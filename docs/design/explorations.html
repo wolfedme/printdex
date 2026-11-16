@@ -1,0 +1,1033 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Printdex design language</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;500;600&family=Atkinson+Hyperlegible+Next:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ---------- Tokens (mirror of .impeccable/design.json; iced theme module reads the same values) ---------- */
+:root {
+  color-scheme: light;
+  --ground: oklch(0.972 0.005 170);
+  --surface: oklch(0.993 0.003 170);
+  --tray: oklch(0.935 0.009 168);
+  --tray-edge: oklch(0.885 0.012 168);
+  --ink: oklch(0.245 0.02 165);
+  --ink-2: oklch(0.43 0.02 165);
+  --ink-3: oklch(0.53 0.018 165);
+  --rule: oklch(0.875 0.01 165);
+  --rule-soft: oklch(0.925 0.008 165);
+  --label-edge: oklch(0.32 0.022 165);
+  --cabinet: oklch(0.315 0.038 162);
+  --cabinet-hi: oklch(0.375 0.044 162);
+  --cabinet-rule: oklch(0.40 0.035 162);
+  --on-cabinet: oklch(0.945 0.012 150);
+  --on-cabinet-2: oklch(0.80 0.025 155);
+  --brass: oklch(0.80 0.125 84);
+  --brass-soft: oklch(0.955 0.04 88);
+  --brass-ink: oklch(0.48 0.09 75);
+  --primary: oklch(0.385 0.06 160);
+  --primary-hi: oklch(0.33 0.06 160);
+  --on-primary: oklch(0.98 0.01 150);
+  --ok: oklch(0.53 0.135 150);
+  --ok-soft: oklch(0.94 0.04 150);
+  --fail: oklch(0.545 0.19 28);
+  --fail-soft: oklch(0.95 0.035 28);
+  --partial: oklch(0.54 0.15 50);
+  --partial-soft: oklch(0.95 0.04 60);
+  --offline: oklch(0.52 0.03 250);
+  --clay-1: oklch(0.90 0.008 160);
+  --clay-2: oklch(0.76 0.012 160);
+  --clay-3: oklch(0.63 0.014 160);
+  --clay-edge: oklch(0.55 0.015 160);
+  --shadow: oklch(0.25 0.02 165 / 0.14);
+  --scrim: oklch(0.25 0.02 165 / 0.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: oklch(0.195 0.012 165);
+    --surface: oklch(0.228 0.014 165);
+    --tray: oklch(0.262 0.016 165);
+    --tray-edge: oklch(0.31 0.018 165);
+    --ink: oklch(0.935 0.01 160);
+    --ink-2: oklch(0.78 0.015 160);
+    --ink-3: oklch(0.67 0.015 160);
+    --rule: oklch(0.33 0.016 165);
+    --rule-soft: oklch(0.285 0.014 165);
+    --label-edge: oklch(0.66 0.02 160);
+    --cabinet: oklch(0.255 0.038 162);
+    --cabinet-hi: oklch(0.31 0.045 162);
+    --cabinet-rule: oklch(0.33 0.035 162);
+    --on-cabinet: oklch(0.94 0.012 150);
+    --on-cabinet-2: oklch(0.78 0.025 155);
+    --brass: oklch(0.80 0.125 84);
+    --brass-soft: oklch(0.33 0.05 84);
+    --brass-ink: oklch(0.84 0.11 84);
+    --primary: oklch(0.74 0.1 158);
+    --primary-hi: oklch(0.80 0.1 158);
+    --on-primary: oklch(0.2 0.03 160);
+    --ok: oklch(0.74 0.14 150);
+    --ok-soft: oklch(0.3 0.05 150);
+    --fail: oklch(0.70 0.16 28);
+    --fail-soft: oklch(0.3 0.06 28);
+    --partial: oklch(0.76 0.13 60);
+    --partial-soft: oklch(0.31 0.05 60);
+    --offline: oklch(0.68 0.03 250);
+    --clay-1: oklch(0.80 0.01 160);
+    --clay-2: oklch(0.64 0.012 160);
+    --clay-3: oklch(0.50 0.014 160);
+    --clay-edge: oklch(0.42 0.014 160);
+    --shadow: oklch(0.05 0.01 165 / 0.5);
+    --scrim: oklch(0.05 0.01 165 / 0.25);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: oklch(0.195 0.012 165);
+  --surface: oklch(0.228 0.014 165);
+  --tray: oklch(0.262 0.016 165);
+  --tray-edge: oklch(0.31 0.018 165);
+  --ink: oklch(0.935 0.01 160);
+  --ink-2: oklch(0.78 0.015 160);
+  --ink-3: oklch(0.67 0.015 160);
+  --rule: oklch(0.33 0.016 165);
+  --rule-soft: oklch(0.285 0.014 165);
+  --label-edge: oklch(0.66 0.02 160);
+  --cabinet: oklch(0.255 0.038 162);
+  --cabinet-hi: oklch(0.31 0.045 162);
+  --cabinet-rule: oklch(0.33 0.035 162);
+  --on-cabinet: oklch(0.94 0.012 150);
+  --on-cabinet-2: oklch(0.78 0.025 155);
+  --brass: oklch(0.80 0.125 84);
+  --brass-soft: oklch(0.33 0.05 84);
+  --brass-ink: oklch(0.84 0.11 84);
+  --primary: oklch(0.74 0.1 158);
+  --primary-hi: oklch(0.80 0.1 158);
+  --on-primary: oklch(0.2 0.03 160);
+  --ok: oklch(0.74 0.14 150);
+  --ok-soft: oklch(0.3 0.05 150);
+  --fail: oklch(0.70 0.16 28);
+  --fail-soft: oklch(0.3 0.06 28);
+  --partial: oklch(0.76 0.13 60);
+  --partial-soft: oklch(0.31 0.05 60);
+  --offline: oklch(0.68 0.03 250);
+  --clay-1: oklch(0.80 0.01 160);
+  --clay-2: oklch(0.64 0.012 160);
+  --clay-3: oklch(0.50 0.014 160);
+  --clay-edge: oklch(0.42 0.014 160);
+  --shadow: oklch(0.05 0.01 165 / 0.5);
+  --scrim: oklch(0.05 0.01 165 / 0.25);
+}
+
+/* type + space scale */
+:root {
+  --font-ui: "Atkinson Hyperlegible Next", system-ui, sans-serif;
+  --font-data: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
+  --t-micro: 11px; --t-caption: 12px; --t-body: 13px; --t-strong: 14px; --t-section: 15px; --t-title: 19px; --t-display: 24px;
+  --s1: 2px; --s2: 4px; --s3: 6px; --s4: 8px; --s5: 12px; --s6: 16px; --s7: 20px; --s8: 24px; --s9: 32px;
+  --r-tight: 2px; --r-control: 4px; --r-panel: 4px;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 var(--t-body)/1.4 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: var(--brass); color: oklch(0.2 0.03 80); }
+:focus-visible, .focused { outline: none; box-shadow: 0 0 0 1px var(--ground), 0 0 0 3px var(--brass) !important; }
+.data { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.num { font-variant-numeric: tabular-nums; }
+.i { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.i.sm { width: 14px; height: 14px; }
+.i.xs { width: 12px; height: 12px; stroke-width: 2; }
+button, input, select, textarea { font: inherit; color: inherit; }
+
+/* ---------- Presentation chrome (not part of the app) ---------- */
+.deck { max-width: 1328px; margin: 0 auto; padding: 24px 24px 64px; }
+.deck-head { display: flex; flex-wrap: wrap; gap: 16px 32px; align-items: end; justify-content: space-between; margin-bottom: 20px; }
+.deck-head h1 { font-size: 28px; line-height: 1.15; letter-spacing: -0.01em; margin: 0 0 6px; font-weight: 700; }
+.deck-head p { margin: 0; color: var(--ink-2); max-width: 64ch; font-size: 14px; }
+.deck-controls { display: flex; flex-wrap: wrap; gap: 12px; }
+.seg { display: inline-flex; border: 1px solid var(--rule); border-radius: var(--r-control); background: var(--surface); padding: 2px; gap: 2px; }
+.seg button { border: 0; background: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; color: var(--ink-2); font-size: var(--t-body); display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+.seg button:hover { color: var(--ink); background: var(--rule-soft); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+.stage { width: 100%; overflow: hidden; }
+.stage-inner { width: 1280px; transform-origin: top left; }
+.window:has(.screen.on[data-screen="tokens"]) { height: auto; }
+.window { width: 1280px; height: 800px; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; box-shadow: 0 12px 40px -12px var(--shadow), 0 2px 6px -2px var(--shadow); background: var(--ground); position: relative; }
+.screen { display: none; }
+.screen.on { display: block; height: 100%; }
+.caption { margin-top: 14px; color: var(--ink-2); font-size: 14px; max-width: 80ch; }
+
+/* ---------- App shell ---------- */
+.app { display: grid; grid-template-columns: 232px 1fr; height: 100%; }
+.rail { background: var(--cabinet); color: var(--on-cabinet); display: flex; flex-direction: column; min-height: 0; }
+.wordmark { display: flex; align-items: center; gap: 10px; padding: 16px 16px 14px; }
+.mark { width: 24px; height: 18px; border: 1.5px solid var(--on-cabinet); border-radius: 2px; display: grid; place-items: center; position: relative; }
+.mark::after { content: ""; position: absolute; left: 0; right: 0; top: 7px; border-top: 1.5px solid var(--on-cabinet); }
+.mark::before { content: ""; position: absolute; left: 3px; width: 8px; bottom: 3px; height: 3px; background: var(--brass); }
+.wordmark b { font-size: 16px; font-weight: 700; }
+.rail-scroll { overflow: hidden; flex: 1; padding: 4px 8px 8px; }
+.rail h3 { font-size: var(--t-micro); font-weight: 600; text-transform: uppercase; color: var(--on-cabinet-2); margin: 16px 8px 6px; display: flex; justify-content: space-between; align-items: center; }
+.rail h3 .i { color: var(--on-cabinet-2); }
+.nav { list-style: none; margin: 0; padding: 0; }
+.nav li { display: flex; align-items: center; gap: 9px; padding: 5px 8px; border-radius: var(--r-control); color: var(--on-cabinet); cursor: default; min-height: 28px; position: relative; }
+.nav li:hover { background: var(--cabinet-hi); }
+.nav li .count { margin-left: auto; font-variant-numeric: tabular-nums; font-size: var(--t-caption); color: var(--on-cabinet-2); }
+.nav li.active { background: var(--cabinet-hi); }
+.nav li.active { box-shadow: inset 0 0 0 1px var(--brass); }
+.nav li .i { color: var(--on-cabinet-2); }
+.nav li.active .i { color: var(--brass); }
+.nav li.offline { color: var(--on-cabinet-2); }
+.nav .sub { display: block; font-size: var(--t-micro); color: var(--on-cabinet-2); line-height: 1.2; }
+.nav .two { display: flex; flex-direction: column; min-width: 0; }
+.swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.rail-foot { border-top: 1px solid var(--cabinet-rule); padding: 10px 16px 12px; font-size: var(--t-caption); color: var(--on-cabinet-2); display: grid; gap: 8px; }
+.scanbar { height: 3px; background: var(--cabinet-hi); border-radius: 2px; overflow: hidden; }
+.scanbar i { display: block; height: 100%; width: 35%; background: var(--brass); }
+.rail-foot .row { display: flex; align-items: center; gap: 8px; }
+.rail-foot .row span.data { margin-left: auto; color: var(--on-cabinet); }
+
+.main { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; min-height: 0; background: var(--ground); }
+.toolbar { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-bottom: 1px solid var(--rule); background: var(--surface); }
+.search { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border: 1px solid var(--rule); border-radius: var(--r-control); background: var(--ground); flex: 0 1 420px; color: var(--ink-3); }
+.search.focus { border-color: var(--label-edge); box-shadow: 0 0 0 2px var(--brass-soft); color: var(--ink); background: var(--surface); }
+.search input { border: 0; background: none; outline: 0; flex: 1; min-width: 0; color: var(--ink); }
+.search input::placeholder { color: var(--ink-3); }
+.kbd { font-family: var(--font-data); font-size: var(--t-micro); border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; color: var(--ink-2); line-height: 16px; background: var(--surface); }
+.chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 6px 0 8px; border: 1px solid var(--rule); border-radius: var(--r-tight); font-size: var(--t-caption); color: var(--ink); background: var(--surface); white-space: nowrap; }
+.chip .k { color: var(--ink-3); }
+.chip .i { color: var(--ink-3); }
+.chip.add { color: var(--ink-2);  padding-right: 8px; }
+.spacer { flex: 1; }
+.btn { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: var(--r-control); border: 1px solid var(--rule); background: var(--surface); color: var(--ink); font-weight: 500; white-space: nowrap; cursor: pointer; }
+.btn:hover { background: var(--rule-soft); }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.btn.primary:hover { background: var(--primary-hi); }
+.btn.ghost { border-color: transparent; background: none; color: var(--ink-2); }
+.btn.icon { width: 32px; padding: 0; justify-content: center; }
+.btn.sm { height: 26px; padding: 0 8px; font-size: var(--t-caption); }
+.select { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px 0 10px; border: 1px solid var(--rule); border-radius: var(--r-control); background: var(--surface); color: var(--ink); white-space: nowrap; }
+.select .i { color: var(--ink-3); }
+.select .k { color: var(--ink-3); }
+
+.content { overflow: hidden; min-height: 0; padding: 16px 20px 0; }
+.resultline { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.resultline h2 { font-size: var(--t-title); margin: 0; font-weight: 700; }
+.resultline .meta { color: var(--ink-2); }
+.grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px 14px; }
+
+/* the specimen card */
+.card { border-radius: var(--r-panel); padding: 6px; margin: -6px; position: relative; }
+.card:hover { background: var(--scrim); }
+.card.sel { background: var(--brass-soft); box-shadow: inset 0 0 0 2px var(--brass); }
+.thumb { aspect-ratio: 1 / 0.82; background: var(--tray); border: 1px solid var(--tray-edge); border-radius: var(--r-tight); display: grid; place-items: center; overflow: hidden; position: relative; }
+.thumb svg.model { width: 82%; height: 82%; }
+.thumb .parts { position: absolute; right: 6px; bottom: 6px; font-family: var(--font-data); font-size: var(--t-micro); color: var(--ink-2); background: var(--surface); border: 1px solid var(--tray-edge); border-radius: var(--r-tight); padding: 0 4px; line-height: 16px; }
+.thumb.pending { background: var(--tray); }
+.thumb.pending .wait { display: flex; align-items: center; gap: 6px; font-size: var(--t-caption); color: var(--ink-2); background: var(--surface); border: 1px solid var(--tray-edge); padding: 3px 8px; border-radius: var(--r-tight); }
+.label { margin-top: 6px; border: 1px solid var(--label-edge); border-radius: var(--r-tight); background: var(--surface); }
+.label .l-name { display: flex; align-items: flex-start; min-height: 46px; gap: 8px; padding: 5px 8px 4px; border-bottom: 1px solid var(--label-edge); }
+.label .l-name b { font-weight: 600; font-size: var(--t-body); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-width: 0; flex: 1; }
+.label .l-name .no { margin-top: 2px; }
+.label .no { font-family: var(--font-data); font-size: var(--t-micro); color: var(--ink-2); flex: none; }
+.label .l-data { display: flex; gap: 4px; padding: 5px 8px 0; flex-wrap: nowrap; overflow: hidden; }
+.tagd { font-family: var(--font-data); font-size: var(--t-micro); line-height: 17px; padding: 0 5px; border-radius: var(--r-tight); background: var(--rule-soft); color: var(--ink); white-space: nowrap; }
+.label .l-status { display: flex; align-items: center; gap: 5px; padding: 4px 8px 5px; font-size: var(--t-caption); color: var(--ink-2); }
+.st-ok { color: var(--ok); } .st-fail { color: var(--fail); } .st-partial { color: var(--partial); } .st-none { color: var(--ink-3); }
+.l-status .when { color: var(--ink-2); }
+.l-status b { font-weight: 600; }
+
+.statusbar { display: flex; align-items: center; gap: 16px; padding: 0 20px; height: 30px; border-top: 1px solid var(--rule); background: var(--surface); font-size: var(--t-caption); color: var(--ink-2); }
+.statusbar .hint { display: inline-flex; align-items: center; gap: 5px; }
+.statusbar .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+
+/* model view */
+.crumbs { display: flex; align-items: center; gap: 4px; color: var(--ink-2); font-size: var(--t-body); }
+.crumbs .i { color: var(--ink-3); }
+.mv { display: grid; grid-template-columns: 1fr 384px; gap: 20px; height: 100%; min-height: 0; padding: 16px 20px 0; overflow: hidden; }
+.mv-head { display: flex; align-items: end; gap: 14px; padding: 14px 20px 14px; border-bottom: 1px solid var(--rule); background: var(--surface); }
+.mv-head h1 { font-size: var(--t-display); line-height: 1.15; margin: 4px 0 0; font-weight: 700; }
+.mv-head .no { font-family: var(--font-data); font-size: var(--t-strong); color: var(--ink-2); margin-left: 10px; font-weight: 400; }
+.viewer { background: var(--tray); border: 1px solid var(--tray-edge); border-radius: var(--r-panel); height: 382px; position: relative; display: grid; place-items: center; }
+.viewer svg.model { width: 64%; height: 82%; }
+.viewer .vt { position: absolute; left: 10px; top: 10px; display: flex; gap: 6px; }
+.viewer .vr { position: absolute; right: 10px; top: 10px; }
+.viewer .dims { position: absolute; left: 12px; bottom: 10px; font-family: var(--font-data); font-size: var(--t-micro); color: var(--ink-2); }
+.viewer .vb { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px; }
+.seg.mini button { padding: 3px 8px; font-size: var(--t-caption); }
+.sec-h { display: flex; align-items: baseline; gap: 8px; margin: 16px 0 8px; }
+.sec-h h2 { font-size: var(--t-section); margin: 0; font-weight: 700; }
+.sec-h .meta { color: var(--ink-2); font-size: var(--t-caption); }
+.sec-h .spacer + * { margin-left: 0; }
+.parts-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.part { border: 1px solid var(--rule); border-radius: var(--r-tight); background: var(--surface); }
+.part.cur { border-color: var(--brass); box-shadow: inset 0 0 0 1px var(--brass); }
+.part .pt { aspect-ratio: 1.35; background: var(--tray); display: grid; place-items: center; border-bottom: 1px solid var(--rule); }
+.part .pt svg { width: 70%; height: 80%; }
+.part .pn { padding: 4px 6px 5px; font-size: var(--t-caption); }
+.part .pn div:last-child { font-family: var(--font-data); font-size: var(--t-micro); color: var(--ink-2); }
+.side { overflow: hidden; min-height: 0; display: flex; flex-direction: column; gap: 14px; padding-bottom: 16px; }
+.recipe { border: 1px solid var(--label-edge); border-radius: var(--r-tight); background: var(--surface); }
+.recipe .r-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--label-edge); }
+.recipe .r-head b { font-size: var(--t-section); }
+.recipe .r-head .no { margin-left: auto; font-family: var(--font-data); font-size: var(--t-micro); color: var(--ink-2); }
+.recipe dl { display: grid; grid-template-columns: repeat(3, 1fr); margin: 0; }
+.recipe dl div { padding: 6px 10px 7px; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.recipe dl div:nth-child(3n) { border-right: 0; }
+.recipe dt { font-size: var(--t-micro); color: var(--ink-2); }
+.recipe dd { margin: 1px 0 0; font-family: var(--font-data); font-size: var(--t-body); font-weight: 500; }
+.recipe .quirk { display: flex; gap: 8px; padding: 8px 10px 9px; font-size: var(--t-body); align-items: flex-start; }
+.recipe .quirk .i { color: var(--partial); margin-top: 2px; }
+.recipe .quirk + .quirk { border-top: 1px solid var(--rule-soft); }
+.tagrow { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 7px; border-radius: var(--r-tight); background: var(--rule-soft); font-size: var(--t-caption); color: var(--ink); }
+.tag .i { color: var(--ink-3); }
+.kv { display: grid; grid-template-columns: 84px 1fr; gap: 6px 10px; font-size: var(--t-body); }
+.kv dt { color: var(--ink-2); }
+.kv dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--brass); text-underline-offset: 3px; text-decoration-thickness: 1.5px; }
+.log { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.log li { border: 1px solid var(--label-edge); border-radius: var(--r-tight); background: var(--surface); }
+.log .ev-h { display: flex; gap: 6px; align-items: center; padding: 5px 8px 4px; border-bottom: 1px solid var(--label-edge); }
+.log .ev-h b { font-weight: 600; }
+.log .ev-h .att { margin-left: auto; font-family: var(--font-data); font-size: var(--t-micro); color: var(--ink-2); }
+.log .ev-d { display: flex; gap: 4px; flex-wrap: wrap; padding: 5px 8px 0; }
+.log .ev-n { padding: 4px 8px 6px; color: var(--ink); }
+.log .ev-m { padding: 4px 8px 6px; color: var(--ink-2); font-size: var(--t-caption); }
+.panel-title { display: flex; align-items: center; gap: 8px; }
+.panel-title h2 { margin: 0; font-size: var(--t-section); font-weight: 700; }
+.link { color: var(--ink); text-decoration: underline; text-decoration-color: var(--brass); text-underline-offset: 3px; text-decoration-thickness: 1.5px; }
+
+/* form */
+.form { border: 1px solid var(--label-edge); border-radius: var(--r-tight); background: var(--surface); display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.form .f-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--label-edge); }
+.form .f-head b { font-size: var(--t-section); }
+.form .f-body { padding: 12px; display: grid; gap: 12px; overflow: hidden; }
+.field label, .field .lab { display: block; font-size: var(--t-caption); color: var(--ink-2); margin-bottom: 4px; font-weight: 500; }
+.input { display: flex; align-items: center; height: 30px; border: 1px solid var(--rule); border-radius: var(--r-control); background: var(--ground); padding: 0 8px; gap: 6px; }
+.input.err { border-color: var(--fail); box-shadow: 0 0 0 2px var(--fail-soft); }
+.input span.v { flex: 1; font-family: var(--font-data); }
+.input span.t { flex: 1; }
+.input .u { font-family: var(--font-data); font-size: var(--t-micro); color: var(--ink-3); }
+.input .i { color: var(--ink-3); }
+.errmsg { color: var(--fail); font-size: var(--t-caption); margin-top: 4px; display: flex; gap: 5px; align-items: center; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.outcome { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--rule); border-radius: var(--r-control); overflow: hidden; }
+.outcome button { border: 0; background: var(--ground); height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--ink-2); font-weight: 500; }
+.outcome button + button { border-left: 1px solid var(--rule); }
+.outcome button.on-fail { background: var(--fail-soft); color: var(--fail); box-shadow: inset 0 -2px 0 var(--fail); }
+.textarea { border: 1px solid var(--rule); border-radius: var(--r-control); background: var(--ground); padding: 7px 8px; min-height: 56px; line-height: 1.4; }
+.textarea .caret { display: inline-block; width: 1.5px; height: 14px; background: var(--ink); vertical-align: -2px; margin-left: 1px; }
+.prefill { display: flex; align-items: center; gap: 6px; font-size: var(--t-caption); color: var(--ink-2); background: var(--brass-soft); border-radius: var(--r-tight); padding: 4px 8px; }
+.prefill .i { color: var(--brass-ink); }
+.drop { border: 1px solid var(--rule); border-radius: var(--r-control); height: 46px; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--ink-2); font-size: var(--t-caption); }
+.f-foot { margin-top: auto; display: flex; gap: 8px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--rule); }
+.f-foot .hint { color: var(--ink-2); font-size: var(--t-caption); display: inline-flex; gap: 4px; align-items: center; margin-right: auto; }
+
+/* settings */
+.settings { display: grid; grid-template-columns: 200px 1fr; height: 100%; min-height: 0; }
+.s-nav { border-right: 1px solid var(--rule); padding: 16px 10px; background: var(--surface); }
+.s-nav h1 { font-size: var(--t-title); margin: 0 8px 12px; }
+.s-nav ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.s-nav li { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border-radius: var(--r-control); color: var(--ink-2); }
+.s-nav li .i { color: var(--ink-3); }
+.s-nav li.on { background: var(--rule-soft); color: var(--ink); font-weight: 600; }
+.s-nav li.on .i { color: var(--ink); }
+.s-body { padding: 20px 28px; overflow: hidden; }
+.s-body h2 { font-size: var(--t-title); margin: 0 0 4px; }
+.s-body h2 + p { margin: 0 0 14px; color: var(--ink-2); max-width: 70ch; }
+.s-body section + section { margin-top: 28px; }
+.libtable { width: 100%; border-collapse: collapse; border: 1px solid var(--rule); border-radius: var(--r-panel); background: var(--surface); }
+.libtable th { text-align: left; font-size: var(--t-micro); font-weight: 600; text-transform: uppercase; color: var(--ink-2); padding: 8px 12px; border-bottom: 1px solid var(--rule); }
+.libtable td { padding: 10px 12px; border-bottom: 1px solid var(--rule-soft); vertical-align: middle; }
+.libtable tr:last-child td { border-bottom: 0; }
+.libtable .path { font-family: var(--font-data); font-size: var(--t-caption); color: var(--ink-2); }
+.libtable .nm { display: flex; gap: 10px; align-items: center; }
+.libtable .nm b { font-weight: 600; display: block; }
+.badge { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-caption); padding: 1px 7px; border-radius: var(--r-tight); white-space: nowrap; }
+.badge.ok { background: var(--ok-soft); color: var(--ok); }
+.badge.off { background: var(--rule-soft); color: var(--offline); }
+.badge.scan { background: var(--brass-soft); color: var(--brass-ink); }
+.setrow { display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--rule-soft); max-width: 760px; }
+.setrow b { font-weight: 600; display: block; }
+.setrow span.d { color: var(--ink-2); font-size: var(--t-caption); display: block; margin-top: 2px; max-width: 62ch; }
+.switch { width: 34px; height: 20px; border-radius: 10px; background: var(--rule); position: relative; }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px var(--shadow); }
+.switch.on { background: var(--primary); }
+.switch.on::after { left: 16px; }
+
+/* tokens sheet */
+.sheet { padding: 20px 28px; height: 100%; overflow: hidden; display: grid; grid-template-columns: 1fr 1fr; gap: 20px 40px; align-content: start; }
+.sheet h2 { font-size: var(--t-section); margin: 0 0 10px; }
+.sw-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.sw { border: 1px solid var(--rule); border-radius: var(--r-tight); overflow: hidden; background: var(--surface); }
+.sw i { display: block; height: 40px; border-bottom: 1px solid var(--rule); }
+.sw div { padding: 4px 6px 5px; font-size: var(--t-caption); }
+.sw div span { display: block; font-family: var(--font-data); font-size: var(--t-micro); color: var(--ink-2); }
+.typescale div { display: flex; align-items: baseline; gap: 14px; padding: 3px 0; border-bottom: 1px solid var(--rule-soft); }
+.typescale span.data { width: 132px; white-space: nowrap; flex: none; color: var(--ink-2); font-size: var(--t-micro); }
+.icons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px 12px; }
+.icons div { display: flex; align-items: center; gap: 8px; font-size: var(--t-caption); color: var(--ink-2); white-space: nowrap; overflow: hidden; }
+.icons div .i { color: var(--ink); }
+.anatomy { display: grid; grid-template-columns: 210px 1fr; gap: 20px; align-items: start; }
+.anatomy ol { margin: 0; padding-left: 18px; color: var(--ink-2); display: grid; gap: 6px; }
+.anatomy ol b { color: var(--ink); font-weight: 600; }
+
+
+/* ================= WORLD: parts-drawer wall ================= */
+:root[data-world="drawers"] {
+  --ground: oklch(0.955 0.004 250); --surface: oklch(0.995 0.002 250); --tray: oklch(0.975 0.004 250); --tray-edge: oklch(0.88 0.01 250);
+  --ink: oklch(0.24 0.02 255); --ink-2: oklch(0.44 0.02 255); --ink-3: oklch(0.54 0.02 255);
+  --rule: oklch(0.87 0.01 250); --rule-soft: oklch(0.93 0.008 250); --label-edge: oklch(0.55 0.15 255);
+  --cabinet: oklch(0.43 0.14 256); --cabinet-hi: oklch(0.50 0.15 256); --cabinet-rule: oklch(0.52 0.12 256);
+  --on-cabinet: oklch(0.985 0.005 250); --on-cabinet-2: oklch(0.88 0.04 250);
+  --brass: oklch(0.85 0.16 95); --brass-soft: oklch(0.96 0.06 95); --brass-ink: oklch(0.5 0.1 85);
+  --primary: oklch(0.47 0.16 256); --primary-hi: oklch(0.42 0.16 256); --on-primary: oklch(0.99 0 0);
+  --bin-a: oklch(0.55 0.2 27); --bin-b: oklch(0.52 0.15 256); --bin-c: oklch(0.80 0.15 90); --bin-d: oklch(0.6 0.13 155);
+  --font-label: "Barlow Semi Condensed", "Atkinson Hyperlegible Next", sans-serif;
+}
+:root[data-world="drawers"][data-theme="dark"] {
+  --ground: oklch(0.2 0.012 255); --surface: oklch(0.235 0.015 255); --tray: oklch(0.255 0.015 255); --tray-edge: oklch(0.34 0.02 255);
+  --ink: oklch(0.94 0.008 250); --ink-2: oklch(0.79 0.015 250); --ink-3: oklch(0.67 0.015 250);
+  --rule: oklch(0.34 0.02 255); --rule-soft: oklch(0.29 0.018 255); --label-edge: oklch(0.66 0.13 255);
+  --cabinet: oklch(0.32 0.11 258); --cabinet-hi: oklch(0.38 0.12 258); --cabinet-rule: oklch(0.40 0.1 258);
+  --on-cabinet: oklch(0.97 0.01 250); --on-cabinet-2: oklch(0.82 0.04 250);
+  --brass: oklch(0.85 0.16 95); --brass-soft: oklch(0.34 0.06 95); --brass-ink: oklch(0.86 0.13 95);
+  --primary: oklch(0.70 0.13 256); --primary-hi: oklch(0.76 0.12 256); --on-primary: oklch(0.18 0.03 256);
+  --bin-a: oklch(0.66 0.17 27); --bin-b: oklch(0.66 0.13 256); --bin-c: oklch(0.82 0.14 90); --bin-d: oklch(0.70 0.12 155);
+}
+[data-world="drawers"] .card { --bin: var(--bin-b); }
+[data-world="drawers"] .card:nth-child(4n+1) { --bin: var(--bin-a); }
+[data-world="drawers"] .card:nth-child(4n+3) { --bin: var(--bin-c); }
+[data-world="drawers"] .card:nth-child(4n+4) { --bin: var(--bin-d); }
+[data-world="drawers"] .thumb { border: 2px solid var(--bin); border-bottom: 0; border-radius: 6px 6px 0 0; background: color-mix(in oklch, var(--bin) 13%, var(--tray)); }
+[data-world="drawers"] .label { margin-top: 0; border: 2px solid var(--bin); border-top-width: 0; border-radius: 0 0 6px 6px; padding: 6px; background: color-mix(in oklch, var(--bin) 13%, var(--tray)); }
+[data-world="drawers"] .label .l-name { background: var(--surface); border: 1px solid var(--rule); border-radius: 3px; padding: 4px 7px; min-height: 0; }
+[data-world="drawers"] .label .l-name b { font-family: var(--font-label); font-size: 14px; font-weight: 600; }
+[data-world="drawers"] .label .l-data, [data-world="drawers"] .label .l-status { padding-left: 2px; padding-right: 2px; }
+[data-world="drawers"] .label .l-status { padding-bottom: 0; }
+[data-world="drawers"] .tagd { background: var(--surface); }
+[data-world="drawers"] .card.sel { background: none; box-shadow: 0 0 0 3px var(--brass); }
+[data-world="drawers"] .recipe, [data-world="drawers"] .log li, [data-world="drawers"] .form { border: 2px solid var(--label-edge); border-radius: 6px; }
+[data-world="drawers"] .recipe .r-head, [data-world="drawers"] .form .f-head { background: var(--label-edge); color: var(--on-primary); border-bottom: 0; }
+[data-world="drawers"][data-theme="dark"] .recipe .r-head, [data-world="drawers"][data-theme="dark"] .form .f-head { color: oklch(0.18 0.03 256); }
+[data-world="drawers"] .recipe .r-head .no, [data-world="drawers"] .recipe .r-head .i, [data-world="drawers"] .form .f-head .btn { color: inherit; }
+[data-world="drawers"] .r-head b, [data-world="drawers"] .f-head b, [data-world="drawers"] .mv-head h1, [data-world="drawers"] .resultline h2, [data-world="drawers"] .sec-h h2, [data-world="drawers"] .wordmark b { font-family: var(--font-label); font-weight: 700; }
+[data-world="drawers"] .mv-head h1 { font-size: 27px; }
+[data-world="drawers"] .log .ev-h { border-bottom-color: var(--rule); }
+[data-world="drawers"] .btn, [data-world="drawers"] .search, [data-world="drawers"] .select, [data-world="drawers"] .input, [data-world="drawers"] .seg { border-radius: 6px; }
+[data-world="drawers"] .viewer, [data-world="drawers"] .part { border-radius: 6px; }
+[data-world="drawers"] .mark { border-radius: 4px; }
+
+/* ================= WORLD: category standard ================= */
+:root[data-world="standard"] {
+  --ground: oklch(0.975 0 0); --surface: oklch(1 0 0); --tray: oklch(0.955 0 0); --tray-edge: oklch(0.955 0 0);
+  --ink: oklch(0.22 0 0); --ink-2: oklch(0.46 0 0); --ink-3: oklch(0.55 0 0);
+  --rule: oklch(0.90 0 0); --rule-soft: oklch(0.945 0 0); --label-edge: oklch(0.90 0 0);
+  --cabinet: oklch(0.955 0 0); --cabinet-hi: oklch(0.915 0 0); --cabinet-rule: oklch(0.90 0 0);
+  --on-cabinet: oklch(0.22 0 0); --on-cabinet-2: oklch(0.48 0 0);
+  --brass: oklch(0.68 0.18 45); --brass-soft: oklch(0.95 0.035 50); --brass-ink: oklch(0.52 0.15 45);
+  --primary: oklch(0.64 0.19 45); --primary-hi: oklch(0.6 0.19 45); --on-primary: oklch(1 0 0);
+  --clay-1: oklch(0.88 0 0); --clay-2: oklch(0.74 0 0); --clay-3: oklch(0.62 0 0); --clay-edge: oklch(0.55 0 0);
+  --font-ui: "Inter", system-ui, sans-serif; --font-data: "Inter", system-ui, sans-serif;
+}
+:root[data-world="standard"][data-theme="dark"] {
+  --ground: oklch(0.2 0 0); --surface: oklch(0.245 0 0); --tray: oklch(0.285 0 0); --tray-edge: oklch(0.285 0 0);
+  --ink: oklch(0.94 0 0); --ink-2: oklch(0.75 0 0); --ink-3: oklch(0.64 0 0);
+  --rule: oklch(0.33 0 0); --rule-soft: oklch(0.3 0 0); --label-edge: oklch(0.33 0 0);
+  --cabinet: oklch(0.17 0 0); --cabinet-hi: oklch(0.26 0 0); --cabinet-rule: oklch(0.28 0 0);
+  --on-cabinet: oklch(0.94 0 0); --on-cabinet-2: oklch(0.70 0 0);
+  --brass: oklch(0.72 0.17 48); --brass-soft: oklch(0.32 0.06 48); --brass-ink: oklch(0.78 0.14 48);
+  --primary: oklch(0.70 0.17 48); --primary-hi: oklch(0.75 0.16 48); --on-primary: oklch(0.15 0 0);
+  --clay-1: oklch(0.78 0 0); --clay-2: oklch(0.62 0 0); --clay-3: oklch(0.49 0 0); --clay-edge: oklch(0.42 0 0);
+}
+[data-world="standard"] .rail { border-right: 1px solid var(--rule); }
+[data-world="standard"] .mark { display: none; }
+[data-world="standard"] .nav li.active { box-shadow: none; background: var(--brass-soft); color: var(--brass-ink); }
+[data-world="standard"] .card { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 8px; margin: 0; }
+[data-world="standard"] .card.sel { background: var(--surface); box-shadow: 0 0 0 2px var(--brass); }
+[data-world="standard"] .thumb { border: 0; border-radius: 7px; }
+[data-world="standard"] .label { border: 0; background: none; margin-top: 8px; }
+[data-world="standard"] .label .l-name { border: 0; padding: 0; min-height: 36px; }
+[data-world="standard"] .label .no { display: none; }
+[data-world="standard"] .label .l-data { padding: 2px 0 0; }
+[data-world="standard"] .label .l-status { padding: 6px 0 0; }
+[data-world="standard"] .tagd { border-radius: 99px; padding: 0 8px; font-size: 11px; }
+[data-world="standard"] .recipe, [data-world="standard"] .form, [data-world="standard"] .log li { border: 1px solid var(--rule); border-radius: 10px; }
+[data-world="standard"] .recipe .r-head, [data-world="standard"] .form .f-head, [data-world="standard"] .log .ev-h { border-bottom-color: var(--rule); }
+[data-world="standard"] .mv-head .no { display: none; }
+[data-world="standard"] .btn, [data-world="standard"] .search, [data-world="standard"] .select, [data-world="standard"] .input, [data-world="standard"] .seg, [data-world="standard"] .chip { border-radius: 8px; }
+[data-world="standard"] .viewer, [data-world="standard"] .part { border-radius: 10px; overflow: hidden; }
+[data-world="standard"] .tag { border-radius: 99px; }
+
+/* ================= shared: translucent worlds sit on a desktop ================= */
+[data-world="lighttable"] .window, [data-world="frosted"] .window {
+  background:
+    radial-gradient(60% 70% at 12% 20%, oklch(0.72 0.14 200) 0%, transparent 70%),
+    radial-gradient(50% 60% at 30% 95%, oklch(0.70 0.16 330) 0%, transparent 70%),
+    radial-gradient(70% 60% at 90% 10%, oklch(0.80 0.12 90) 0%, transparent 70%),
+    oklch(0.55 0.06 260);
+}
+[data-world="lighttable"][data-theme="dark"] .window, [data-world="frosted"][data-theme="dark"] .window {
+  background:
+    radial-gradient(60% 70% at 12% 20%, oklch(0.42 0.12 200) 0%, transparent 70%),
+    radial-gradient(50% 60% at 30% 95%, oklch(0.38 0.14 330) 0%, transparent 70%),
+    radial-gradient(70% 60% at 90% 10%, oklch(0.45 0.1 90) 0%, transparent 70%),
+    oklch(0.2 0.03 260);
+}
+[data-world="lighttable"] .rail, [data-world="frosted"] .rail { backdrop-filter: blur(28px) saturate(1.5); -webkit-backdrop-filter: blur(28px) saturate(1.5); }
+[data-world="lighttable"] .toolbar, [data-world="frosted"] .toolbar, [data-world="lighttable"] .statusbar, [data-world="frosted"] .statusbar, [data-world="lighttable"] .mv-head, [data-world="frosted"] .mv-head { backdrop-filter: blur(20px) saturate(1.3); -webkit-backdrop-filter: blur(20px) saturate(1.3); }
+[data-world="lighttable"] .mark, [data-world="frosted"] .mark { display: none; }
+
+/* ================= WORLD: light table ================= */
+:root[data-world="lighttable"] {
+  --ground: oklch(0.985 0.004 230); --surface: oklch(1 0 0); --tray: oklch(0.21 0.01 250); --tray-edge: oklch(0.21 0.01 250);
+  --ink: oklch(0.2 0.01 250); --ink-2: oklch(0.42 0.012 250); --ink-3: oklch(0.52 0.012 250);
+  --rule: oklch(0.88 0.008 240); --rule-soft: oklch(0.94 0.006 240); --label-edge: oklch(0.88 0.008 240);
+  --cabinet: oklch(0.97 0.005 240 / 0.62); --cabinet-hi: oklch(1 0 0 / 0.7); --cabinet-rule: oklch(0.2 0.01 250 / 0.12);
+  --on-cabinet: oklch(0.2 0.01 250); --on-cabinet-2: oklch(0.4 0.012 250);
+  --brass: oklch(0.6 0.13 225); --brass-soft: oklch(0.94 0.035 225); --brass-ink: oklch(0.45 0.11 228);
+  --primary: oklch(0.22 0.01 250); --primary-hi: oklch(0.3 0.01 250); --on-primary: oklch(0.99 0 0);
+  --fail: oklch(0.55 0.2 25);
+  --clay-1: oklch(0.86 0.01 240); --clay-2: oklch(0.68 0.012 240); --clay-3: oklch(0.52 0.014 240); --clay-edge: oklch(0.4 0.012 240);
+  --font-ui: "Hanken Grotesk", system-ui, sans-serif; --font-data: "JetBrains Mono", ui-monospace, monospace;
+  --glass: oklch(1 0 0 / 0.66); --table-grid: oklch(0.2 0.01 250 / 0.05);
+}
+:root[data-world="lighttable"][data-theme="dark"] {
+  --ground: oklch(0.255 0.01 245); --surface: oklch(0.31 0.01 245); --tray: oklch(0.16 0.008 250); --tray-edge: oklch(0.16 0.008 250);
+  --ink: oklch(0.95 0.005 240); --ink-2: oklch(0.78 0.01 240); --ink-3: oklch(0.68 0.01 240);
+  --rule: oklch(0.38 0.01 245); --rule-soft: oklch(0.34 0.01 245); --label-edge: oklch(0.38 0.01 245);
+  --cabinet: oklch(0.2 0.01 250 / 0.6); --cabinet-hi: oklch(1 0 0 / 0.1); --cabinet-rule: oklch(1 0 0 / 0.1);
+  --on-cabinet: oklch(0.95 0.005 240); --on-cabinet-2: oklch(0.76 0.01 240);
+  --brass: oklch(0.74 0.12 222); --brass-soft: oklch(0.36 0.05 222); --brass-ink: oklch(0.82 0.1 222);
+  --primary: oklch(0.95 0.005 240); --primary-hi: oklch(1 0 0); --on-primary: oklch(0.2 0.01 250);
+  --fail: oklch(0.7 0.17 25);
+  --clay-1: oklch(0.82 0.01 240); --clay-2: oklch(0.64 0.012 240); --clay-3: oklch(0.48 0.014 240); --clay-edge: oklch(0.36 0.012 240);
+  --glass: oklch(0.2 0.01 250 / 0.62); --table-grid: oklch(1 0 0 / 0.045);
+}
+[data-world="lighttable"] .main { background-color: var(--ground); background-image: linear-gradient(var(--table-grid) 1px, transparent 1px), linear-gradient(90deg, var(--table-grid) 1px, transparent 1px); background-size: 24px 24px; }
+[data-world="lighttable"] .toolbar, [data-world="lighttable"] .statusbar, [data-world="lighttable"] .mv-head { background: var(--glass); }
+[data-world="lighttable"] .card { background: var(--surface); border-radius: 4px; padding: 8px 8px 6px; margin: 0; box-shadow: 0 1px 2px oklch(0.2 0.01 250 / 0.12), 0 3px 10px -4px oklch(0.2 0.01 250 / 0.18); }
+[data-world="lighttable"] .card.sel { background: var(--surface); box-shadow: 0 0 0 2px var(--brass), 0 8px 20px -6px oklch(0.2 0.01 250 / 0.3); transform: translateY(-2px); }
+[data-world="lighttable"] .thumb { border-radius: 6px; border: 0; }
+[data-world="lighttable"] .thumb .parts { background: oklch(0 0 0 / 0.5); color: oklch(0.95 0 0); border: 0; }
+[data-world="lighttable"] .thumb.pending { background: var(--tray); }
+[data-world="lighttable"] .label { border: 0; margin-top: 6px; background: none; }
+[data-world="lighttable"] .label .l-name { border: 0; padding: 0 2px; min-height: 36px; }
+[data-world="lighttable"] .label .l-data { padding: 2px 2px 0; }
+[data-world="lighttable"] .label .l-status { padding: 4px 2px 0; }
+[data-world="lighttable"] .tagd { background: var(--rule-soft); border-radius: 3px; }
+[data-world="lighttable"] .nav li.active { box-shadow: none; background: var(--cabinet-hi); }
+[data-world="lighttable"] .nav li.active .i { color: var(--brass-ink); }
+[data-world="lighttable"] .recipe, [data-world="lighttable"] .form, [data-world="lighttable"] .log li, [data-world="lighttable"] .part, [data-world="lighttable"] .libtable { border: 0; border-radius: 6px; box-shadow: 0 1px 2px oklch(0.2 0.01 250 / 0.12), 0 3px 10px -4px oklch(0.2 0.01 250 / 0.18); }
+[data-world="lighttable"] .recipe .r-head, [data-world="lighttable"] .form .f-head, [data-world="lighttable"] .log .ev-h { border-bottom-color: var(--rule); }
+[data-world="lighttable"] .viewer { border: 0; border-radius: 8px; }
+[data-world="lighttable"] .part .pt { background: var(--tray); }
+[data-world="lighttable"] .btn, [data-world="lighttable"] .search, [data-world="lighttable"] .select, [data-world="lighttable"] .input, [data-world="lighttable"] .seg, [data-world="lighttable"] .chip { border-radius: 6px; }
+[data-world="lighttable"] .settings .s-nav { background: var(--glass); }
+
+/* ================= WORLD: frosted print ================= */
+:root[data-world="frosted"] {
+  --ground: oklch(0.975 0.006 250 / 0.82); --surface: oklch(1 0 0 / 0.72); --tray: oklch(0.95 0.008 250 / 0.7); --tray-edge: oklch(1 0 0 / 0.9);
+  --ink: oklch(0.23 0.02 265); --ink-2: oklch(0.43 0.02 265); --ink-3: oklch(0.52 0.02 265);
+  --rule: oklch(0.25 0.03 265 / 0.12); --rule-soft: oklch(0.25 0.03 265 / 0.06); --label-edge: oklch(1 0 0 / 0.9);
+  --cabinet: oklch(0.96 0.01 250 / 0.5); --cabinet-hi: oklch(1 0 0 / 0.6); --cabinet-rule: oklch(1 0 0 / 0.5);
+  --on-cabinet: oklch(0.2 0.02 265); --on-cabinet-2: oklch(0.38 0.02 265);
+  --brass: oklch(0.6 0.2 300); --brass-soft: oklch(0.93 0.04 300 / 0.8); --brass-ink: oklch(0.47 0.18 300);
+  --primary: oklch(0.52 0.2 295); --primary-hi: oklch(0.47 0.2 295); --on-primary: oklch(0.99 0 0);
+  --font-ui: "Figtree", system-ui, sans-serif; --font-data: "JetBrains Mono", ui-monospace, monospace;
+}
+:root[data-world="frosted"][data-theme="dark"] {
+  --ground: oklch(0.21 0.015 265 / 0.8); --surface: oklch(0.3 0.015 265 / 0.62); --tray: oklch(0.26 0.015 265 / 0.6); --tray-edge: oklch(1 0 0 / 0.1);
+  --ink: oklch(0.95 0.008 265); --ink-2: oklch(0.8 0.012 265); --ink-3: oklch(0.7 0.012 265);
+  --rule: oklch(1 0 0 / 0.1); --rule-soft: oklch(1 0 0 / 0.06); --label-edge: oklch(1 0 0 / 0.12);
+  --cabinet: oklch(0.18 0.015 265 / 0.55); --cabinet-hi: oklch(1 0 0 / 0.09); --cabinet-rule: oklch(1 0 0 / 0.08);
+  --on-cabinet: oklch(0.95 0.008 265); --on-cabinet-2: oklch(0.78 0.012 265);
+  --brass: oklch(0.74 0.15 300); --brass-soft: oklch(0.4 0.08 300 / 0.6); --brass-ink: oklch(0.84 0.1 300);
+  --primary: oklch(0.72 0.15 298); --primary-hi: oklch(0.78 0.13 298); --on-primary: oklch(0.18 0.03 298);
+}
+[data-world="frosted"] .main { backdrop-filter: blur(40px) saturate(1.6); -webkit-backdrop-filter: blur(40px) saturate(1.6); }
+[data-world="frosted"] .toolbar, [data-world="frosted"] .statusbar, [data-world="frosted"] .mv-head { background: var(--surface); }
+[data-world="frosted"] .card { background: var(--surface); border: 1px solid var(--tray-edge); border-radius: 14px; padding: 8px; margin: 0; }
+[data-world="frosted"] .card.sel { background: var(--brass-soft); box-shadow: 0 0 0 2px var(--brass); }
+[data-world="frosted"] .thumb { border: 0; border-radius: 9px; }
+[data-world="frosted"] .label { border: 0; margin-top: 8px; background: none; }
+[data-world="frosted"] .label .l-name { border: 0; padding: 0 2px; min-height: 36px; }
+[data-world="frosted"] .label .l-data { padding: 2px 2px 0; }
+[data-world="frosted"] .label .l-status { padding: 5px 2px 0; }
+[data-world="frosted"] .tagd { border-radius: 99px; padding: 0 7px; background: var(--rule-soft); }
+[data-world="frosted"] svg.model polygon { fill-opacity: 0.82; }
+[data-world="frosted"] .card[data-mat="petg"] { --clay-1: oklch(0.86 0.08 195); --clay-2: oklch(0.7 0.11 200); --clay-3: oklch(0.56 0.11 205); --clay-edge: oklch(0.48 0.1 205); }
+[data-world="frosted"] .card[data-mat="pla"] { --clay-1: oklch(0.88 0.1 65); --clay-2: oklch(0.76 0.14 55); --clay-3: oklch(0.63 0.15 45); --clay-edge: oklch(0.55 0.13 45); }
+[data-world="frosted"] .card[data-mat="tpu"] { --clay-1: oklch(0.85 0.09 340); --clay-2: oklch(0.7 0.15 345); --clay-3: oklch(0.56 0.16 350); --clay-edge: oklch(0.48 0.14 350); }
+[data-world="frosted"] .card[data-mat="asa"] { --clay-1: oklch(0.82 0.01 260); --clay-2: oklch(0.62 0.015 260); --clay-3: oklch(0.45 0.02 260); --clay-edge: oklch(0.38 0.02 260); }
+[data-world="frosted"] .viewer { --clay-1: oklch(0.86 0.08 195); --clay-2: oklch(0.7 0.11 200); --clay-3: oklch(0.56 0.11 205); --clay-edge: oklch(0.48 0.1 205); border: 1px solid var(--tray-edge); border-radius: 14px; }
+[data-world="frosted"] .viewer svg.model polygon { fill-opacity: 0.85; }
+[data-world="frosted"] .nav li.active { box-shadow: none; background: var(--cabinet-hi); }
+[data-world="frosted"] .nav li.active .i { color: var(--brass-ink); }
+[data-world="frosted"] .recipe, [data-world="frosted"] .form, [data-world="frosted"] .log li, [data-world="frosted"] .libtable { border: 1px solid var(--tray-edge); border-radius: 14px; overflow: hidden; }
+[data-world="frosted"] .recipe .r-head, [data-world="frosted"] .form .f-head, [data-world="frosted"] .log .ev-h { border-bottom-color: var(--rule); }
+[data-world="frosted"] .part { border-radius: 10px; overflow: hidden; border-color: var(--tray-edge); }
+[data-world="frosted"] .btn, [data-world="frosted"] .search, [data-world="frosted"] .select, [data-world="frosted"] .input, [data-world="frosted"] .chip { border-radius: 10px; }
+[data-world="frosted"] .seg { border-radius: 10px; }
+[data-world="frosted"] .settings .s-nav { background: var(--surface); }
+
+@media (max-width: 720px) {
+  .deck { padding: 16px; }
+  .deck-head h1 { font-size: 22px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .stage-inner { transition: opacity .18s cubic-bezier(.2,.7,.2,1); }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><!-- Icons: Lucide 0.460.0, ISC license --><defs><symbol id="i-archive" viewBox="0 0 24 24"><svg class="lucide lucide-archive" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="20" height="5" x="2" y="3" rx="1" /> <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" /> <path d="M10 12h4" /></symbol><symbol id="i-box" viewBox="0 0 24 24"><svg class="lucide lucide-box" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" /> <path d="m3.3 7 8.7 5 8.7-5" /> <path d="M12 22V12" /></symbol><symbol id="i-check" viewBox="0 0 24 24"><svg class="lucide lucide-check" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M20 6 9 17l-5-5" /></symbol><symbol id="i-chevron-down" viewBox="0 0 24 24"><svg class="lucide lucide-chevron-down" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="m6 9 6 6 6-6" /></symbol><symbol id="i-chevron-right" viewBox="0 0 24 24"><svg class="lucide lucide-chevron-right" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="m9 18 6-6-6-6" /></symbol><symbol id="i-circle-check" viewBox="0 0 24 24"><svg class="lucide lucide-circle-check" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="m9 12 2 2 4-4" /></symbol><symbol id="i-circle-dashed" viewBox="0 0 24 24"><svg class="lucide lucide-circle-dashed" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10.1 2.182a10 10 0 0 1 3.8 0" /> <path d="M13.9 21.818a10 10 0 0 1-3.8 0" /> <path d="M17.609 3.721a10 10 0 0 1 2.69 2.7" /> <path d="M2.182 13.9a10 10 0 0 1 0-3.8" /> <path d="M20.279 17.609a10 10 0 0 1-2.7 2.69" /> <path d="M21.818 10.1a10 10 0 0 1 0 3.8" /> <path d="M3.721 6.391a10 10 0 0 1 2.7-2.69" /> <path d="M6.391 20.279a10 10 0 0 1-2.69-2.7" /></symbol><symbol id="i-circle-x" viewBox="0 0 24 24"><svg class="lucide lucide-circle-x" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="m15 9-6 6" /> <path d="m9 9 6 6" /></symbol><symbol id="i-clipboard-pen" viewBox="0 0 24 24"><svg class="lucide lucide-clipboard-pen" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="8" height="4" x="8" y="2" rx="1" /> <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5.5" /> <path d="M4 13.5V6a2 2 0 0 1 2-2h2" /> <path d="M13.378 15.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z" /></symbol><symbol id="i-ellipsis" viewBox="0 0 24 24"><svg class="lucide lucide-ellipsis" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="1" /> <circle cx="19" cy="12" r="1" /> <circle cx="5" cy="12" r="1" /></symbol><symbol id="i-external-link" viewBox="0 0 24 24"><svg class="lucide lucide-external-link" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M15 3h6v6" /> <path d="M10 14 21 3" /> <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></symbol><symbol id="i-folder-open" viewBox="0 0 24 24"><svg class="lucide lucide-folder-open" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" /></symbol><symbol id="i-hard-drive" viewBox="0 0 24 24"><svg class="lucide lucide-hard-drive" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <line x1="22" x2="2" y1="12" y2="12" /> <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /> <line x1="6" x2="6.01" y1="16" y2="16" /> <line x1="10" x2="10.01" y1="16" y2="16" /></symbol><symbol id="i-history" viewBox="0 0 24 24"><svg class="lucide lucide-history" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /> <path d="M3 3v5h5" /> <path d="M12 7v5l4 2" /></symbol><symbol id="i-image-plus" viewBox="0 0 24 24"><svg class="lucide lucide-image-plus" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M16 5h6" /> <path d="M19 2v6" /> <path d="M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5" /> <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /> <circle cx="9" cy="9" r="2" /></symbol><symbol id="i-info" viewBox="0 0 24 24"><svg class="lucide lucide-info" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" /></symbol><symbol id="i-keyboard" viewBox="0 0 24 24"><svg class="lucide lucide-keyboard" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M10 8h.01" /> <path d="M12 12h.01" /> <path d="M14 8h.01" /> <path d="M16 12h.01" /> <path d="M18 8h.01" /> <path d="M6 8h.01" /> <path d="M7 16h10" /> <path d="M8 12h.01" /> <rect width="20" height="16" x="2" y="4" rx="2" /></symbol><symbol id="i-layout-grid" viewBox="0 0 24 24"><svg class="lucide lucide-layout-grid" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="7" height="7" x="3" y="3" rx="1" /> <rect width="7" height="7" x="14" y="3" rx="1" /> <rect width="7" height="7" x="14" y="14" rx="1" /> <rect width="7" height="7" x="3" y="14" rx="1" /></symbol><symbol id="i-list" viewBox="0 0 24 24"><svg class="lucide lucide-list" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M3 12h.01" /> <path d="M3 18h.01" /> <path d="M3 6h.01" /> <path d="M8 12h13" /> <path d="M8 18h13" /> <path d="M8 6h13" /></symbol><symbol id="i-loader-circle" viewBox="0 0 24 24"><svg class="lucide lucide-loader-circle" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M21 12a9 9 0 1 1-6.219-8.56" /></symbol><symbol id="i-monitor" viewBox="0 0 24 24"><svg class="lucide lucide-monitor" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="20" height="14" x="2" y="3" rx="2" /> <line x1="8" x2="16" y1="21" y2="21" /> <line x1="12" x2="12" y1="17" y2="21" /></symbol><symbol id="i-moon" viewBox="0 0 24 24"><svg class="lucide lucide-moon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" /></symbol><symbol id="i-notebook-pen" viewBox="0 0 24 24"><svg class="lucide lucide-notebook-pen" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4" /> <path d="M2 6h4" /> <path d="M2 10h4" /> <path d="M2 14h4" /> <path d="M2 18h4" /> <path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z" /></symbol><symbol id="i-palette" viewBox="0 0 24 24"><svg class="lucide lucide-palette" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="13.5" cy="6.5" r=".5" fill="currentColor" /> <circle cx="17.5" cy="10.5" r=".5" fill="currentColor" /> <circle cx="8.5" cy="7.5" r=".5" fill="currentColor" /> <circle cx="6.5" cy="12.5" r=".5" fill="currentColor" /> <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" /></symbol><symbol id="i-plus" viewBox="0 0 24 24"><svg class="lucide lucide-plus" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M5 12h14" /> <path d="M12 5v14" /></symbol><symbol id="i-refresh-cw" viewBox="0 0 24 24"><svg class="lucide lucide-refresh-cw" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /> <path d="M21 3v5h-5" /> <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /> <path d="M8 16H3v5" /></symbol><symbol id="i-rotate-3d" viewBox="0 0 24 24"><svg class="lucide lucide-rotate-3d" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M16.466 7.5C15.643 4.237 13.952 2 12 2 9.239 2 7 6.477 7 12s2.239 10 5 10c.342 0 .677-.069 1-.2" /> <path d="m15.194 13.707 3.814 1.86-1.86 3.814" /> <path d="M19 15.57c-1.804.885-4.274 1.43-7 1.43-5.523 0-10-2.239-10-5s4.477-5 10-5c4.838 0 8.873 1.718 9.8 4" /></symbol><symbol id="i-search" viewBox="0 0 24 24"><svg class="lucide lucide-search" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="11" cy="11" r="8" /> <path d="m21 21-4.3-4.3" /></symbol><symbol id="i-server" viewBox="0 0 24 24"><svg class="lucide lucide-server" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <rect width="20" height="8" x="2" y="2" rx="2" ry="2" /> <rect width="20" height="8" x="2" y="14" rx="2" ry="2" /> <line x1="6" x2="6.01" y1="6" y2="6" /> <line x1="6" x2="6.01" y1="18" y2="18" /></symbol><symbol id="i-server-off" viewBox="0 0 24 24"><svg class="lucide lucide-server-off" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M7 2h13a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-5" /> <path d="M10 10 2.5 2.5C2 2 2 2.5 2 5v3a2 2 0 0 0 2 2h6z" /> <path d="M22 17v-1a2 2 0 0 0-2-2h-1" /> <path d="M4 14a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h16.5l1-.5.5.5-8-8H4z" /> <path d="M6 18h.01" /> <path d="m2 2 20 20" /></symbol><symbol id="i-settings" viewBox="0 0 24 24"><svg class="lucide lucide-settings" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /> <circle cx="12" cy="12" r="3" /></symbol><symbol id="i-sparkle" viewBox="0 0 24 24"><svg class="lucide lucide-sparkle" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" /></symbol><symbol id="i-sun" viewBox="0 0 24 24"><svg class="lucide lucide-sun" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <circle cx="12" cy="12" r="4" /> <path d="M12 2v2" /> <path d="M12 20v2" /> <path d="m4.93 4.93 1.41 1.41" /> <path d="m17.66 17.66 1.41 1.41" /> <path d="M2 12h2" /> <path d="M20 12h2" /> <path d="m6.34 17.66-1.41 1.41" /> <path d="m19.07 4.93-1.41 1.41" /></symbol><symbol id="i-tag" viewBox="0 0 24 24"><svg class="lucide lucide-tag" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" /> <circle cx="7.5" cy="7.5" r=".5" fill="currentColor" /></symbol><symbol id="i-triangle-alert" viewBox="0 0 24 24"><svg class="lucide lucide-triangle-alert" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /> <path d="M12 9v4" /> <path d="M12 17h.01" /></symbol><symbol id="i-x" viewBox="0 0 24 24"><svg class="lucide lucide-x" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" > <path d="M18 6 6 18" /> <path d="m6 6 12 12" /></symbol></defs></svg>
+<div class="deck">
+  <header class="deck-head">
+    <div>
+      <h1 id="worldTitle">Printdex: specimen cabinet</h1>
+      <p id="worldDesc"></p>
+    </div>
+    <div class="deck-controls">
+      <div class="seg" role="group" aria-label="Screen" id="screens">
+        <button data-s="library" aria-pressed="true">Library</button>
+        <button data-s="model" aria-pressed="false">Model</button>
+        <button data-s="log" aria-pressed="false">Log a print</button>
+        <button data-s="settings" aria-pressed="false">Settings</button>
+        <button data-s="tokens" aria-pressed="false">Tokens</button>
+      </div>
+      <div class="seg" role="group" aria-label="World" id="worlds">
+        <button data-w="specimen" aria-pressed="true">Specimen cabinet</button>
+        <button data-w="drawers" aria-pressed="false">Parts-drawer wall</button>
+        <button data-w="standard" aria-pressed="false">Category standard</button>
+        <button data-w="lighttable" aria-pressed="false">Light table</button>
+        <button data-w="frosted" aria-pressed="false">Frosted print</button>
+      </div>
+      <div class="seg" role="group" aria-label="Theme" id="themes">
+        <button data-t="light" aria-pressed="false"><svg class="i sm"><use href="#i-sun"/></svg>Light</button>
+        <button data-t="dark" aria-pressed="false"><svg class="i sm"><use href="#i-moon"/></svg>Dark</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="stage" id="stage"><div class="stage-inner" id="stageInner"><div class="window">
+
+  <!-- ================= LIBRARY ================= -->
+  <div class="screen on" data-screen="library">
+    <div class="app">
+      <aside class="rail" data-rail="library"></aside>
+      <div class="main">
+        <div class="toolbar">
+          <div class="search focus"><svg class="i"><use href="#i-search"/></svg><input value="bin" aria-label="Search library"><span class="kbd">Ctrl K</span></div>
+          <span class="chip"><span class="k">Material</span> PETG <svg class="i xs"><use href="#i-x"/></svg></span>
+          <span class="chip"><span class="k">Last print</span> any <svg class="i xs"><use href="#i-x"/></svg></span>
+          <span class="chip add"><svg class="i xs"><use href="#i-plus"/></svg>Filter</span>
+          <span class="spacer"></span>
+          <span class="select"><span class="k">Sort</span> Recently added <svg class="i sm"><use href="#i-chevron-down"/></svg></span>
+          <div class="seg" role="group" aria-label="View"><button aria-pressed="true" title="Grid"><svg class="i sm"><use href="#i-layout-grid"/></svg></button><button aria-pressed="false" title="List"><svg class="i sm"><use href="#i-list"/></svg></button></div>
+        </div>
+        <div class="content">
+          <div class="resultline"><h2>Workshop SSD</h2><span class="meta"><span class="num">212</span> of <span class="num">1,284</span> models match</span></div>
+          <div class="grid" id="libgrid"></div>
+        </div>
+        <div class="statusbar">
+          <span class="hint"><span class="dot" style="background:var(--ok)"></span>Workshop SSD up to date</span>
+          <span class="hint"><span class="dot" style="background:var(--offline)"></span>NAS prints offline</span>
+          <span class="spacer"></span>
+          <span class="hint"><span class="kbd">← →</span> move</span>
+          <span class="hint"><span class="kbd">Enter</span> open</span>
+          <span class="hint"><span class="kbd">T</span> tag</span>
+          <span class="hint"><span class="kbd">L</span> log a print</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODEL ================= -->
+  <div class="screen" data-screen="model" data-variant="view"></div>
+  <div class="screen" data-screen="log" data-variant="log"></div>
+
+  <!-- ================= SETTINGS ================= -->
+  <div class="screen" data-screen="settings">
+    <div class="app">
+      <aside class="rail" data-rail="settings"></aside>
+      <div class="main" style="grid-template-rows: 1fr">
+        <div class="settings">
+          <nav class="s-nav">
+            <h1>Settings</h1>
+            <ul>
+              <li><svg class="i"><use href="#i-settings"/></svg>General</li>
+              <li class="on"><svg class="i"><use href="#i-hard-drive"/></svg>Libraries</li>
+              <li><svg class="i"><use href="#i-palette"/></svg>Appearance</li>
+              <li><svg class="i"><use href="#i-box"/></svg>Previews</li>
+              <li><svg class="i"><use href="#i-archive"/></svg>Backup</li>
+              <li><svg class="i"><use href="#i-keyboard"/></svg>Shortcuts</li>
+              <li><svg class="i"><use href="#i-info"/></svg>About</li>
+            </ul>
+          </nav>
+          <div class="s-body">
+            <section>
+              <h2>Libraries</h2>
+              <p>Folders Printdex catalogues. Model files are only read, never changed.</p>
+              <table class="libtable">
+                <thead><tr><th>Library</th><th>Location</th><th>Status</th><th style="text-align:right">Models</th><th></th></tr></thead>
+                <tbody>
+                  <tr><td><div class="nm"><svg class="i"><use href="#i-hard-drive"/></svg><b>Workshop SSD</b></div></td><td class="path">/home/max/3d/library</td><td><span class="badge ok"><svg class="i xs"><use href="#i-check"/></svg>Up to date</span></td><td class="num" style="text-align:right">1,284</td><td style="text-align:right"><button class="btn sm ghost"><svg class="i sm"><use href="#i-refresh-cw"/></svg>Rescan</button><button class="btn sm ghost icon" title="More"><svg class="i sm"><use href="#i-ellipsis"/></svg></button></td></tr>
+                  <tr><td><div class="nm"><svg class="i"><use href="#i-server"/></svg><b>Downloads inbox</b></div></td><td class="path">/home/max/Downloads/models</td><td><span class="badge scan"><svg class="i xs"><use href="#i-loader-circle"/></svg>Scanning <span class="num">3,412 / 9,870</span></span></td><td class="num" style="text-align:right">3,412</td><td style="text-align:right"><button class="btn sm ghost"><svg class="i sm"><use href="#i-refresh-cw"/></svg>Rescan</button><button class="btn sm ghost icon" title="More"><svg class="i sm"><use href="#i-ellipsis"/></svg></button></td></tr>
+                  <tr><td><div class="nm"><svg class="i"><use href="#i-server-off"/></svg><b>NAS prints</b></div></td><td class="path">smb://nas.local/prints</td><td><span class="badge off"><svg class="i xs"><use href="#i-server-off"/></svg>Offline since 14:02</span></td><td class="num" style="text-align:right">8,906</td><td style="text-align:right"><button class="btn sm ghost"><svg class="i sm"><use href="#i-refresh-cw"/></svg>Retry</button><button class="btn sm ghost icon" title="More"><svg class="i sm"><use href="#i-ellipsis"/></svg></button></td></tr>
+                </tbody>
+              </table>
+              <div style="margin-top:12px"><button class="btn"><svg class="i"><use href="#i-plus"/></svg>Add library</button></div>
+            </section>
+            <section>
+              <h2>Library behaviour</h2>
+              <p>Applies to every library unless a library overrides it.</p>
+              <div class="setrow"><div><b>Write a .printdex.toml next to each model</b><span class="d">Keeps tags, recipe and print log with the files, so they survive moving the folder to another machine.</span></div><div class="switch on" role="switch" aria-checked="true"></div></div>
+              <div class="setrow"><div><b>Watch local folders for changes</b><span class="d">Network shares are rescanned every 15 minutes instead, because their change notifications are unreliable.</span></div><div class="switch on" role="switch" aria-checked="true"></div></div>
+              <div class="setrow"><div><b>Theme</b><span class="d">System follows your desktop's light or dark setting.</span></div><div class="seg focused"><button aria-pressed="true"><svg class="i sm"><use href="#i-monitor"/></svg>System</button><button aria-pressed="false"><svg class="i sm"><use href="#i-sun"/></svg>Light</button><button aria-pressed="false"><svg class="i sm"><use href="#i-moon"/></svg>Dark</button></div></div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= TOKENS ================= -->
+  <div class="screen" data-screen="tokens">
+    <div class="sheet" id="sheet">
+      <div>
+        <h2>Colour</h2>
+        <div class="sw-grid" id="swatches"></div>
+      </div>
+      <div>
+        <h2>Type</h2>
+        <div class="typescale">
+          <div><span class="data">display 24/700</span><span style="font-size:24px;font-weight:700;">Gridfinity bin 2×3</span></div>
+          <div><span class="data">title 19/700</span><span style="font-size:19px;font-weight:700">Workshop SSD</span></div>
+          <div><span class="data">section 15/700</span><span style="font-size:15px;font-weight:700">Print log</span></div>
+          <div><span class="data">body 13/400</span><span>Fails in PETG unless the bed is at 85 °C.</span></div>
+          <div><span class="data">caption 12/500</span><span style="font-size:12px;font-weight:500;color:var(--ink-2)">Nozzle temperature</span></div>
+          <div><span class="data">data 11–13 mono</span><span class="data" style="font-size:13px;white-space:nowrap">№ 0412 · 0.20 mm · 240 °C</span></div>
+          <div><span class="data">group 11/600 caps</span><span style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--ink-2)">Collections</span></div>
+        </div>
+        <p style="color:var(--ink-2);margin:10px 0 0">Atkinson Hyperlegible Next for all interface text, Atkinson Hyperlegible Mono only for measurements, catalogue numbers and file data. Both SIL OFL, bundled with the app.</p>
+        <h2 style="margin-top:16px">Icons</h2>
+        <div class="icons" id="iconsheet"></div>
+      </div>
+      <div>
+        <h2>The specimen label</h2>
+        <div class="anatomy">
+          <div id="anatomyCard"></div>
+          <ol>
+            <li><b>Name and catalogue number.</b> Number is per library, assigned once, never reused, so it can be written on the physical bin.</li>
+            <li><b>Ink rule.</b> 1px label edge, the only full-strength border in the app.</li>
+            <li><b>Requirements.</b> Up to three mono chips from the recipe: material, layer height, special needs.</li>
+            <li><b>Last print.</b> Status icon, word and date. Colour never carries status alone.</li>
+          </ol>
+        </div>
+      </div>
+      <div>
+        <h2>Shape, space, depth</h2>
+        <div class="kv" style="grid-template-columns:120px 1fr">
+          <dt>Spacing</dt><dd class="data">2 · 4 · 6 · 8 · 12 · 16 · 20 · 24 · 32</dd>
+          <dt>Radius</dt><dd class="data">2 labels, chips · 4 controls, panels</dd>
+          <dt>Borders</dt><dd>1px rules; ink edge only on labels</dd>
+          <dt>Elevation</dt><dd>Menus and popovers only; panels sit flat</dd>
+          <dt>Selection</dt><dd>Brass ring + tint: cards, parts, rail item</dd>
+          <dt>Focus</dt><dd>2px brass ring outside a 1px gap, app-drawn</dd>
+          <dt>Motion</dt><dd>120–180 ms ease-out; none when reduced</dd>
+          <dt>Icons</dt><dd>Lucide, 16px, 1.75 stroke</dd>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  </div></div></div>
+  <p class="caption" id="caption"></p>
+</div>
+
+<script>
+/* ---------- isometric clay renderer for synthetic thumbnails ---------- */
+const C = Math.cos(Math.PI / 6), S = Math.sin(Math.PI / 6);
+const P = (x, y, z) => [(x - y) * C, (x + y) * S - z];
+function boxFaces(x0, y0, z0, w, d, h) {
+  const x1 = x0 + w, y1 = y0 + d, z1 = z0 + h;
+  return [
+    { pts: [[x1,y0,z1],[x1,y1,z1],[x1,y1,z0],[x1,y0,z0]], f: 3 },
+    { pts: [[x0,y1,z1],[x1,y1,z1],[x1,y1,z0],[x0,y1,z0]], f: 2 },
+    { pts: [[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]], f: 1 },
+  ];
+}
+function cavity(x0, y0, z1, w, d, depth) {
+  const x1 = x0 + w, y1 = y0 + d, zf = z1 - depth;
+  return [
+    { pts: [[x0,y0,zf],[x1,y0,zf],[x1,y1,zf],[x0,y1,zf]], f: 4, clip: [[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]] },
+    { pts: [[x0,y0,z1],[x0,y1,z1],[x0,y1,zf],[x0,y0,zf]], f: 3, clip: [[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]] },
+    { pts: [[x0,y0,z1],[x1,y0,z1],[x1,y0,zf],[x0,y0,zf]], f: 2, clip: [[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]] },
+  ];
+}
+function extrude(outline, z0, z1, layers) {
+  const out = [];
+  const n = layers || 8;
+  for (let i = 0; i <= n; i++) {
+    const z = z0 + (z1 - z0) * i / n;
+    out.push({ pts: outline.map(([x, y]) => [x, y, z]), f: i === n ? 1 : 3, layer: i < n });
+  }
+  return out;
+}
+function circle(cx, cy, r, n = 48, rf) { return Array.from({ length: n }, (_, i) => { const a = i / n * Math.PI * 2; const rr = rf ? rf(a) : r; return [cx + Math.cos(a) * rr, cy + Math.sin(a) * rr]; }); }
+function ring(cx, cy, r) { return circle(cx, cy, r, 6); }
+const shapes = {
+  bin: () => [...boxFaces(0,0,0,60,90,34), ...cavity(4,4,34,52,82,28)],
+  bin2: () => [...boxFaces(0,0,0,90,40,22), ...cavity(4,4,22,26,32,18), ...cavity(32,4,22,26,32,18), ...cavity(60,4,22,26,32,18)],
+  arm: () => [...boxFaces(0,0,0,16,70,16), ...boxFaces(0,0,16,16,16,54), ...boxFaces(0,52,16,16,18,10)],
+  clip: () => extrude([...circle(0,0,22,32).slice(5,30), ...circle(0,0,14,32).slice(5,30).reverse()], 0, 16, 6),
+  vase: () => { const o = []; for (let i = 0; i <= 26; i++) { const z = i * 4; const r = 18 + 10 * Math.sin(i / 26 * Math.PI * 1.1 + .3); o.push({ pts: circle(0,0,r,40,a => r * (1 + .06 * Math.cos(a * 7 + i * .35))).map(([x,y]) => [x,y,z]), f: i === 26 ? 4 : 3, layer: i < 26 }); } return o; },
+  gear: () => extrude(circle(0,0,34,96,a => 34 + (Math.cos(a * 18) > 0 ? 5 : 0)), 0, 12, 4).concat([{ pts: circle(0,0,9,24).map(([x,y]) => [x,y,12]), f: 4 }]),
+  pull: () => [...boxFaces(0,0,0,24,80,8), ...boxFaces(4,8,8,16,64,14)],
+  hex: () => { const o = []; [[0,0],[52,0],[26,45]].forEach(([cx,cy]) => { o.push(...extrude(ring(cx,cy,30), 0, 22, 5)); o.push({ pts: ring(cx,cy,25).map(([x,y]) => [x,y,22]), f: 4 }); }); return o; },
+  hook: () => [...boxFaces(0,0,0,14,50,10), ...boxFaces(0,0,10,14,10,60), ...boxFaces(0,0,70,14,40,10), ...boxFaces(0,30,70,14,10,-16)],
+  pi: () => [...boxFaces(0,0,0,58,90,26)],
+  lid: () => [...boxFaces(0,0,0,90,90,8), ...boxFaces(8,8,8,74,74,4), ...cavity(20,20,12,50,50,3)],
+  caddy: () => [...boxFaces(0,0,0,70,70,40), ...cavity(4,4,40,29,29,34), ...cavity(37,4,40,29,29,34), ...cavity(4,37,40,29,29,34), ...cavity(37,37,40,29,29,34)],
+  duct: () => [...boxFaces(0,0,0,40,40,30), ...boxFaces(10,40,0,20,40,14), ...cavity(6,6,30,28,28,10)],
+};
+const fill = { 1: "var(--clay-1)", 2: "var(--clay-2)", 3: "var(--clay-3)", 4: "var(--clay-2)" };
+let clipN = 0;
+function render(kind) {
+  const faces = shapes[kind]();
+  const all = faces.flatMap(f => f.pts.map(p => P(...p)));
+  const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const pad = 6, w = maxX - minX + pad * 2, h = maxY - minY + pad * 2 + 8;
+  const pt = q => q.map(p => P(...p).map(v => v.toFixed(1)).join(",")).join(" ");
+  let svg = `<svg class="model" viewBox="${(minX - pad).toFixed(1)} ${(minY - pad).toFixed(1)} ${w.toFixed(1)} ${h.toFixed(1)}" aria-hidden="true">`;
+  svg += `<ellipse cx="${((minX + maxX) / 2).toFixed(1)}" cy="${(maxY + 2).toFixed(1)}" rx="${((maxX - minX) / 2.2).toFixed(1)}" ry="4" fill="var(--shadow)" opacity=".6"/>`;
+  faces.forEach(f => {
+    if (f.clip) {
+      const id = "cp" + (clipN++);
+      svg += `<clipPath id="${id}"><polygon points="${pt(f.clip)}"/></clipPath><polygon clip-path="url(#${id})" points="${pt(f.pts)}" fill="${f.f === 4 ? "var(--clay-3)" : fill[f.f]}" stroke="var(--clay-edge)" stroke-width=".4"/>`;
+    } else {
+      svg += `<polygon points="${pt(f.pts)}" fill="${fill[f.f]}" stroke="var(--clay-edge)" stroke-width="${f.layer ? .35 : .5}" stroke-linejoin="round"/>`;
+    }
+  });
+  return svg + "</svg>";
+}
+
+const I = (n, c = "") => `<svg class="i ${c}"><use href="#i-${n}"/></svg>`;
+const status = {
+  ok: (n, d) => `<span class="st-ok">${I("circle-check","sm")}</span><b class="st-ok">Printed ${n}×</b><span class="when num">· ${d}</span>`,
+  fail: d => `<span class="st-fail">${I("circle-x","sm")}</span><b class="st-fail">Failed</b><span class="when num">· ${d}</span>`,
+  partial: d => `<span class="st-partial">${I("triangle-alert","sm")}</span><b class="st-partial">Partial</b><span class="when num">· ${d}</span>`,
+  none: () => `<span class="st-none">${I("circle-dashed","sm")}</span><span>Not printed yet</span>`,
+};
+const models = [
+  ["Gridfinity bin 2×3, label lip", "0412", "bin", ["PETG","0.20 mm"], status.ok(3, "12 Nov"), 1],
+  ["Spool holder arm", "0398", "arm", ["PETG","supports"], status.fail("9 Nov"), 3],
+  ["Cable clip set", "0377", "clip", ["TPU 95A","0.16 mm"], status.none(), 8],
+  ["Spiral vase 140 mm", "0421", "vase", ["PLA","vase mode"], status.ok(1, "4 Nov"), 1],
+  ["Planetary gear set", "0359", "gear", ["PETG","0.12 mm"], status.partial("2 Nov"), 6],
+  ["Drawer pull, knurled", "0402", "pull", ["PLA","0.20 mm"], status.ok(5, "28 Oct"), 1],
+  ["Hex shelf 3-pack", "0388", "hex", ["PLA","0.28 mm"], status.none(), 3],
+  ["Headphone hook, desk clamp", "0346", "hook", ["PETG","brim 5"], status.ok(2, "19 Oct"), 2],
+  ["Raspberry Pi 5 case", "0431", null, ["ASA","enclosure"], status.none(), 4],
+  ["Filament dry-box lid", "0417", "lid", ["PETG","0.20 mm"], status.fail("1 Nov"), 2],
+  ["Tool caddy, four slots", "0365", "caddy", ["PLA","0.24 mm"], status.ok(1, "15 Oct"), 1],
+  ["5015 fan duct", "0391", "duct", ["ASA","0.20 mm"], status.ok(2, "11 Oct"), 1],
+  ["Gridfinity baseplate 4×4", "0413", "bin2", ["PLA","0.20 mm"], status.ok(4, "12 Nov"), 1],
+  ["Bench vise jaw pads", "0384", "pull", ["TPU 95A","0.20 mm"], status.none(), 2],
+  ["Bit holder, hex shank", "0370", "hex", ["PETG","0.20 mm"], status.ok(1, "8 Oct"), 1],
+];
+function card([name, no, kind, req, st, parts], sel) {
+  const thumb = kind ? `<div class="thumb">${render(kind)}${parts > 1 ? `<span class="parts">${parts} parts</span>` : ""}</div>`
+    : `<div class="thumb pending"><span class="wait">${I("loader-circle","sm")}Rendering preview</span></div>`;
+  return `<div class="card${sel ? " sel" : ""}" data-mat="${req[0].split(" ")[0].toLowerCase()}">${thumb}<div class="label"><div class="l-name"><b>${name}</b><span class="no">№ ${no}</span></div><div class="l-data">${req.map(r => `<span class="tagd">${r}</span>`).join("")}</div><div class="l-status">${st}</div></div></div>`;
+}
+document.getElementById("libgrid").innerHTML = models.map((m, i) => card(m, i === 0)).join("");
+document.getElementById("anatomyCard").innerHTML = card(models[0], false);
+
+/* rail */
+function rail(active) {
+  const li = (icon, text, count, cls = "", sub = "") => `<li class="${cls}">${icon}${sub ? `<span class="two"><span>${text}</span><span class="sub">${sub}</span></span>` : `<span>${text}</span>`}${count != null ? `<span class="count">${count}</span>` : ""}</li>`;
+  const sw = c => `<span class="swatch" style="background:${c}"></span>`;
+  return `<div class="wordmark"><span class="mark" aria-hidden="true"></span><b>Printdex</b></div>
+  <div class="rail-scroll">
+    <h3>Libraries ${I("plus","sm")}</h3>
+    <ul class="nav">
+      ${li(I("hard-drive"), "Workshop SSD", "1,284", active === "lib" ? "active" : "")}
+      ${li(I("folder-open"), "Downloads inbox", "3,412", "", "Scanning…")}
+      ${li(I("server-off"), "NAS prints", "8,906", "offline", "Offline since 14:02")}
+    </ul>
+    <h3>Collections ${I("plus","sm")}</h3>
+    <ul class="nav">
+      ${li(sw("oklch(0.62 0.1 195)"), "Desk organizers", "38")}
+      ${li(sw("oklch(0.58 0.12 300)"), "Voron spares", "54", active === "col" ? "active" : "")}
+      ${li(sw("oklch(0.6 0.09 230)"), "Gifts 2026", "12")}
+    </ul>
+    <h3>Smart filters</h3>
+    <ul class="nav">
+      ${li(I("circle-dashed"), "Never printed", "804")}
+      ${li(I("circle-x"), "Failed last time", "27")}
+      ${li(I("history"), "Added this week", "61")}
+    </ul>
+    <h3>Tags</h3>
+    <ul class="nav">
+      ${li(I("tag"), "functional", "412")}
+      ${li(I("tag"), "gridfinity", "96")}
+      ${li(I("tag"), "multi-part", "143")}
+    </ul>
+  </div>
+  <div class="rail-foot">
+    <div class="row">${I("loader-circle","sm")}Scanning Downloads inbox<span class="data">35%</span></div>
+    <div class="scanbar"><i></i></div>
+    <div class="row" style="margin-top:2px">${I("settings","sm")}<span style="color:var(--on-cabinet)">Settings</span><span class="data" style="color:var(--on-cabinet-2)">Ctrl ,</span></div>
+  </div>`;
+}
+document.querySelectorAll("[data-rail]").forEach(r => r.innerHTML = rail(r.dataset.rail === "library" ? "lib" : r.dataset.rail === "model" ? "lib" : ""));
+
+/* model view + log form share a frame */
+function modelScreen(variant) {
+  const parts = [["bin_2x3_body.stl","bin","4.2 MB"],["label_insert.stl","pull","0.3 MB"],["stacking_lip.stl","lid","1.1 MB"],["divider_x.stl","arm","0.4 MB"],["bin_2x3.3mf","bin2","6.8 MB"]];
+  const recipe = `<div class="recipe">
+    <div class="r-head">${I("notebook-pen")}<b>Recipe</b><span class="no">from attempt 3 · 12 Nov</span></div>
+    <dl>
+      <div><dt>Material</dt><dd>PETG</dd></div><div><dt>Nozzle</dt><dd>0.4 mm</dd></div><div><dt>Layer</dt><dd>0.20 mm</dd></div>
+      <div><dt>Bed</dt><dd>85 °C</dd></div><div><dt>Hotend</dt><dd>240 °C</dd></div><div><dt>Infill</dt><dd>15 % gyroid</dd></div>
+    </dl>
+    <div class="quirk">${I("triangle-alert")}<span>Warps in PETG unless the bed is at 85 °C and the first layer runs at 20 mm/s.</span></div>
+    <div class="quirk">${I("info")}<span style="color:var(--ink-2)">No supports. Print the label insert flat, face down.</span></div>
+  </div>`;
+  const log = `<div class="sec-h" style="margin:2px 0 8px"><h2>Print log</h2><span class="meta"><span class="num">3</span> attempts</span><span class="spacer"></span><button class="btn sm">${I("clipboard-pen","sm")}Log a print</button></div>
+  <ul class="log">
+    <li><div class="ev-h"><span class="st-ok">${I("circle-check","sm")}</span><b class="st-ok">Success</b><span style="color:var(--ink-2)">· 12 Nov · Prusa MK4</span><span class="att">Attempt 3</span></div><div class="ev-d"><span class="tagd">PETG</span><span class="tagd">0.20 mm</span><span class="tagd">85 / 240 °C</span><span class="tagd">2 h 41 m</span></div><div class="ev-m">Recipe saved from this attempt.</div></li>
+    <li><div class="ev-h"><span class="st-fail">${I("circle-x","sm")}</span><b class="st-fail">Failed</b><span style="color:var(--ink-2)">· 9 Nov · Prusa MK4</span><span class="att">Attempt 2</span></div><div class="ev-d"><span class="tagd">PETG</span><span class="tagd">0.20 mm</span><span class="tagd">75 / 240 °C</span></div><div class="ev-n">Corners lifted at layer 14. Bed too cold for this brand.</div></li>
+</ul><button class="btn sm ghost" style="margin-top:4px">Show 1 earlier attempt</button>`;
+  const form = `<div class="form">
+    <div class="f-head">${I("clipboard-pen")}<b>Log a print</b><span class="spacer"></span><button class="btn ghost icon" title="Close">${I("x")}</button></div>
+    <div class="f-body">
+      <div class="field"><span class="lab">Outcome</span><div class="outcome"><button>${I("circle-check","sm")}Success</button><button>${I("triangle-alert","sm")}Partial</button><button class="on-fail">${I("circle-x","sm")}Failed</button></div></div>
+      <div class="prefill">${I("sparkle","sm")}Settings filled in from the recipe. Change what was different.</div>
+      <div class="row2">
+        <div class="field"><label>Printer</label><div class="input focused"><span class="t">Prusa MK4</span>${I("chevron-down","sm")}</div></div>
+        <div class="field"><label>Date</label><div class="input"><span class="v">16 Nov 2026</span></div></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Material</label><div class="input"><span class="t">PETG</span>${I("chevron-down","sm")}</div></div>
+        <div class="field"><label>Brand and colour</label><div class="input"><span class="t">Prusament Galaxy Black</span></div></div>
+      </div>
+      <div class="row3">
+        <div class="field"><label>Layer height</label><div class="input"><span class="v">0.20</span><span class="u">mm</span></div></div>
+        <div class="field"><label>Bed</label><div class="input err"><span class="v">850</span><span class="u">°C</span></div></div>
+        <div class="field"><label>Hotend</label><div class="input"><span class="v">240</span><span class="u">°C</span></div></div>
+      </div>
+      <div class="errmsg" style="margin-top:-6px">${I("circle-x","sm")}Bed temperature must be between 0 and 150 °C.</div>
+      <div class="field"><label>What went wrong</label><div class="textarea">Stringing between the divider walls, top layer pillowed<span class="caret"></span></div></div>
+      <div class="drop">${I("image-plus")}Add a photo (optional) <span class="kbd">Ctrl V</span></div>
+    </div>
+    <div class="f-foot"><span class="hint"><span class="kbd">Ctrl Enter</span> to save</span><button class="btn ghost">Cancel</button><button class="btn primary focused">${I("check")}Save attempt</button></div>
+  </div>`;
+  return `<div class="app"><aside class="rail">${rail("lib")}</aside>
+  <div class="main" style="grid-template-rows:auto 1fr auto">
+    <div class="mv-head">
+      <div style="min-width:0">
+        <div class="crumbs">${I("hard-drive","sm")}Workshop SSD ${I("chevron-right","sm")} Desk organizers ${I("chevron-right","sm")} gridfinity</div>
+        <h1>Gridfinity bin 2×3, label lip<span class="no">№ 0412</span></h1>
+      </div>
+      <span class="spacer"></span>
+      <button class="btn ghost">${I("folder-open")}Show in folder</button>
+      <button class="btn">${I("external-link")}Open in OrcaSlicer</button>
+      <button class="btn primary">${I("clipboard-pen")}Log a print</button>
+    </div>
+    <div class="mv">
+      <div style="min-width:0;overflow:hidden">
+        <div class="viewer">${render("bin")}
+          <div class="vt"><div class="seg mini"><button aria-pressed="true">Solid</button><button aria-pressed="false">Wire</button></div></div>
+          <div class="vr"><button class="btn sm">${I("rotate-3d","sm")}Reset view</button></div>
+          <div class="dims">bin_2x3_body.stl · 83.5 × 125.5 × 42.0 mm · 186,240 triangles</div>
+        </div>
+        <div class="sec-h"><h2>Parts</h2><span class="meta"><span class="num">5</span> files · <span class="num">12.8 MB</span></span></div>
+        <div class="parts-row">${parts.map(([n,k,s],i) => `<div class="part${i===0?" cur":""}"><div class="pt">${render(k)}</div><div class="pn"><div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${n}</div><div>${s}</div></div></div>`).join("")}</div>
+        <div class="sec-h"><h2>Notes</h2><span class="spacer"></span><button class="btn sm ghost">Edit <span class="kbd">N</span></button></div>
+        <p style="margin:0;max-width:68ch;color:var(--ink)">Remixed the original to add a 12 mm label lip. The 3MF has the dividers already placed; use the STLs if you want a different layout.</p>
+      </div>
+      <div class="side">
+        ${variant === "log" ? form : recipe + `<div class="tagrow"><span class="tag">${I("tag","xs")}gridfinity</span><span class="tag">${I("tag","xs")}functional</span><span class="tag">${I("tag","xs")}multi-part</span><span class="chip add" style="height:22px">${I("plus","xs")}Tag <span class="kbd" style="margin-left:2px">T</span></span></div>
+        <dl class="kv"><dt>Collection</dt><dd>Desk organizers</dd><dt>Source</dt><dd><a class="link">printables.com/model/… (saved link)</a></dd><dt>Folder</dt><dd class="data" style="font-size:12px">~/3d/library/gridfinity/bin-2x3</dd></dl>` + log}
+      </div>
+    </div>
+    <div class="statusbar"><span class="hint"><span class="kbd">Esc</span> back to library</span><span class="hint"><span class="kbd">L</span> log a print</span><span class="hint"><span class="kbd">O</span> open in slicer</span><span class="hint"><span class="kbd">Drag</span> rotate preview</span><span class="spacer"></span><span class="num">Added 3 Oct 2026 · fingerprint 9f3a…c21e</span></div>
+  </div></div>`;
+}
+document.querySelector('[data-screen="model"]').innerHTML = modelScreen("view");
+document.querySelector('[data-screen="log"]').innerHTML = modelScreen("log");
+
+/* swatches read live token values */
+const sws = [["Cabinet","--cabinet"],["Ground","--ground"],["Surface","--surface"],["Tray","--tray"],["Ink","--ink"],["Ink 2","--ink-2"],["Rule","--rule"],["Label edge","--label-edge"],["Brass","--brass"],["Primary","--primary"],["Printed","--ok"],["Failed","--fail"],["Partial","--partial"],["Offline","--offline"],["Clay","--clay-2"],["Brass soft","--brass-soft"]];
+document.getElementById("swatches").innerHTML = sws.map(([n,v]) => `<div class="sw"><i style="background:var(${v})"></i><div>${n}<span>${v}</span></div></div>`).join("");
+
+const icl = [["search","Search"],["hard-drive","Local library"],["server","Network library"],["server-off","Offline"],["folder-open","Show in folder"],["tag","Tag"],["layout-grid","Grid view"],["list","List view"],["circle-check","Printed"],["circle-x","Failed"],["triangle-alert","Partial, quirk"],["circle-dashed","Never printed"],["notebook-pen","Recipe"],["clipboard-pen","Log a print"],["external-link","Open in slicer"],["rotate-3d","Reset view"],["refresh-cw","Rescan"],["loader-circle","Working"],["history","Recent"],["image-plus","Add photo"],["archive","Backup"],["settings","Settings"],["info","Note"],["sparkle","Prefilled"],["box","Previews"],["palette","Appearance"],["keyboard","Shortcuts"],["monitor","System theme"],["sun","Light"],["moon","Dark"],["plus","Add"],["x","Remove, close"],["ellipsis","More"],["check","Confirm"],["chevron-down","Menu"],["chevron-right","Path"]];
+document.getElementById("iconsheet").innerHTML = icl.map(([n,l]) => `<div>${I(n)}${l}</div>`).join("");
+const worlds = {
+  specimen: ["Specimen cabinet", "Every model is a catalogued specimen; its bordered label says how it prints. Cabinet-green rail, brass for selection, red only for failures."],
+  drawers: ["Parts-drawer wall", "The library as a wall of small-parts drawers: each model is a drawer front in a bin colour with a paper label strip. Workshop blue rail, yellow for selection, condensed label type."],
+  lighttable: ["Light table", "The library laid out like slides on a photographer's light table: each model's preview sits dark in a white mount on a glowing gridded surface. Sidebar and toolbars are frosted glass over your desktop. Cyan for selection, red only for failures.",],
+  frosted: ["Frosted print", "Everything is milky, frosted plastic like a translucent PETG print: panes blur the desktop behind them, and each model is shown in the colour of its recipe material (PETG teal, PLA orange, TPU magenta, ASA grey). Violet for selection.",],
+  standard: ["Category standard", "The familiar look of slicer-era tools: neutral greys, one orange accent, rounded cards, Inter. Safe and clean, least distinctive."],
+};
+function world(w) {
+  document.documentElement.dataset.world = w;
+  document.querySelectorAll("#worlds button").forEach(b => b.setAttribute("aria-pressed", b.dataset.w === w));
+  document.getElementById("worldTitle").textContent = "Printdex: " + worlds[w][0].toLowerCase();
+  document.getElementById("worldDesc").textContent = worlds[w][1] + " Library data is synthetic.";
+  document.getElementById("caption").hidden = w !== "specimen";
+}
+/* presentation controls */
+const params = new URLSearchParams(location.search);
+function params0() { return params.get("world"); }
+const captions = {
+  library: "Library: the cabinet-green rail holds libraries, collections, smart filters and tags. Each model is a tray with its specimen label: name, catalogue number, recipe requirements, last print. Brass marks the selected card. One preview is still rendering and never blocks the grid.",
+  model: "Model: 3D preview and parts on the left, recipe card on the right in the same label language, then tags, source and the print log timeline. Log a print is the primary action.",
+  log: "Log a print: an inline panel replaces the side column, so the model stays visible. Settings come prefilled from the recipe; validation names the problem and the valid range.",
+  settings: "Settings: libraries with live scan and offline states, then behaviour switches. Plain table, standard controls.",
+  tokens: "Tokens: the values the iced theme module implements. Switch the theme to see the dark set.",
+};
+function show(s) {
+  document.querySelectorAll(".screen").forEach(el => el.classList.toggle("on", el.dataset.screen === s));
+  document.querySelectorAll("#screens button").forEach(b => b.setAttribute("aria-pressed", b.dataset.s === s));
+  document.getElementById("caption").textContent = captions[s];
+  if (window.fit) fit();
+  try { localStorage.setItem("pdx-screen", s); } catch (e) {}
+}
+function theme(t) {
+  document.documentElement.dataset.theme = t;
+  document.querySelectorAll("#themes button").forEach(b => b.setAttribute("aria-pressed", b.dataset.t === t));
+}
+document.querySelectorAll("#screens button").forEach(b => b.onclick = () => show(b.dataset.s));
+document.querySelectorAll("#themes button").forEach(b => b.onclick = () => theme(b.dataset.t));
+document.querySelectorAll("#worlds button").forEach(b => b.onclick = () => world(b.dataset.w));
+world(worlds[params0()] ? params0() : "specimen");
+
+let s0 = params.get("screen"); try { s0 = s0 || localStorage.getItem("pdx-screen"); } catch (e) {}
+show(s0 && captions[s0] ? s0 : "library");
+theme(params.get("theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
+function fit() {
+  const st = document.getElementById("stage"), inner = document.getElementById("stageInner");
+  const k = Math.min(1, st.clientWidth / 1282);
+  inner.style.transform = `scale(${k})`;
+  st.style.height = (inner.offsetHeight * k + 2) + "px";
+}
+addEventListener("resize", fit); fit();
+</script>
+</body>
+</html>

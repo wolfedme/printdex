@@ -11,18 +11,22 @@ Scope: the whole desktop app shell and its v1 screens (library, model view, log 
 
 Audience and job: makers with 3D-printing libraries, from a small local folder to a multi-TB NAS. Find a model fast, see how it must be printed, log how the print went. Keyboard-first, light and dark.
 
-Constraints: the mockup is reference only; the shipped UI is iced with a token theme. Everything must be buildable from iced's standard widget set plus custom containers (no web-only effects such as backdrop blur). No invented user counts or benchmarks; demo library data is synthetic.
+Constraints: the mockup is reference only; the shipped UI is iced with a token theme. Buildable from iced's standard widgets plus custom containers: solid borders only, no letter-spacing, no repeated gradients, app-drawn focus ring. Background blur comes only from the OS compositor behind a transparent window (Windows Mica/Acrylic, macOS vibrancy, KDE blur); iced has no in-app blur, and a shader blur would break the no-GPU requirement. Every glass surface needs a solid-tint fallback (GNOME, software rendering, reduced transparency). Demo data is synthetic.
+
+History: first roll ran degraded and offered Specimen cabinet, Parts-drawer wall and the category standard. Max asked for previews of all, then re-rolled with the steer "I like translucent elements with blur behind them" and chose Frosted print on 2026-11-16 to iterate on. After comparing accents and seven full palettes, Max chose **Graphite signal** as the default and asked for the colour theme to be switchable later in Settings (the other six palettes ship as presets). Comparison page: docs/design/explorations.html.
 
 ## Direction contract
 
-THESIS: Printdex is a natural-history collection for printable models: every model is a catalogued specimen with a label that tells you how it must be handled. Refuses the category default of a charcoal slicer-style shell with one orange or green accent and anonymous thumbnail tiles.
+THESIS: Printdex is a shelf of frosted translucent prints: the interface is milky plastic panes, and every model shows up in the colour of the material it is printed in, so the library reads by material at a glance. Refuses the charcoal slicer-style shell with one orange accent and grey anonymous thumbnails.
 
-OWN-WORLD: Collection-cabinet green shell rail (deep grey-green enamel), cool archival-white ground in light and green-black in dark, brass for selection and focus like a cabinet's card holder (ring plus tint), specimen-label red reserved for failures only. Atkinson Hyperlegible Next for UI, Atkinson Hyperlegible Mono for measurements and catalogue numbers. 2px labels and chips, 4px controls and panels, 1px ink rules, no soft floating cards.
+OWN-WORLD: Frosted panes of neutral smoked glass (Graphite signal: near-neutral graphite tint; content panes ~70-86%, sidebar 82% so text holds over any wallpaper) with a bright 1px edge and 14px corners; one OS blur behind the window, panes differ only by fill alpha. Material colours for model previews, opaque (PETG teal, PLA orange, TPU magenta, ASA/unknown neutral). Signal yellow for selection, focus and the main action; red only for failure, amber for partial; recipe notes neutral. The colour theme (glass tint + accent) is a user setting with seven presets; material and status colours never change. Figtree for UI, JetBrains Mono for measurements and catalogue numbers.
 
-STORY: The user sees their library as a tidy collection, reads each model's needs straight off its label, opens it, checks the recipe, prints, and logs the attempt in seconds.
+STORY: The user scans a calm, glassy library where colour means material, opens a model, checks its recipe, prints, and logs the attempt in seconds.
 
-FIRST VIEWPORT: Left: green cabinet rail (libraries, collections, tags, smart filters, offline NAS state). Top: search field with filter chips and grid/list toggle. Main: virtualized thumbnail grid; each card is a render above a bordered specimen label (name, catalogue no., material chips, last-print status). Primary action "Log a print" lives in the model view header.
+FIRST VIEWPORT: Left: frosted sidebar (libraries, collections, smart filters, tags, offline NAS, scan progress). Top: frosted toolbar with search, filter chips, sort, grid/list toggle. Main: virtualized grid of frosted model panes, each a material-coloured preview, name with mono catalogue number, recipe chips, last-print status. Primary action "Log a print" (accent) in the model header.
 
-FORM: Specimen cabinet, position 6 of 7 on my ordered list. seed:361ee0d6e183525d. Signature move: the specimen label, a 1px-bordered caption block with catalogue number, set in mono, used on cards, the recipe card and print-log entries (attempt number in mono).
+MOTION: quick, physical and quiet. Focal moment is print-in (a finished preview builds up from the bed in 16 layers, 720ms, once per new thumbnail). Feedback: 90ms press, 4px hover lift of the model, springy toggles (only overshoot), sliding outcome indicator, model stays painted while the log panel slides, log entry slot-in with fading ring and toast. Colour, opacity, translate and clip only; reduced motion keeps fades.
+
+FORM: Frosted print, my top-ranked candidate of the re-roll (Impeccable's pick), chosen by Max over the assigned light-table direction. seed:2c92208f21fd7a40. Signature move: material colour, the model preview tinted by its recipe material on cards, parts and the 3D viewer.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
