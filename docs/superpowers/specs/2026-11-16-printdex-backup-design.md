@@ -85,7 +85,7 @@ Snapshots are tagged so they can be told apart: `printdex-data` and `printdex-mo
 - **Folder**: any local or mounted path (USB drive, NAS share, Dropbox/Nextcloud/OneDrive synced folder).
 - **S3-compatible**: endpoint, bucket, region, access key, secret (AWS S3, Backblaze B2, Wasabi, MinIO, Cloudflare R2, …).
 - **WebDAV**: URL, user, password (Nextcloud, ownCloud, many NAS boxes).
-- **SFTP**: host, port, user, password or key file.
+- **SFTP** (Linux and macOS only, decided by Max): host, port, user, password or key file.
 
 All via `rustic_backend` (folder backend + OpenDAL-based remotes). MVP supports **one target** per install. *(Claude's call: multiple targets, e.g. USB plus cloud, is a natural follow-up; the config should be a list from day one so it doesn't need migration.)*
 
@@ -161,7 +161,7 @@ Restores never delete or overwrite user files silently, consistent with v1 §8.
 ## 13. Verified before planning (2026-11-16)
 
 - **License: OK.** `rustic_core` 0.13 and `rustic_backend` are `Apache-2.0 OR MIT`. Their full dependency tree (~430 crates, checked for the Windows target) is MIT/Apache-2.0/BSD/ISC/Zlib/MPL-2.0/Unicode-3.0/CC0/Unlicense, all GPL-3.0-compatible. `cargo-deny` stays the enforcement in CI.
-- **SFTP: not available on Windows** through `rustic_backend` (OpenDAL's SFTP service is Unix-only). *(Claude's call)* Implement SFTP as a small Printdex-owned rustic backend on a pure-Rust SSH/SFTP crate (e.g. `russh` + `russh-sftp`, MIT/Apache-2.0) and use it on **all** platforms, so SFTP behaves the same everywhere. Folder, S3 and WebDAV use `rustic_backend`'s OpenDAL services as planned. If that backend turns out to be disproportionate work, ship SFTP on Linux/macOS only for MVP and say so in the UI.
+- **SFTP: not available on Windows** through `rustic_backend` (OpenDAL's SFTP service is Unix-only). **Decided by Max:** no custom SFTP backend; SFTP is offered on **Linux and macOS only**. On Windows the SFTP option is not shown in the target list (folder, S3 and WebDAV remain).
 - **Empty passphrase:** `rustic_core` takes the password as a plain string and has no check rejecting an empty one; confirm with an init/backup/restore round-trip test in the first milestone-5 task.
 - **Weight:** rustic pulls in a sizeable dependency tree (~430 crates, OpenDAL, reqwest, its own rayon/tokio use). Measure binary size and build time in the first milestone-5 task; trim OpenDAL service features to only folder/S3/WebDAV.
 
@@ -174,6 +174,7 @@ Restores never delete or overwrite user files silently, consistent with v1 §8.
 - History: snapshots; keep space low; compression.
 - Encryption: optional, user's own passphrase, for general privacy.
 - Engine: rustic_core (restic format).
+- SFTP on Linux and macOS only; no custom SFTP backend for Windows.
 
 ## 15. Claude's calls (check while reading)
 
