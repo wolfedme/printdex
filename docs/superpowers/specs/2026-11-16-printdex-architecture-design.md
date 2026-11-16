@@ -1,6 +1,6 @@
 # Printdex — Architecture & Tech Stack
 
-*Status: draft for Max's review · 2026-11-16*
+*Status: approved by Max · 2026-11-16*
 *Builds on: [Printdex v1 design](2026-11-16-printdex-v1-design.md) (PR #1). That document owns product scope, data model, file-handling rules and performance targets; this one owns how the code is structured and which tools it uses. Where they overlap, this document refines §5 and §12 of the v1 design.*
 
 ## 1. Intent
