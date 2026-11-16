@@ -4,7 +4,7 @@
 
 ## 1. Intent
 
-Printdex is a native desktop app that turns chaotic folders of 3D-print files into an organized, searchable library, and remembers how each model actually printed. It runs fully locally and never uploads anything.
+Printdex is a native desktop app that turns chaotic folders of 3D-print files into an organized, searchable library, and remembers how each model actually printed. It runs fully locally; it only uploads to backup storage the user configured (see the [backup design](2026-11-16-printdex-backup-design.md)).
 
 **Why it exists.** Tools in this space (Manyfold, STL Shelf, and others) have roughly the right features, but each fails on delivery: they need a self-hosted server, are tied to one OS, are unmaintained, or are slow and overcomplicated. Printdex closes that gap: native on Windows, macOS and Linux, no server, lightweight, fast, and it speeds up the workflow instead of adding steps.
 
@@ -19,6 +19,7 @@ Printdex is a native desktop app that turns chaotic folders of 3D-print files in
 - Per-model **recipe**: what a model needs to print well, shown at a glance.
 - Per-model **print log**: each attempt with result, settings used, notes, optional photo.
 - Feel instant on large NAS libraries (see §7 targets).
+- Backup & restore of Printdex data and (opt-in) model files to a folder or remote of the user's choice ([backup design](2026-11-16-printdex-backup-design.md)).
 
 **Post-MVP (planned; v1 data model must accommodate without migration pain)**
 - Downloading/importing models from model sites (Printables, Thingiverse, MakerWorld…).
@@ -29,7 +30,7 @@ Printdex is a native desktop app that turns chaotic folders of 3D-print files in
 **Never (anti-goals)**
 - Slicing.
 - Printer control or monitoring.
-- Any cloud upload of user files, accounts, or telemetry required to use the app.
+- Requiring an account, an upload or telemetry to use the app. Uploads happen only to storage the user configured.
 - Modifying the contents of model files.
 - Silent or automatic moving/renaming of user files.
 - A server component of any kind for the core experience.
@@ -38,7 +39,7 @@ Printdex is a native desktop app that turns chaotic folders of 3D-print files in
 
 - Language: Rust.
 - Platforms: Windows, macOS, Linux desktop.
-- Fully offline; network only for future, explicitly user-initiated features.
+- Offline by default; network only for features the user explicitly sets up (backup targets, update check, later downloads/sync).
 - Must work against slow, high-latency network shares where file-change notifications are unreliable.
 
 - *(Claude's call)* Minimum platforms: Windows 10+, macOS 12+, Linux on both Wayland and X11. Rendering must work without a capable GPU: use wgpu's fallback/software adapter (WARP on Windows, llvmpipe on Linux) for thumbnails and preview, accepting slower rendering there.
@@ -144,6 +145,7 @@ Keyboard-first: global search shortcut, arrow-key grid navigation, quick tag ent
     2. Thumbnails (embedded → folder image → wgpu render) and 3D preview.
     3. Tags, collections, notes, source, recipe, print log, sidecars.
     4. NAS hardening (offline libraries, periodic rescan, move detection), file actions with trash + undo, performance pass against §7 targets.
+    5. Backup & restore (added 2026-11-16; see the backup design). MVP ships after milestone 5.
 
 ## 11. Proposed by Claude, not objected to (confirm while reading)
 
