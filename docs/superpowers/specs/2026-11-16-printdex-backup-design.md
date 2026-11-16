@@ -1,6 +1,6 @@
 # Printdex Backup & Restore — Design
 
-*Status: draft for Max's review · 2026-11-16*
+*Status: approved by Max · 2026-11-16*
 
 Extends the [v1 design](2026-11-16-printdex-v1-design.md) and the [architecture design](2026-11-16-printdex-architecture-design.md). Where this document disagrees with them, this one wins.
 
@@ -158,12 +158,12 @@ Restores never delete or overwrite user files silently, consistent with v1 §8.
 - A backup scheduler task in the engine owns timers, debounce and the "due on launch" logic.
 - The DB snapshot uses sqlx/SQLite's backup into a temp file; the live DB keeps serving reads and writes.
 
-## 13. Open items to verify before planning
+## 13. Verified before planning (2026-11-16)
 
-- **License**: confirm `rustic_core`, `rustic_backend` and their transitive deps pass `cargo-deny` against GPL-3.0 (expected MIT/Apache-2.0). If not, revisit engine choice with Max.
-- Confirm `rustic_backend` covers folder, S3, WebDAV and SFTP on all three OSes (SFTP via OpenDAL may be Unix-only; if so, fall back to a separate SFTP crate or drop SFTP on Windows for MVP and tell Max).
-- Confirm empty-passphrase repositories are supported by rustic_core.
-- Check binary size and compile-time impact; Printdex aims to be lightweight.
+- **License: OK.** `rustic_core` 0.13 and `rustic_backend` are `Apache-2.0 OR MIT`. Their full dependency tree (~430 crates, checked for the Windows target) is MIT/Apache-2.0/BSD/ISC/Zlib/MPL-2.0/Unicode-3.0/CC0/Unlicense, all GPL-3.0-compatible. `cargo-deny` stays the enforcement in CI.
+- **SFTP: not available on Windows** through `rustic_backend` (OpenDAL's SFTP service is Unix-only). *(Claude's call)* Implement SFTP as a small Printdex-owned rustic backend on a pure-Rust SSH/SFTP crate (e.g. `russh` + `russh-sftp`, MIT/Apache-2.0) and use it on **all** platforms, so SFTP behaves the same everywhere. Folder, S3 and WebDAV use `rustic_backend`'s OpenDAL services as planned. If that backend turns out to be disproportionate work, ship SFTP on Linux/macOS only for MVP and say so in the UI.
+- **Empty passphrase:** `rustic_core` takes the password as a plain string and has no check rejecting an empty one; confirm with an init/backup/restore round-trip test in the first milestone-5 task.
+- **Weight:** rustic pulls in a sizeable dependency tree (~430 crates, OpenDAL, reqwest, its own rayon/tokio use). Measure binary size and build time in the first milestone-5 task; trim OpenDAL service features to only folder/S3/WebDAV.
 
 ## 14. Decided by Max
 
