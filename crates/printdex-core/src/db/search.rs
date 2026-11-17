@@ -125,7 +125,9 @@ pub fn to_fts_query(input: &str) -> Option<String> {
     let terms: Vec<String> = input
         .split_whitespace()
         .map(|t| t.replace('"', ""))
-        .filter(|t| !t.is_empty())
+        // Tokens without a letter or digit ("*", "-", ".") match nothing
+        // useful and confuse FTS5; drop them.
+        .filter(|t| t.chars().any(char::is_alphanumeric))
         .map(|t| format!("\"{t}\"*"))
         .collect();
     (!terms.is_empty()).then(|| terms.join(" "))
@@ -520,6 +522,15 @@ mod tests {
         );
         assert_eq!(to_fts_query("   "), None);
         assert_eq!(to_fts_query("\" \"\""), None);
+    }
+
+    #[test]
+    fn symbol_only_search_tokens_are_dropped() {
+        let plain = to_fts_query("dragon");
+        assert_eq!(to_fts_query("dragon *"), plain);
+        assert_eq!(to_fts_query("dragon -"), plain);
+        assert_eq!(to_fts_query("dragon . -- **"), plain);
+        assert_eq!(to_fts_query("* -"), None);
     }
 
     #[tokio::test]

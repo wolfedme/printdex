@@ -13,6 +13,7 @@ use crate::db::{
 };
 use crate::error::{CoreError, Result};
 use crate::events::EngineEvent;
+use crate::fs::{Fs, RealFs};
 use crate::ids::{LibraryId, ModelId};
 use crate::scan::{ScanSummary, SidecarCtx, scan_library};
 use crate::sidecar::SidecarWriter;
@@ -31,10 +32,8 @@ pub enum LibraryStatus {
     Offline,
 }
 
-async fn folder_status(path: PathBuf) -> LibraryStatus {
-    let check = tokio::task::spawn_blocking(move || {
-        std::fs::read_dir(&path).is_ok_and(|mut d| d.next().is_none_or(|e| e.is_ok()))
-    });
+async fn folder_status(fs: Arc<dyn Fs>, path: PathBuf) -> LibraryStatus {
+    let check = tokio::task::spawn_blocking(move || fs.read_dir(&path).is_ok());
     match tokio::time::timeout(STATUS_TIMEOUT, check).await {
         Ok(Ok(true)) => LibraryStatus::Online,
         _ => LibraryStatus::Offline,
@@ -50,12 +49,42 @@ pub struct Engine {
     thumbs: ThumbnailService,
     pub(crate) sidecars: SidecarWriter,
     pub(crate) install: crate::ids::Uuid,
+    pub(crate) fs: Arc<dyn Fs>,
+    data_dir: PathBuf,
 }
 
-/// Removes a library from the "scanning" set on every exit path.
+/// Removes a library from the "scanning" set on every exit path. Holds the
+/// library's lock file, so another Printdex process (the CLI next to the
+/// app) cannot scan it at the same time; the OS drops the lock if the
+/// process dies.
 struct ScanGuard<'a> {
     scanning: &'a Mutex<HashSet<LibraryId>>,
     id: LibraryId,
+    _lock: std::fs::File,
+}
+
+/// Takes the cross-process scan lock for library `id`.
+fn scan_lock(data_dir: &Path, id: LibraryId) -> Result<std::fs::File> {
+    let dir = data_dir.join("locks");
+    std::fs::create_dir_all(&dir).map_err(|source| CoreError::Io {
+        path: dir.clone(),
+        source,
+    })?;
+    let path = dir.join(format!("scan-{id}.lock"));
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .map_err(|source| CoreError::Io {
+            path: path.clone(),
+            source,
+        })?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(CoreError::AlreadyScanning(id)),
+        Err(std::fs::TryLockError::Error(source)) => Err(CoreError::Io { path, source }),
+    }
 }
 
 impl Drop for ScanGuard<'_> {
@@ -79,6 +108,16 @@ impl Engine {
     /// Must be called inside a tokio runtime: it starts the thumbnail
     /// workers.
     pub async fn open_with_cache(data_dir: &Path, cache_dir: &Path) -> Result<Engine> {
+        Engine::open_with_fs(data_dir, cache_dir, Arc::new(RealFs)).await
+    }
+
+    /// Like [`Engine::open_with_cache`], scanning through `fs` (tests and
+    /// the bench pass a [`crate::fs::ChaosFs`]).
+    pub async fn open_with_fs(
+        data_dir: &Path,
+        cache_dir: &Path,
+        fs: Arc<dyn Fs>,
+    ) -> Result<Engine> {
         std::fs::create_dir_all(data_dir).map_err(|source| CoreError::Io {
             path: data_dir.to_path_buf(),
             source,
@@ -95,6 +134,8 @@ impl Engine {
             thumbs,
             sidecars,
             install,
+            fs,
+            data_dir: data_dir.to_path_buf(),
         })
     }
 
@@ -121,8 +162,15 @@ impl Engine {
     /// Registers a library folder. The path must be an existing directory
     /// with a UTF-8 path that neither contains nor lies inside another library.
     pub async fn add_library(&self, path: &Path, display_name: Option<String>) -> Result<Library> {
-        let path = dunce::canonicalize(path)
-            .map_err(|_| CoreError::LibraryPathInvalid(path.to_path_buf()))?;
+        let path = match dunce::canonicalize(path) {
+            Ok(p) => p,
+            // A symlink (or mount point) whose target is unreachable is an
+            // offline share, not a bad path.
+            Err(_) if std::fs::symlink_metadata(path).is_ok() => {
+                return Err(CoreError::LibraryOffline(path.to_path_buf()));
+            }
+            Err(_) => return Err(CoreError::LibraryPathInvalid(path.to_path_buf())),
+        };
         if !path.is_dir() || path.to_str().is_none() {
             return Err(CoreError::LibraryPathInvalid(path));
         }
@@ -171,16 +219,32 @@ impl Engine {
         if !lock(&self.scanning).insert(id) {
             return Err(CoreError::AlreadyScanning(id));
         }
+        let file_lock = match scan_lock(&self.data_dir, id) {
+            Ok(f) => f,
+            Err(e) => {
+                lock(&self.scanning).remove(&id);
+                return Err(e);
+            }
+        };
         let _guard = ScanGuard {
             scanning: &self.scanning,
             id,
+            _lock: file_lock,
         };
         let lib = self.db.library(id).await?;
         let ctx = SidecarCtx {
             writer: &self.sidecars,
             install: self.install,
         };
-        scan_library(&self.db, &lib, &self.events, cancel, Some(ctx)).await
+        scan_library(
+            self.fs.clone(),
+            &self.db,
+            &lib,
+            &self.events,
+            cancel,
+            Some(ctx),
+        )
+        .await
     }
 
     /// Searches models; see [`Db::search_models`].
@@ -241,7 +305,7 @@ impl Engine {
     /// after [`STATUS_TIMEOUT`] (a hung network share counts as offline).
     pub async fn library_status(&self, id: LibraryId) -> Result<LibraryStatus> {
         let lib = self.db.library(id).await?;
-        Ok(folder_status(lib.path).await)
+        Ok(folder_status(self.fs.clone(), lib.path).await)
     }
 
     /// Present-model counts per library; libraries without models are absent.

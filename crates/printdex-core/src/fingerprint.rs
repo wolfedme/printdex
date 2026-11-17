@@ -1,9 +1,10 @@
 //! Partial-content fingerprints: file size plus xxh3-64 of the first and last
 //! 64 KiB (the whole file when it is at most 128 KiB).
 
-use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+
+use crate::fs::{Fs, RealFs};
 
 use xxhash_rust::xxh3::Xxh3;
 
@@ -19,8 +20,13 @@ pub struct Fingerprint {
 
 /// Fingerprints the file at `path`. Blocking; run it on the CPU pool.
 pub fn fingerprint_file(path: &Path) -> std::io::Result<Fingerprint> {
-    let mut file = File::open(path)?;
-    let size = file.metadata()?.len();
+    fingerprint_with(&RealFs, path)
+}
+
+/// Fingerprints `path` through `fs`.
+pub fn fingerprint_with(fs: &dyn Fs, path: &Path) -> std::io::Result<Fingerprint> {
+    let size = fs.metadata(path)?.len;
+    let mut file = fs.open(path)?;
     let mut hasher = Xxh3::new();
     let mut buf = vec![0u8; SAMPLE_BYTES as usize];
     if size <= 2 * SAMPLE_BYTES {
@@ -38,7 +44,7 @@ pub fn fingerprint_file(path: &Path) -> std::io::Result<Fingerprint> {
 
 /// Feeds exactly `len` bytes from `file` into `hasher`. A file that shrank
 /// since its size was read fails with `UnexpectedEof`.
-fn feed(file: &mut File, hasher: &mut Xxh3, buf: &mut [u8], len: u64) -> std::io::Result<()> {
+fn feed(file: &mut dyn Read, hasher: &mut Xxh3, buf: &mut [u8], len: u64) -> std::io::Result<()> {
     let mut left = len;
     while left > 0 {
         let n = usize::try_from(left.min(buf.len() as u64)).unwrap_or(buf.len());

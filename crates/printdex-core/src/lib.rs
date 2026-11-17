@@ -9,6 +9,7 @@ pub mod engine;
 pub mod error;
 pub mod events;
 pub mod fingerprint;
+pub mod fs;
 pub mod grouping;
 pub mod ids;
 pub mod model_data;

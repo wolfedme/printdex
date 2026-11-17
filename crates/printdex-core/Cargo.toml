@@ -15,7 +15,6 @@ image.workspace = true
 printdex-mesh.workspace = true
 printdex-render.workspace = true
 dunce.workspace = true
-ignore.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true

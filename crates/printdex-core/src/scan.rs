@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 
 use rayon::prelude::*;
@@ -13,10 +14,11 @@ use crate::cpu::run_cpu;
 use crate::db::{Db, KnownFile, Library};
 use crate::error::{CoreError, Result};
 use crate::events::{EngineEvent, ScanPhase};
-use crate::fingerprint::{Fingerprint, fingerprint_file};
+use crate::fingerprint::{Fingerprint, fingerprint_with};
+use crate::fs::Fs;
 use crate::grouping::{ModelGroup, group_models};
 use crate::time::now_ms;
-use crate::walk::{FileEntry, FileKind, SkipReason, walk_library};
+use crate::walk::{FileEntry, FileKind, SkipReason, root_readable, walk_library};
 
 /// Files fingerprinted per CPU-pool job (one progress event each).
 const FINGERPRINT_CHUNK: usize = 256;
@@ -78,18 +80,28 @@ pub fn needs_fingerprint(known: &HashMap<&str, &KnownFile>, entry: &FileEntry) -
 /// Returns the successes and the indices that failed (vanished, truncated,
 /// unreadable).
 pub(crate) async fn fingerprint_entries(
+    fs: Arc<dyn Fs>,
     root: &Path,
     files: &[FileEntry],
     which: &[usize],
 ) -> (HashMap<usize, Fingerprint>, Vec<usize>) {
-    let jobs: Vec<(usize, PathBuf)> = which
+    let jobs: Vec<(usize, PathBuf, u64)> = which
         .iter()
-        .map(|&i| (i, root.join(&files[i].rel_path)))
+        .map(|&i| (i, root.join(&files[i].rel_path), files[i].size))
         .collect();
     let results = run_cpu(move || {
         jobs.into_par_iter()
-            .map(|(i, path)| {
-                let r = fingerprint_file(&path);
+            .map(|(i, path, walked_size)| {
+                // A file rewritten between the walk and now would store the
+                // walk's size next to the new content's hash: count it as
+                // failed, the next scan picks it up.
+                let r = fingerprint_with(&*fs, &path).and_then(|fp| {
+                    if fp.size == walked_size {
+                        Ok(fp)
+                    } else {
+                        Err(std::io::Error::other("file changed during the scan"))
+                    }
+                });
                 if let Err(e) = &r {
                     tracing::warn!(path = %path.display(), error = %e, "cannot fingerprint file, skipping");
                 }
@@ -116,6 +128,7 @@ pub(crate) async fn fingerprint_entries(
 /// and `ScanFinished`, or `ScanFailed` on error. Nothing is written when the
 /// scan is cancelled or the library is offline.
 pub async fn scan_library(
+    fs: Arc<dyn Fs>,
     db: &Db,
     lib: &Library,
     events: &broadcast::Sender<EngineEvent>,
@@ -123,7 +136,7 @@ pub async fn scan_library(
     sidecars: Option<SidecarCtx<'_>>,
 ) -> Result<ScanSummary> {
     let _ = events.send(EngineEvent::ScanStarted { library: lib.id });
-    match run_scan_with(db, lib, events, cancel, sidecars, |_| {}).await {
+    match run_scan_with(fs, db, lib, events, cancel, sidecars, |_| {}).await {
         Ok(summary) => {
             let _ = events.send(EngineEvent::ScanFinished {
                 library: lib.id,
@@ -181,6 +194,7 @@ fn clone_error(e: &CoreError) -> CoreError {
 /// The scan, with `after_walk` called between the walk and fingerprinting so
 /// tests can change the tree mid-scan.
 async fn run_scan_with(
+    fs: Arc<dyn Fs>,
     db: &Db,
     lib: &Library,
     events: &broadcast::Sender<EngineEvent>,
@@ -200,8 +214,11 @@ async fn run_scan_with(
 
     progress(ScanPhase::Walking, 0, 0);
     let root = lib.path.clone();
-    let walk_cancel = cancel.clone();
-    let walked = tokio::task::spawn_blocking(move || walk_library(&root, &walk_cancel))
+    // Dropping this scan (instead of cancelling it) must stop the walk too.
+    let walk_cancel = cancel.child_token();
+    let _stop_walk = walk_cancel.clone().drop_guard();
+    let walk_fs = fs.clone();
+    let walked = tokio::task::spawn_blocking(move || walk_library(&*walk_fs, &root, &walk_cancel))
         .await
         .map_err(|e| CoreError::Io {
             path: lib.path.clone(),
@@ -247,7 +264,7 @@ async fn run_scan_with(
         if cancel.is_cancelled() {
             return Err(CoreError::Cancelled);
         }
-        let (ok, bad) = fingerprint_entries(&lib.path, &files, chunk).await;
+        let (ok, bad) = fingerprint_entries(fs.clone(), &lib.path, &files, chunk).await;
         fingerprints.extend(ok);
         failed.extend(bad);
         let done = (n * FINGERPRINT_CHUNK + chunk.len()).min(which.len());
@@ -280,7 +297,7 @@ async fn run_scan_with(
     }
     // The share may have dropped while we were reading; check again right
     // before writing so a vanished library is never marked missing.
-    if !root_readable(&lib.path) {
+    if !root_readable(&*fs, &lib.path) {
         return Err(CoreError::LibraryOffline(lib.path.clone()));
     }
     let groups = group_models(&files);
@@ -341,13 +358,13 @@ fn rel_string(rel: &Path) -> Option<String> {
     parts.map(|p| p.join("/"))
 }
 
-fn root_readable(root: &Path) -> bool {
-    std::fs::metadata(root).is_ok_and(|m| m.is_dir()) && std::fs::read_dir(root).is_ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn real() -> Arc<dyn Fs> {
+        Arc::new(crate::fs::RealFs)
+    }
     use crate::db::LibraryKind;
     use crate::ids::LibraryId;
     use std::fs;
@@ -390,6 +407,7 @@ mod tests {
 
         async fn scan(&self) -> ScanSummary {
             scan_library(
+                real(),
                 &self.db,
                 &self.lib,
                 &self.tx,
@@ -527,7 +545,7 @@ mod tests {
     #[tokio::test]
     async fn scan_survives_file_deleted_before_fingerprint() {
         let f = Fixture::new(TREE).await;
-        let walked = walk_library(&f.root, &CancellationToken::new()).unwrap();
+        let walked = walk_library(&crate::fs::RealFs, &f.root, &CancellationToken::new()).unwrap();
         let gone = walked
             .files
             .iter()
@@ -535,11 +553,32 @@ mod tests {
             .unwrap();
         fs::remove_file(f.root.join("Orc/orc.3mf")).unwrap();
         let all: Vec<usize> = (0..walked.files.len()).collect();
-        let (ok, failed) = fingerprint_entries(&f.root, &walked.files, &all).await;
+        let (ok, failed) = fingerprint_entries(real(), &f.root, &walked.files, &all).await;
         assert_eq!(failed, [gone]);
         assert_eq!(ok.len(), 2);
         let s = f.scan().await;
         assert_eq!(s.models_added, 1);
+    }
+
+    #[tokio::test]
+    async fn fingerprint_size_mismatch_is_failure() {
+        let f = Fixture::new(TREE).await;
+        let walked = walk_library(&crate::fs::RealFs, &f.root, &CancellationToken::new()).unwrap();
+        let grown = walked
+            .files
+            .iter()
+            .position(|e| e.rel_path == "Orc/orc.3mf")
+            .unwrap();
+        // The file grows after the walk listed it.
+        fs::write(
+            f.root.join("Orc/orc.3mf"),
+            b"a much longer body than before",
+        )
+        .unwrap();
+        let all: Vec<usize> = (0..walked.files.len()).collect();
+        let (ok, failed) = fingerprint_entries(real(), &f.root, &walked.files, &all).await;
+        assert_eq!(failed, [grown]);
+        assert!(!ok.contains_key(&grown));
     }
 
     #[tokio::test]
@@ -571,7 +610,7 @@ mod tests {
         let f = Fixture::new(TREE).await;
         let c = CancellationToken::new();
         c.cancel();
-        let r = scan_library(&f.db, &f.lib, &f.tx, c, None).await;
+        let r = scan_library(real(), &f.db, &f.lib, &f.tx, c, None).await;
         assert!(matches!(r, Err(CoreError::Cancelled)));
         assert_eq!(f.count("SELECT count(*) FROM models").await, 0);
     }
@@ -584,7 +623,7 @@ mod tests {
         for e in fs::read_dir(&f.root).unwrap() {
             fs::remove_dir_all(e.unwrap().path()).unwrap();
         }
-        let r = scan_library(&f.db, &f.lib, &f.tx, CancellationToken::new(), None).await;
+        let r = scan_library(real(), &f.db, &f.lib, &f.tx, CancellationToken::new(), None).await;
         assert!(matches!(r, Err(CoreError::LibraryOffline(_))), "{r:?}");
         assert_eq!(
             f.count("SELECT count(*) FROM models WHERE missing_since IS NOT NULL")
@@ -599,6 +638,7 @@ mod tests {
         after_walk: impl FnOnce(&[FileEntry]),
     ) -> Result<ScanSummary> {
         run_scan_with(
+            real(),
             &f.db,
             &f.lib,
             &f.tx,
@@ -624,7 +664,7 @@ mod tests {
                 .fetch_one(f.db.reader())
                 .await
                 .unwrap();
-        let real = fingerprint_file(&f.root.join("Dragon/STLs/a.stl"))
+        let real = crate::fingerprint::fingerprint_file(&f.root.join("Dragon/STLs/a.stl"))
             .unwrap()
             .hash;
         assert_eq!(stored as u64, real);
@@ -696,7 +736,7 @@ mod tests {
         for d in ["Dragon", "Orc"] {
             fs::set_permissions(f.root.join(d), fs::Permissions::from_mode(0o000)).unwrap();
         }
-        let r = scan_library(&f.db, &f.lib, &f.tx, CancellationToken::new(), None).await;
+        let r = scan_library(real(), &f.db, &f.lib, &f.tx, CancellationToken::new(), None).await;
         for d in ["Dragon", "Orc"] {
             fs::set_permissions(f.root.join(d), fs::Permissions::from_mode(0o755)).unwrap();
         }
@@ -718,7 +758,7 @@ mod tests {
         }
         f.scan().await;
         fs::set_permissions(f.root.join("Orc"), fs::Permissions::from_mode(0o000)).unwrap();
-        let r = scan_library(&f.db, &f.lib, &f.tx, CancellationToken::new(), None).await;
+        let r = scan_library(real(), &f.db, &f.lib, &f.tx, CancellationToken::new(), None).await;
         fs::set_permissions(f.root.join("Orc"), fs::Permissions::from_mode(0o755)).unwrap();
         let s = r.unwrap();
         assert_eq!((s.skipped, s.models_missing), (1, 0));
