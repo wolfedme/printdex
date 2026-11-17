@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE assets SET model_id = ?, size = ?, mtime_ns = ?, missing_since = NULL,\n                                               updated_at = ?\n                             WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "4a36b5d353289656845f9e12fe62af1eff5c77c9a71bf2be357ae95106a354ed"
+}

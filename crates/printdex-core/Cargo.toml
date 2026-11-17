@@ -1,0 +1,28 @@
+[package]
+name = "printdex-core"
+description = "UI-free engine for Printdex: libraries, scanning, database and search."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+directories.workspace = true
+dunce.workspace = true
+ignore.workspace = true
+rayon.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+xxhash-rust.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!: AssetId\", model_id as \"model_id: ModelId\", rel_path,\n                      size, mtime_ns, missing_since\n               FROM assets WHERE library_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: AssetId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "assets",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "model_id: ModelId",
+        "ordinal": 1,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "assets",
+            "name": "model_id"
+          }
+        }
+      },
+      {
+        "name": "rel_path",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "assets",
+            "name": "rel_path"
+          }
+        }
+      },
+      {
+        "name": "size",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "assets",
+            "name": "size"
+          }
+        }
+      },
+      {
+        "name": "mtime_ns",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "assets",
+            "name": "mtime_ns"
+          }
+        }
+      },
+      {
+        "name": "missing_since",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "assets",
+            "name": "missing_since"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "4bdcedeec492cb4d257030104d52ec07426deb43c318244b6d9a210bc95b7854"
+}

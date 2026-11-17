@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT rel_path, size, mtime_ns FROM assets WHERE library_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "rel_path",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "assets",
+            "name": "rel_path"
+          }
+        }
+      },
+      {
+        "name": "size",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "assets",
+            "name": "size"
+          }
+        }
+      },
+      {
+        "name": "mtime_ns",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "assets",
+            "name": "mtime_ns"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e2798e62f242ef0ca773a7de19cecfca38f0cc6b1b6db98fc5fa5d289143002f"
+}

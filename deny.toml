@@ -1,0 +1,46 @@
+# cargo-deny configuration. Printdex is GPL-3.0-only, so every dependency
+# must carry a GPL-3.0-compatible license.
+
+[graph]
+all-features = false
+
+[advisories]
+# Defaults: vulnerabilities and unsound crates are errors.
+ignore = [
+    # SQLite < 3.54 can return stale page-cache memory when a database is
+    # opened next to a crafted `-wal` file with a different page size. Needs
+    # local write access to Printdex's own data folder. The fix ships in
+    # libsqlite3-sys 0.39, which sqlx 0.9.0 does not allow yet (<0.38).
+    # Remove this once sqlx accepts libsqlite3-sys >= 0.39 (issue #23).
+    { id = "RUSTSEC-2026-0459", reason = "fix needs libsqlite3-sys 0.39; blocked on sqlx; local-only attack on our own data folder" },
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "CC0-1.0",
+    "BSL-1.0",
+    "GPL-3.0-only",
+    "GPL-3.0-or-later",
+    "LGPL-2.1-or-later",
+    "LGPL-3.0-or-later",
+]
+confidence-threshold = 0.9
+# The allow list is a policy, not an inventory; unused entries are fine.
+unused-allowed-license = "allow"
+
+[bans]
+multiple-versions = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

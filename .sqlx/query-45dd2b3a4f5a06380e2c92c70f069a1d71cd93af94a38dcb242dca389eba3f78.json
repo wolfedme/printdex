@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO models (id, library_id, rel_path, name, kind, created_at, updated_at)\n                             VALUES (?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "45dd2b3a4f5a06380e2c92c70f069a1d71cd93af94a38dcb242dca389eba3f78"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE libraries SET last_full_scan_at = ?, updated_at = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "3b9c8ef30e03d2379b62652dc816c9510dcbfc69c76dc8f287266b42c6100a36"
+}

@@ -1,0 +1,49 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n                 (SELECT count(*) FROM libraries) as \"libraries!: i64\",\n                 (SELECT count(*) FROM models WHERE missing_since IS NULL) as \"models!: i64\",\n                 (SELECT count(*) FROM parts WHERE missing_since IS NULL) as \"parts!: i64\",\n                 (SELECT count(*) FROM assets WHERE missing_since IS NULL) as \"assets!: i64\",\n                 (SELECT count(*) FROM models WHERE missing_since IS NOT NULL) as \"missing_models!: i64\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "libraries!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "models!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "parts!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "assets!: i64",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "missing_models!: i64",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "43e432e5539a4af894a27839300017a67a0d3831a1279605b9998bbb8073152b"
+}

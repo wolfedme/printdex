@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!: LibraryId\", path, display_name, kind,\n                      sidecar_enabled as \"sidecar_enabled: bool\", last_full_scan_at\n               FROM libraries ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: LibraryId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "libraries",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "path",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "libraries",
+            "name": "path"
+          }
+        }
+      },
+      {
+        "name": "display_name",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "libraries",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "name": "kind",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "libraries",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "name": "sidecar_enabled: bool",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "libraries",
+            "name": "sidecar_enabled"
+          }
+        }
+      },
+      {
+        "name": "last_full_scan_at",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "libraries",
+            "name": "last_full_scan_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "174ae4c4538309e750f8449573b912f71418801e086ab367db91292e42da5319"
+}
