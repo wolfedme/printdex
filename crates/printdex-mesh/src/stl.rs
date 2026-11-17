@@ -75,7 +75,7 @@ fn read_binary<R: Read>(mut r: R, count: u64, limits: Limits) -> Result<Mesh> {
                 e.into()
             }
         })?;
-        for rec in bytes.chunks_exact(RECORD as usize) {
+        for rec in bytes.as_chunks::<{ RECORD as usize }>().0 {
             // 12 bytes normal, 3 × 12 bytes vertices, 2 bytes attribute.
             let v = |i: usize| -> [f32; 3] {
                 let o = 12 + i * 12;

@@ -219,8 +219,10 @@ pub fn render(mesh: &Mesh, opts: &RenderOptions) -> Image {
     let mut target = Target::new(w, h);
     for (tri, proj) in mesh
         .positions
-        .chunks_exact(3)
-        .zip(projected.chunks_exact(3))
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .zip(projected.as_chunks::<3>().0)
     {
         let [a, b, c] = [tri[0], tri[1], tri[2]].map(Vec3::from_array);
         let n = (b - a).cross(c - a);
