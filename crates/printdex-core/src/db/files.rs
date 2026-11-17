@@ -99,6 +99,16 @@ enum Op<'a> {
     MissingAsset(AssetId),
 }
 
+/// Whether `a` and `b` are the same path or one lies inside the other.
+fn overlaps(a: &str, b: &str) -> bool {
+    let inside = |inner: &str, outer: &str| {
+        inner.len() > outer.len()
+            && inner.starts_with(outer)
+            && inner.as_bytes()[outer.len()] == b'/'
+    };
+    a == b || inside(a, b) || inside(b, a)
+}
+
 impl Db {
     /// Every part and asset of `lib` recorded so far, missing or not.
     pub async fn known_files(&self, lib: LibraryId) -> Result<Vec<KnownFile>> {
@@ -280,19 +290,20 @@ impl Db {
             }
         }
 
+        let kept = |path: &str| write.keep.iter().any(|k| overlaps(path, k));
         for m in &models {
-            if m.missing_since.is_none() && !seen_models.contains(&m.id) {
+            if m.missing_since.is_none() && !seen_models.contains(&m.id) && !kept(&m.rel_path) {
                 stats.models_missing += 1;
                 ops.push(Op::MissingModel(m.id));
             }
         }
         for p in &parts {
-            if p.missing_since.is_none() && !seen_parts.contains(&p.id) {
+            if p.missing_since.is_none() && !seen_parts.contains(&p.id) && !kept(&p.rel_path) {
                 ops.push(Op::MissingPart(p.id));
             }
         }
         for a in &assets {
-            if a.missing_since.is_none() && !seen_assets.contains(&a.id) {
+            if a.missing_since.is_none() && !seen_assets.contains(&a.id) && !kept(&a.rel_path) {
                 ops.push(Op::MissingAsset(a.id));
             }
         }

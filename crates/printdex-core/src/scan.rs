@@ -16,7 +16,7 @@ use crate::events::{EngineEvent, ScanPhase};
 use crate::fingerprint::{Fingerprint, fingerprint_file};
 use crate::grouping::{ModelGroup, group_models};
 use crate::time::now_ms;
-use crate::walk::{FileEntry, FileKind, walk_library};
+use crate::walk::{FileEntry, FileKind, SkipReason, walk_library};
 
 /// Files fingerprinted per CPU-pool job (one progress event each).
 const FINGERPRINT_CHUNK: usize = 256;
@@ -27,6 +27,9 @@ pub struct ScanWrite {
     /// Index into `files`; only new or changed parts.
     pub fingerprints: HashMap<usize, Fingerprint>,
     pub groups: Vec<ModelGroup>,
+    /// Relative paths (folders or files) the scan could not read this round.
+    /// Existing rows at, under or containing them are not marked missing.
+    pub keep: Vec<String>,
 }
 
 /// Model counts from applying a scan.
@@ -155,6 +158,18 @@ async fn run_scan(
     events: &broadcast::Sender<EngineEvent>,
     cancel: CancellationToken,
 ) -> Result<ScanSummary> {
+    run_scan_with(db, lib, events, cancel, |_| {}).await
+}
+
+/// The scan, with `after_walk` called between the walk and fingerprinting so
+/// tests can change the tree mid-scan.
+async fn run_scan_with(
+    db: &Db,
+    lib: &Library,
+    events: &broadcast::Sender<EngineEvent>,
+    cancel: CancellationToken,
+    after_walk: impl FnOnce(&[FileEntry]),
+) -> Result<ScanSummary> {
     let started = Instant::now();
     let progress = |phase: ScanPhase, done: usize, total: usize| {
         let _ = events.send(EngineEvent::ScanProgress {
@@ -176,14 +191,31 @@ async fn run_scan(
         })??;
     let mut files = walked.files;
     let files_seen = files.len();
+    after_walk(&files);
     progress(ScanPhase::Walking, files_seen, files_seen);
 
     let known = db.known_files(lib.id).await?;
-    // A library that had files and now shows an empty root is far more likely
-    // an unmounted share (empty mount point) than a deliberately emptied
-    // folder. Refuse instead of marking the whole library missing.
-    if files.is_empty() && walked.skipped.is_empty() && !known.is_empty() {
+    // A library that had files and now yields none is far more likely an
+    // unmounted share (empty mount point) or a share failing mid-walk than a
+    // deliberately emptied folder. Refuse instead of marking it all missing.
+    if files.is_empty() && !known.is_empty() {
         return Err(CoreError::LibraryOffline(lib.path.clone()));
+    }
+    let mut keep = Vec::new();
+    for skipped in &walked.skipped {
+        if skipped.reason != SkipReason::Unreadable {
+            continue;
+        }
+        match skipped
+            .path
+            .strip_prefix(&lib.path)
+            .ok()
+            .and_then(rel_string)
+        {
+            Some(rel) if !rel.is_empty() => keep.push(rel),
+            // The root itself (or something outside it) failed.
+            _ => return Err(CoreError::LibraryOffline(lib.path.clone())),
+        }
     }
     let known: HashMap<&str, &KnownFile> = known.iter().map(|k| (k.rel_path.as_str(), k)).collect();
     let which: Vec<usize> = (0..files.len())
@@ -208,6 +240,7 @@ async fn run_scan(
     // Drop files that vanished or changed mid-scan; re-key fingerprints to
     // the new indices.
     if !failed.is_empty() {
+        keep.extend(failed.iter().map(|&i| files[i].rel_path.clone()));
         let failed: std::collections::HashSet<usize> = failed.iter().copied().collect();
         let mut remap = HashMap::with_capacity(fingerprints.len());
         let mut kept = Vec::with_capacity(files.len() - failed.len());
@@ -227,6 +260,11 @@ async fn run_scan(
     if cancel.is_cancelled() {
         return Err(CoreError::Cancelled);
     }
+    // The share may have dropped while we were reading; check again right
+    // before writing so a vanished library is never marked missing.
+    if !root_readable(&lib.path) {
+        return Err(CoreError::LibraryOffline(lib.path.clone()));
+    }
     let groups = group_models(&files);
     progress(ScanPhase::Writing, 0, groups.len());
     let stats = db
@@ -236,6 +274,7 @@ async fn run_scan(
                 files,
                 fingerprints,
                 groups,
+                keep,
             },
         )
         .await?;
@@ -250,6 +289,16 @@ async fn run_scan(
         models_returned: stats.models_returned,
         duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
     })
+}
+
+/// `/`-joined UTF-8 relative path, or `None` if not representable.
+fn rel_string(rel: &Path) -> Option<String> {
+    let parts: Option<Vec<&str>> = rel.components().map(|c| c.as_os_str().to_str()).collect();
+    parts.map(|p| p.join("/"))
+}
+
+fn root_readable(root: &Path) -> bool {
+    std::fs::metadata(root).is_ok_and(|m| m.is_dir()) && std::fs::read_dir(root).is_ok()
 }
 
 #[cfg(test)]
@@ -489,6 +538,134 @@ mod tests {
         assert!(matches!(r, Err(CoreError::LibraryOffline(_))), "{r:?}");
         assert_eq!(
             f.count("SELECT count(*) FROM models WHERE missing_since IS NOT NULL")
+                .await,
+            0
+        );
+    }
+
+    /// Runs a scan with `after_walk` called between the walk and fingerprinting.
+    async fn scan_with_hook(
+        f: &Fixture,
+        after_walk: impl FnOnce(&[FileEntry]),
+    ) -> Result<ScanSummary> {
+        run_scan_with(&f.db, &f.lib, &f.tx, CancellationToken::new(), after_walk).await
+    }
+
+    #[tokio::test]
+    async fn file_vanishing_mid_scan_is_skipped_and_others_keep_their_fingerprints() {
+        let f = Fixture::new(TREE).await;
+        let s = scan_with_hook(&f, |_| fs::remove_file(f.root.join("Orc/orc.3mf")).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(
+            (s.files_seen, s.fingerprinted, s.skipped, s.models_added),
+            (3, 1, 1, 1)
+        );
+        let stored: i64 =
+            sqlx::query_scalar("SELECT fp_hash FROM parts WHERE rel_path = 'Dragon/STLs/a.stl'")
+                .fetch_one(f.db.reader())
+                .await
+                .unwrap();
+        let real = fingerprint_file(&f.root.join("Dragon/STLs/a.stl"))
+            .unwrap()
+            .hash;
+        assert_eq!(stored as u64, real);
+        assert_eq!(
+            f.count("SELECT count(*) FROM parts WHERE rel_path = 'Orc/orc.3mf'")
+                .await,
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn known_part_failing_fingerprint_is_not_marked_missing() {
+        let f = Fixture::new(TREE).await;
+        f.scan().await;
+        write(
+            &f.root,
+            "Orc/orc.3mf",
+            b"a newer, longer version of the orc",
+        );
+        let s = scan_with_hook(&f, |_| fs::remove_file(f.root.join("Orc/orc.3mf")).unwrap())
+            .await
+            .unwrap();
+        assert_eq!((s.skipped, s.models_missing), (1, 0));
+        assert_eq!(
+            f.count("SELECT count(*) FROM parts WHERE missing_since IS NOT NULL")
+                .await,
+            0
+        );
+        assert_eq!(f.model("Orc").await.1, None);
+    }
+
+    #[tokio::test]
+    async fn library_vanishing_mid_scan_is_offline() {
+        let f = Fixture::new(TREE).await;
+        f.scan().await;
+        let away = f.root.parent().unwrap().join("away");
+        let r = scan_with_hook(&f, |_| fs::rename(&f.root, &away).unwrap()).await;
+        assert!(matches!(r, Err(CoreError::LibraryOffline(_))), "{r:?}");
+        assert_eq!(
+            f.count("SELECT count(*) FROM models WHERE missing_since IS NOT NULL")
+                .await,
+            0
+        );
+    }
+
+    /// Whether this process can ignore file permissions (root on unix).
+    #[cfg(unix)]
+    fn permissions_enforced(dir: &Path) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        let probe = dir.join("probe");
+        fs::create_dir_all(&probe).unwrap();
+        fs::set_permissions(&probe, fs::Permissions::from_mode(0o000)).unwrap();
+        let enforced = fs::read_dir(&probe).is_err();
+        fs::set_permissions(&probe, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::remove_dir(&probe).unwrap();
+        enforced
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unreadable_library_contents_are_offline() {
+        use std::os::unix::fs::PermissionsExt;
+        let f = Fixture::new(TREE).await;
+        if !permissions_enforced(f.root.parent().unwrap()) {
+            return;
+        }
+        f.scan().await;
+        // Root still listable, but nothing below it can be entered.
+        for d in ["Dragon", "Orc"] {
+            fs::set_permissions(f.root.join(d), fs::Permissions::from_mode(0o000)).unwrap();
+        }
+        let r = scan_library(&f.db, &f.lib, &f.tx, CancellationToken::new()).await;
+        for d in ["Dragon", "Orc"] {
+            fs::set_permissions(f.root.join(d), fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert!(matches!(r, Err(CoreError::LibraryOffline(_))), "{r:?}");
+        assert_eq!(
+            f.count("SELECT count(*) FROM models WHERE missing_since IS NOT NULL")
+                .await,
+            0
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unreadable_subfolder_keeps_its_models() {
+        use std::os::unix::fs::PermissionsExt;
+        let f = Fixture::new(TREE).await;
+        if !permissions_enforced(f.root.parent().unwrap()) {
+            return;
+        }
+        f.scan().await;
+        fs::set_permissions(f.root.join("Orc"), fs::Permissions::from_mode(0o000)).unwrap();
+        let r = scan_library(&f.db, &f.lib, &f.tx, CancellationToken::new()).await;
+        fs::set_permissions(f.root.join("Orc"), fs::Permissions::from_mode(0o755)).unwrap();
+        let s = r.unwrap();
+        assert_eq!((s.skipped, s.models_missing), (1, 0));
+        assert_eq!(
+            f.count("SELECT count(*) FROM parts WHERE missing_since IS NOT NULL")
                 .await,
             0
         );
