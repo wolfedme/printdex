@@ -8,6 +8,7 @@ pub mod error;
 pub mod fingerprint;
 pub mod ids;
 pub mod time;
+pub mod walk;
 
 pub use error::{CoreError, Result};
 pub use ids::{AssetId, LibraryId, ModelId, PartId};
