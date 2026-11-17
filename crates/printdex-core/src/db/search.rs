@@ -22,6 +22,8 @@ pub enum Smart {
     FailedLast,
     /// First seen in the last seven days.
     AddedThisWeek,
+    /// No longer found in its library (kept while it has user data).
+    Missing,
 }
 
 /// Length of "this week" for [`Smart::AddedThisWeek`].
@@ -86,6 +88,7 @@ pub struct SmartCounts {
     pub never_printed: u64,
     pub failed_last: u64,
     pub added_this_week: u64,
+    pub missing: u64,
 }
 
 /// Structured narrowing of a search. The default narrows nothing.
@@ -182,7 +185,11 @@ fn push_from_where(
         q.push(" JOIN collection_models cm ON cm.model_id = m.id AND cm.collection_id = ")
             .push_bind(*c);
     }
-    q.push(" WHERE m.missing_since IS NULL");
+    if *scope == Scope::Smart(Smart::Missing) {
+        q.push(" WHERE m.missing_since IS NOT NULL");
+    } else {
+        q.push(" WHERE m.missing_since IS NULL");
+    }
     match text {
         Text::All => {}
         Text::Fts(fts) => {
@@ -221,6 +228,7 @@ fn push_from_where(
             q.push(" AND m.created_at >= ")
                 .push_bind(now_ms() - WEEK_MS);
         }
+        Scope::Smart(Smart::Missing) => {}
     }
     if !filter.formats.is_empty() {
         q.push(" AND EXISTS (SELECT 1 FROM parts p WHERE p.model_id = m.id AND p.missing_since IS NULL AND p.format IN (");
@@ -285,7 +293,7 @@ fn hit_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<ModelHit> {
         kind: ModelKind::from_db(&kind).unwrap_or(ModelKind::Folder),
         number: number.and_then(|n| u32::try_from(n).ok()),
         part_count: u32::try_from(part_count).unwrap_or(u32::MAX),
-        missing: false,
+        missing: row.try_get::<Option<i64>, _>("missing_since")?.is_some(),
         created_at: row.try_get("created_at")?,
         material,
         recipe,
@@ -324,7 +332,7 @@ impl Db {
     ) -> Result<Vec<ModelHit>> {
         let text = text_query(input);
         let mut q = QueryBuilder::<Sqlite>::new(format!(
-            "SELECT m.id, m.library_id, m.name, m.rel_path, m.kind, m.created_at, m.number,
+            "SELECT m.id, m.library_id, m.name, m.rel_path, m.kind, m.created_at, m.number, m.missing_since,
                     (SELECT count(*) FROM parts p WHERE p.model_id = m.id AND p.missing_since IS NULL) as part_count,
                     (SELECT r.settings FROM recipes r WHERE r.model_id = m.id) as recipe,
                     {} as last_result, {} as last_at,
@@ -376,6 +384,7 @@ impl Db {
             (Smart::NeverPrinted, &mut out.never_printed),
             (Smart::FailedLast, &mut out.failed_last),
             (Smart::AddedThisWeek, &mut out.added_this_week),
+            (Smart::Missing, &mut out.missing),
         ] {
             *slot = self
                 .count_models(&Scope::Smart(smart), "", &SearchFilter::default())
@@ -972,7 +981,8 @@ mod tests {
             SmartCounts {
                 never_printed: 1,
                 failed_last: 1,
-                added_this_week: 1
+                added_this_week: 1,
+                missing: 0
             }
         );
     }

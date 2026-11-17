@@ -1129,6 +1129,22 @@ impl App {
                 // Smart filter counts follow the print log.
                 Task::batch([self.run_search(ticket), data, self.load_lists()])
             }
+            EngineEvent::ModelForgotten(id) => {
+                if self.model.as_ref().map(ModelView::id) == Some(id) {
+                    self.model = None;
+                    self.org.cancel_edits();
+                    self.prints.reset();
+                }
+                if self.selected == Some(id) {
+                    self.selected = None;
+                }
+                let ticket = self.search.refresh();
+                Task::batch([
+                    self.load_libraries(),
+                    self.run_search(ticket),
+                    self.load_lists(),
+                ])
+            }
             EngineEvent::OrganizeChanged => {
                 let ticket = self.search.refresh();
                 Task::batch([self.load_lists(), self.run_search(ticket)])

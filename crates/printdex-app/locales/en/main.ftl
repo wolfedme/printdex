@@ -199,6 +199,7 @@ sidebar-tags-fewer = Show fewer tags
 smart-never-printed = Never printed
 smart-failed-last = Failed last time
 smart-added-week = Added this week
+smart-missing = Missing
 header-tag = Tagged “{ $tag }”
 sort-collection = Collection order
 collection-rename = Rename collection

@@ -111,3 +111,100 @@ async fn symlink_to_offline_target_reports_offline() {
         Err(CoreError::LibraryOffline(_))
     ));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn vanishing_mount_mid_walk_marks_nothing_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("lib");
+    many(&root, 800);
+    let data = dir.path().join("data");
+    let fs = Arc::new(ChaosFs::new().with_latency(Duration::from_millis(1)));
+    let engine = Engine::open_with_fs(&data, &data.join("cache"), fs.clone())
+        .await
+        .unwrap();
+    let lib = engine.add_library(&root, None).await.unwrap();
+    engine
+        .rescan(lib.id, CancellationToken::new())
+        .await
+        .unwrap();
+    let before = engine.stats().await.unwrap();
+
+    // The share drops while the second scan walks.
+    let scan = tokio::spawn({
+        let engine = engine.clone();
+        async move { engine.rescan(lib.id, CancellationToken::new()).await }
+    });
+    tokio::time::sleep(Duration::from_millis(40)).await;
+    fs.unmount(&root);
+    let r = scan.await.unwrap();
+    assert!(
+        matches!(r, Err(CoreError::LibraryOffline(_))),
+        "expected offline, got {r:?}"
+    );
+    let after = engine.stats().await.unwrap();
+    assert_eq!(after.models, before.models);
+    assert_eq!(after.missing_models, 0);
+
+    // Back online: everything is still there.
+    fs.remount(&root);
+    let s = engine
+        .rescan(lib.id, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!((s.models_missing, s.models_added), (0, 0));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn flaky_reads_mark_nothing_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("lib");
+    many(&root, 400);
+    let data = dir.path().join("data");
+    let engine = Engine::open(&data).await.unwrap();
+    let lib = engine.add_library(&root, None).await.unwrap();
+    engine
+        .rescan(lib.id, CancellationToken::new())
+        .await
+        .unwrap();
+    let before = engine.stats().await.unwrap();
+    drop(engine);
+
+    // The same data, now through a share that drops one call in 13.
+    let flaky = Arc::new(ChaosFs::new().failing_every(13));
+    let engine = Engine::open_with_fs(&data, &data.join("cache"), flaky)
+        .await
+        .unwrap();
+    for _ in 0..3 {
+        match engine.rescan(lib.id, CancellationToken::new()).await {
+            Ok(s) => assert_eq!(s.models_missing, 0, "{s:?}"),
+            Err(CoreError::LibraryOffline(_)) => {}
+            Err(e) => panic!("{e}"),
+        }
+        let now = engine.stats().await.unwrap();
+        assert_eq!(now.missing_models, 0);
+        assert_eq!(now.models, before.models);
+    }
+}
+
+#[tokio::test]
+async fn offline_library_does_not_age() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("lib");
+    many(&root, 40);
+    let engine = Engine::open(&dir.path().join("data")).await.unwrap();
+    let lib = engine.add_library(&root, None).await.unwrap();
+    engine
+        .rescan(lib.id, CancellationToken::new())
+        .await
+        .unwrap();
+    // Unplugged: every scan fails as offline and changes nothing.
+    fs::rename(&root, dir.path().join("unplugged")).unwrap();
+    for _ in 0..3 {
+        assert!(matches!(
+            engine.rescan(lib.id, CancellationToken::new()).await,
+            Err(CoreError::LibraryOffline(_))
+        ));
+    }
+    let s = engine.stats().await.unwrap();
+    assert_eq!((s.models, s.missing_models), (10, 0));
+}

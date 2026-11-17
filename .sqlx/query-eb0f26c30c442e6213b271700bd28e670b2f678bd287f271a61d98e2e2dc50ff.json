@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM models\n             WHERE library_id = ? AND missing_since IS NOT NULL AND missing_since < ?\n               AND notes = '' AND source_url IS NULL\n               AND NOT EXISTS (SELECT 1 FROM model_tags t WHERE t.model_id = models.id)\n               AND NOT EXISTS (SELECT 1 FROM collection_models c WHERE c.model_id = models.id)\n               AND NOT EXISTS (SELECT 1 FROM recipes r WHERE r.model_id = models.id)\n               AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.model_id = models.id)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "eb0f26c30c442e6213b271700bd28e670b2f678bd287f271a61d98e2e2dc50ff"
+}

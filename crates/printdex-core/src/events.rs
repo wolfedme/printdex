@@ -55,6 +55,8 @@ pub enum EngineEvent {
     ModelDataChanged(ModelId),
     /// The list of tags or collections changed (names or counts).
     OrganizeChanged,
+    /// A missing model was forgotten.
+    ModelForgotten(ModelId),
     /// A scan found sidecars written by another Printdex install.
     SidecarForeign {
         library: LibraryId,

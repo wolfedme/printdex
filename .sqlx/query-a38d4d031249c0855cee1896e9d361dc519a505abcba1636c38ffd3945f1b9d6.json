@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM assets\n             WHERE library_id = ? AND missing_since IS NOT NULL AND missing_since < ?\n               AND model_id IN (SELECT id FROM models WHERE missing_since IS NULL)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "a38d4d031249c0855cee1896e9d361dc519a505abcba1636c38ffd3945f1b9d6"
+}

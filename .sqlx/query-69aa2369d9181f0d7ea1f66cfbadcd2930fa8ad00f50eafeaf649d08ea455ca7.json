@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM parts\n             WHERE library_id = ? AND missing_since IS NOT NULL AND missing_since < ?\n               AND model_id IN (SELECT id FROM models WHERE missing_since IS NULL)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "69aa2369d9181f0d7ea1f66cfbadcd2930fa8ad00f50eafeaf649d08ea455ca7"
+}

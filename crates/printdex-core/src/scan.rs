@@ -16,7 +16,7 @@ use crate::error::{CoreError, Result};
 use crate::events::{EngineEvent, ScanPhase};
 use crate::fingerprint::{Fingerprint, fingerprint_with};
 use crate::fs::Fs;
-use crate::grouping::{ModelGroup, group_models};
+use crate::grouping::{ModelGroup, Opaque, group_models_with};
 use crate::time::now_ms;
 use crate::walk::{FileEntry, FileKind, SkipReason, root_readable, walk_library};
 
@@ -313,7 +313,22 @@ async fn run_scan_with(
     if !root_readable(&*fs, &lib.path) {
         return Err(CoreError::LibraryOffline(lib.path.clone()));
     }
-    let groups = group_models(&files);
+    // Paths that could not be read this time keep their old shape in the
+    // grouping, so a flaky share never re-roots a model.
+    let opaque: Vec<Opaque> = keep
+        .iter()
+        .map(|rel| {
+            let prefix = format!("{rel}/");
+            Opaque {
+                rel_path: rel.clone(),
+                is_file: known.get(rel.as_str()).is_some_and(|k| k.is_part),
+                had_printables: known
+                    .iter()
+                    .any(|(p, k)| k.is_part && (*p == rel.as_str() || p.starts_with(&prefix))),
+            }
+        })
+        .collect();
+    let groups = group_models_with(&files, &opaque);
     let sidecar_files: Vec<(String, i64)> = files
         .iter()
         .filter(|f| f.kind == FileKind::Sidecar)
@@ -332,6 +347,13 @@ async fn run_scan_with(
         )
         .await?;
     db.set_last_full_scan(lib.id, now_ms()).await?;
+    // The scan reached the folder: rows missing longer than the grace
+    // period can go. (An offline library never gets here, so its rows
+    // never age out.)
+    let purged = db.purge_missing(lib.id, now_ms()).await?;
+    if purged != crate::db::Purged::default() {
+        tracing::info!(?purged, "forgot rows missing for over 30 days");
+    }
     for m in &stats.moved {
         tracing::info!(from = %m.from, to = %m.to, "model moved; keeping its data");
     }
