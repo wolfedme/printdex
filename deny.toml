@@ -6,11 +6,6 @@ all-features = false
 
 [advisories]
 # Defaults: vulnerabilities and unsound crates are errors.
-# Unmaintained crates fail only when we depend on them directly (decided by
-# Max, 2026-11-17). The iced stack pulls in several unmaintained crates deep
-# down (rustybuzz and ttf-parser via cosmic-text; zbus/zvariant via winit
-# theme detection and rfd; paste via wgpu) that we cannot replace ourselves.
-unmaintained = "workspace"
 ignore = [
     # SQLite < 3.54 can return stale page-cache memory when a database is
     # opened next to a crafted `-wal` file with a different page size. Needs
@@ -18,6 +13,15 @@ ignore = [
     # libsqlite3-sys 0.39, which sqlx 0.9.0 does not allow yet (<0.38).
     # Remove this once sqlx accepts libsqlite3-sys >= 0.39 (issue #23).
     { id = "RUSTSEC-2026-0459", reason = "fix needs libsqlite3-sys 0.39; blocked on sqlx; local-only attack on our own data folder" },
+    # Unmaintained (not vulnerable) crates deep in iced's tree, with no
+    # replacement we can pick ourselves. Accepted by Max 2026-11-17; review
+    # by 2026-12-15 (issue #37). Vulnerabilities in them would still fail.
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser via iced/cosmic-text font loading; no maintained replacement in iced 0.14" },
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz via iced/cosmic-text text shaping; no maintained replacement in iced 0.14" },
+    { id = "RUSTSEC-2024-0436", reason = "paste, build-time macro helper pulled in by the wgpu stack" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant folded into zbus; clears when iced/rfd move to the merged zbus" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names folded into zbus; clears when iced/rfd move to the merged zbus" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive folded into zbus; clears when iced/rfd move to the merged zbus" },
 ]
 
 [licenses]
