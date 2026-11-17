@@ -1,0 +1,20 @@
+[package]
+name = "printdex-cli"
+description = "Command line front end for the Printdex engine."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "printdex"
+path = "src/main.rs"
+
+[dependencies]
+printdex-core.workspace = true
+clap.workspace = true
+
+[lints]
+workspace = true

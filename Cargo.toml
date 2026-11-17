@@ -1,0 +1,35 @@
+[workspace]
+resolver = "3"
+members = ["crates/printdex-core", "crates/printdex-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+rust-version = "1.88"
+repository = "https://github.com/wolfedme/printdex"
+
+[workspace.dependencies]
+printdex-core = { path = "crates/printdex-core" }
+tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "sync", "signal", "fs", "time"] }
+tokio-util = "0.7"
+rayon = "1.12"
+sqlx = { version = "0.9", default-features = false, features = ["sqlite", "runtime-tokio", "macros", "migrate", "uuid"] }
+ignore = "0.4"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+uuid = { version = "1", features = ["v7"] }
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+directories = "6"
+clap = { version = "4", features = ["derive"] }
+fastrand = "2"
+dunce = "1"
+tempfile = "3"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
