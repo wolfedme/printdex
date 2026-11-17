@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/printdex-core", "crates/printdex-cli", "crates/printdex-app"]
+members = ["crates/printdex-core", "crates/printdex-cli", "crates/printdex-app", "crates/printdex-mesh", "crates/printdex-render"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +11,8 @@ repository = "https://github.com/wolfedme/printdex"
 
 [workspace.dependencies]
 printdex-core = { path = "crates/printdex-core" }
+printdex-mesh = { path = "crates/printdex-mesh" }
+printdex-render = { path = "crates/printdex-render" }
 tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "sync", "signal", "fs", "time"] }
 tokio-util = "0.7"
 rayon = "1.12"
@@ -34,6 +36,10 @@ rfd = "0.15"
 toml = "1"
 jiff = "1"
 opener = { version = "0.9", features = ["reveal"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
+quick-xml = "0.41"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+glam = "0.25"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
