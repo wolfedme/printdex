@@ -126,6 +126,7 @@ fn pane<'a>(app: &App, p: Palette, m: &GridMetrics, hit: &ModelHit) -> Element<'
             .style(move |_, _| p.bare())
             .on_press(Message::Select(id)),
     )
+    .on_double_click(Message::OpenModel(id))
     .on_enter(Message::Hover(Some(id)))
     .on_exit(Message::Hover(None))
     .into()

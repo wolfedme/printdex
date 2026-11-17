@@ -19,6 +19,7 @@ use crate::grid::GridMetrics;
 use crate::i18n::{Arg, t, t_args};
 use crate::nav::{self, Move};
 use crate::search::{SEARCH_LIMIT, SearchState, Ticket};
+use crate::settings::{Settings, ThemeMode, Translucency};
 use crate::theme::{self, ColorTheme, Mode, Palette, Surface};
 
 /// Widget ids the update logic talks to.
@@ -39,12 +40,42 @@ pub const GRID_PAD_X: f32 = theme::S7;
 /// Initial window size (the DESIGN.md mock width).
 pub const INITIAL_WINDOW: Size = Size::new(1280.0, 800.0);
 
-/// Where the engine keeps its data.
+/// Startup options from the command line and the settings file.
 #[derive(Clone, Debug)]
 pub struct Options {
     pub data_dir: PathBuf,
-    /// Fixed light/dark; `None` follows the OS.
+    /// Where `settings.toml` lives; `None` keeps settings in memory only.
+    pub config_dir: Option<PathBuf>,
+    /// One-off light/dark override (`--mode`); never saved.
     pub mode: Option<Mode>,
+    /// Settings as loaded at startup.
+    pub settings: Settings,
+    /// Whether the window was created transparent with an OS blur. Fixed
+    /// for the window's lifetime.
+    pub glass_window: bool,
+}
+
+impl Options {
+    /// Options for tests and tools: no settings file, solid window.
+    #[cfg(test)]
+    pub fn in_memory(data_dir: PathBuf) -> Options {
+        Options {
+            data_dir,
+            config_dir: None,
+            mode: None,
+            settings: Settings::default(),
+            glass_window: false,
+        }
+    }
+}
+
+/// Which screen fills the main area.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Screen {
+    #[default]
+    Library,
+    Model(ModelId),
+    Settings,
 }
 
 /// Startup state.
@@ -81,9 +112,10 @@ pub struct App {
     pub selected: Option<ModelId>,
     pub hovered: Option<ModelId>,
     pub error: Option<String>,
-    pub color_theme: ColorTheme,
-    pub surface: Surface,
-    pub mode: Mode,
+    pub screen: Screen,
+    pub settings: Settings,
+    /// The OS's light/dark preference, used when the mode is System.
+    pub system_mode: Mode,
     pub window: Size,
     pub viewport: Option<GridViewport>,
     cancel: CancellationToken,
@@ -115,12 +147,21 @@ pub enum Message {
     Escape,
     SystemMode(iced::theme::Mode),
     DismissError,
+    /// Open the selected model (Enter).
+    OpenSelected,
+    OpenModel(ModelId),
+    OpenSettings,
+    Back,
+    SettingsChanged(Settings),
+    SettingsSaved(Result<(), Arc<std::io::Error>>),
 }
 
 impl App {
     /// State before the engine is open.
     pub fn new(options: Options) -> App {
-        let mode = options.mode.unwrap_or_default();
+        let settings = options.settings;
+        let mut search = SearchState::default();
+        search.query.sort = settings.sort;
         App {
             options,
             engine: None,
@@ -128,13 +169,13 @@ impl App {
             libraries: Vec::new(),
             counts: HashMap::new(),
             scans: HashMap::new(),
-            search: SearchState::default(),
+            search,
             selected: None,
             hovered: None,
             error: None,
-            color_theme: ColorTheme::default(),
-            surface: Surface::Solid,
-            mode,
+            screen: Screen::Library,
+            settings,
+            system_mode: Mode::default(),
             window: INITIAL_WINDOW,
             viewport: None,
             cancel: CancellationToken::new(),
@@ -153,8 +194,32 @@ impl App {
         (App::new(options), Task::batch([open, mode]))
     }
 
+    /// Light or dark right now: the `--mode` override, else the setting,
+    /// else the OS.
+    pub fn mode(&self) -> Mode {
+        match (self.options.mode, self.settings.mode) {
+            (Some(m), _) => m,
+            (None, ThemeMode::Light) => Mode::Light,
+            (None, ThemeMode::Dark) => Mode::Dark,
+            (None, ThemeMode::System) => self.system_mode,
+        }
+    }
+
+    /// Glass only in a transparent window and while translucency is on.
+    pub fn surface(&self) -> Surface {
+        if self.options.glass_window && self.settings.translucency == Translucency::Auto {
+            Surface::Glass
+        } else {
+            Surface::Solid
+        }
+    }
+
+    pub fn color_theme(&self) -> ColorTheme {
+        self.settings.color_theme
+    }
+
     pub fn palette(&self) -> Palette {
-        Palette::new(self.color_theme, self.mode, self.surface)
+        Palette::new(self.color_theme(), self.mode(), self.surface())
     }
 
     pub fn title(&self) -> String {
@@ -321,6 +386,7 @@ impl App {
                 operation::focus(search_id()),
                 operation::select_all(search_id()),
             ]),
+            Message::Escape if self.screen != Screen::Library => self.update(Message::Back),
             Message::Escape => {
                 if self.search.query.text.is_empty() {
                     self.selected = None;
@@ -329,9 +395,8 @@ impl App {
                     self.update(Message::SearchChanged(String::new()))
                 }
             }
-            Message::SystemMode(_) if self.options.mode.is_some() => Task::none(),
             Message::SystemMode(mode) => {
-                self.mode = match mode {
+                self.system_mode = match mode {
                     iced::theme::Mode::Dark => Mode::Dark,
                     iced::theme::Mode::Light | iced::theme::Mode::None => Mode::Light,
                 };
@@ -341,7 +406,59 @@ impl App {
                 self.error = None;
                 Task::none()
             }
+            Message::OpenSelected => match (self.screen, self.selected) {
+                (Screen::Library, Some(id)) => self.update(Message::OpenModel(id)),
+                _ => Task::none(),
+            },
+            Message::OpenModel(id) => {
+                self.selected = Some(id);
+                self.screen = Screen::Model(id);
+                Task::none()
+            }
+            Message::OpenSettings => {
+                self.screen = Screen::Settings;
+                Task::none()
+            }
+            Message::Back => {
+                self.screen = Screen::Library;
+                Task::none()
+            }
+            Message::SettingsChanged(settings) => {
+                let old = std::mem::replace(&mut self.settings, settings);
+                let search = if old.sort == settings.sort {
+                    Task::none()
+                } else {
+                    match self.search.update(|q| q.sort = settings.sort) {
+                        Some(ticket) => self.run_search(ticket),
+                        None => Task::none(),
+                    }
+                };
+                Task::batch([search, self.save_settings()])
+            }
+            Message::SettingsSaved(Ok(())) => Task::none(),
+            Message::SettingsSaved(Err(e)) => {
+                tracing::warn!(error = %e, "could not save settings");
+                self.error = Some(t("error-settings-save"));
+                Task::none()
+            }
         }
+    }
+
+    /// Writes the settings file off the UI thread.
+    fn save_settings(&self) -> Task<Message> {
+        let Some(dir) = self.options.config_dir.clone() else {
+            return Task::none();
+        };
+        let settings = self.settings;
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || settings.save(&dir))
+                    .await
+                    .unwrap_or_else(|e| Err(std::io::Error::other(e)))
+                    .map_err(Arc::new)
+            },
+            Message::SettingsSaved,
+        )
     }
 
     fn on_engine_event(&mut self, event: EngineEvent) -> Task<Message> {
@@ -515,6 +632,8 @@ fn on_event(event: Event, status: event::Status, _window: window::Id) -> Option<
             let free = status == event::Status::Ignored;
             match key.as_ref() {
                 keyboard::Key::Named(key::Named::Escape) => Some(Message::Escape),
+                keyboard::Key::Character(",") if modifiers.command() => Some(Message::OpenSettings),
+                keyboard::Key::Named(key::Named::Enter) if free => Some(Message::OpenSelected),
                 keyboard::Key::Character("f") if modifiers.command() => Some(Message::FocusSearch),
                 keyboard::Key::Character("/") if free => Some(Message::FocusSearch),
                 keyboard::Key::Named(named) if free => match named {
@@ -563,10 +682,7 @@ mod tests {
     use printdex_core::ModelKind;
 
     fn app() -> App {
-        App::new(Options {
-            data_dir: PathBuf::from("/nonexistent"),
-            mode: None,
-        })
+        App::new(Options::in_memory(PathBuf::from("/nonexistent")))
     }
 
     fn hit(name: &str) -> ModelHit {
@@ -735,18 +851,105 @@ mod tests {
     fn follows_system_dark_mode() {
         let mut a = app();
         let _ = a.update(Message::SystemMode(iced::theme::Mode::Dark));
-        assert_eq!(a.mode, Mode::Dark);
+        assert_eq!(a.mode(), Mode::Dark);
         let _ = a.update(Message::SystemMode(iced::theme::Mode::Light));
-        assert_eq!(a.mode, Mode::Light);
+        assert_eq!(a.mode(), Mode::Light);
     }
 
     #[test]
     fn fixed_mode_ignores_system() {
         let mut a = App::new(Options {
-            data_dir: PathBuf::from("/nonexistent"),
             mode: Some(Mode::Dark),
+            ..Options::in_memory(PathBuf::from("/nonexistent"))
         });
         let _ = a.update(Message::SystemMode(iced::theme::Mode::Light));
-        assert_eq!(a.mode, Mode::Dark);
+        assert_eq!(a.mode(), Mode::Dark);
+        // The override is not a setting.
+        assert_eq!(a.settings.mode, ThemeMode::System);
+    }
+
+    #[test]
+    fn enter_opens_selected_model() {
+        let mut a = app();
+        let h = hit("orc");
+        deliver(&mut a, vec![h.clone()]);
+        let _ = a.update(Message::OpenSelected);
+        assert_eq!(a.screen, Screen::Library);
+        let _ = a.update(Message::Select(h.id));
+        let _ = a.update(Message::OpenSelected);
+        assert_eq!(a.screen, Screen::Model(h.id));
+    }
+
+    #[test]
+    fn escape_returns_to_library() {
+        let mut a = app();
+        let h = hit("orc");
+        let _ = a.update(Message::SearchChanged("orc".into()));
+        deliver(&mut a, vec![h.clone()]);
+        let _ = a.update(Message::OpenModel(h.id));
+        let _ = a.update(Message::Escape);
+        assert_eq!(a.screen, Screen::Library);
+        // Back keeps the search and the selection.
+        assert_eq!(a.search.query.text, "orc");
+        assert_eq!(a.selected, Some(h.id));
+        let _ = a.update(Message::OpenSettings);
+        let _ = a.update(Message::Escape);
+        assert_eq!(a.screen, Screen::Library);
+    }
+
+    #[test]
+    fn ctrl_comma_opens_settings() {
+        let event = Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Character(",".into()),
+            modified_key: keyboard::Key::Character(",".into()),
+            physical_key: key::Physical::Code(key::Code::Comma),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::COMMAND,
+            text: None,
+            repeat: false,
+        });
+        let msg = on_event(event, event::Status::Ignored, window::Id::unique());
+        assert!(matches!(msg, Some(Message::OpenSettings)));
+    }
+
+    #[test]
+    fn settings_mode_wins_over_system() {
+        let mut a = app();
+        let _ = a.update(Message::SystemMode(iced::theme::Mode::Dark));
+        let s = Settings {
+            mode: ThemeMode::Light,
+            ..a.settings
+        };
+        let _ = a.update(Message::SettingsChanged(s));
+        assert_eq!(a.mode(), Mode::Light);
+    }
+
+    #[test]
+    fn changing_sort_reruns_search() {
+        let mut a = app();
+        deliver(&mut a, vec![]);
+        let s = Settings {
+            sort: printdex_core::SortOrder::RecentlyAdded,
+            ..a.settings
+        };
+        let _ = a.update(Message::SettingsChanged(s));
+        assert!(a.search.loading);
+        assert_eq!(a.search.query.sort, printdex_core::SortOrder::RecentlyAdded);
+    }
+
+    #[test]
+    fn glass_needs_transparent_window_and_translucency() {
+        let mut a = App::new(Options {
+            glass_window: true,
+            ..Options::in_memory(PathBuf::from("/nonexistent"))
+        });
+        assert_eq!(a.surface(), Surface::Glass);
+        let s = Settings {
+            translucency: Translucency::Off,
+            ..a.settings
+        };
+        let _ = a.update(Message::SettingsChanged(s));
+        assert_eq!(a.surface(), Surface::Solid);
+        assert_eq!(app().surface(), Surface::Solid);
     }
 }

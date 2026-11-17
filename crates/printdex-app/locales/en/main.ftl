@@ -44,3 +44,4 @@ error-library-invalid = That folder can’t be added. Pick a folder that exists 
 error-library-offline = The library folder at { $path } can’t be reached.
 error-already-scanning = This library is already being scanned.
 error-other = Something went wrong. Details are in the log.
+error-settings-save = Your settings couldn’t be saved. Details are in the log.
