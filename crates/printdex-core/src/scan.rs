@@ -487,7 +487,11 @@ mod tests {
         }
         let r = scan_library(&f.db, &f.lib, &f.tx, CancellationToken::new()).await;
         assert!(matches!(r, Err(CoreError::LibraryOffline(_))), "{r:?}");
-        assert_eq!(f.count("SELECT count(*) FROM models WHERE missing_since IS NOT NULL").await, 0);
+        assert_eq!(
+            f.count("SELECT count(*) FROM models WHERE missing_since IS NOT NULL")
+                .await,
+            0
+        );
     }
 
     #[test]

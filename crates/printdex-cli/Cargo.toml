@@ -14,7 +14,16 @@ path = "src/main.rs"
 
 [dependencies]
 printdex-core.workspace = true
+anyhow.workspace = true
 clap.workspace = true
+fastrand.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true
