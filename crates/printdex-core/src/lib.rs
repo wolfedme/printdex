@@ -6,6 +6,7 @@
 pub mod cpu;
 pub mod error;
 pub mod fingerprint;
+pub mod grouping;
 pub mod ids;
 pub mod time;
 pub mod walk;
