@@ -22,6 +22,7 @@ use crate::i18n::{Arg, t, t_args};
 use crate::motion::Motion;
 use crate::nav::{self, Move};
 use crate::org::{Org, OrgState};
+use crate::prints::{Pr, PrintsUi};
 use crate::search::{SEARCH_LIMIT, SearchState, Ticket};
 use crate::settings::{Settings, ThemeMode, Translucency, ViewMode};
 use crate::theme::{self, ColorTheme, Mode, Palette, Surface};
@@ -183,6 +184,8 @@ pub struct App {
     pub clearing_cache: bool,
     /// Tags, collections, notes and source of the open model.
     pub org: OrgState,
+    /// Recipe editor, print log and the "Log a print" form.
+    pub prints: PrintsUi,
     cancel: CancellationToken,
     started: std::time::Instant,
 }
@@ -201,6 +204,9 @@ pub enum Message {
     /// A sort picked inside a collection (not saved).
     QuerySort(SortOrder),
     Org(Org),
+    Prints(Pr),
+    /// Ctrl+Enter: saves whatever is being edited.
+    SaveShortcut,
     PickLibrary,
     LibraryPicked(Option<PathBuf>),
     LibraryAdded(Result<Library, Arc<CoreError>>),
@@ -294,6 +300,7 @@ impl App {
             cache_usage: None,
             clearing_cache: false,
             org: OrgState::default(),
+            prints: PrintsUi::default(),
             cancel: CancellationToken::new(),
             started: std::time::Instant::now(),
         }
@@ -525,6 +532,16 @@ impl App {
                 None => Task::none(),
             },
             Message::Org(msg) => self.handle_org(msg),
+            Message::Prints(msg) => self.handle_prints(msg),
+            Message::SaveShortcut => {
+                if self.prints.form.is_some() {
+                    self.update(Message::Prints(Pr::Save))
+                } else if self.prints.note_for.is_some() {
+                    self.update(Message::Prints(Pr::CommitNote))
+                } else {
+                    self.update(Message::Org(Org::SaveNotes))
+                }
+            }
             Message::SearchChanged(text) => match self.search.update(|q| q.text = text) {
                 Some(ticket) => self.run_search(ticket),
                 None => Task::none(),
@@ -546,6 +563,7 @@ impl App {
                 self.screen = Screen::Library;
                 self.model = None;
                 self.org.cancel_edits();
+                self.prints.reset();
                 self.set_scope(scope)
             }
             Message::PickLibrary => Task::perform(
@@ -640,6 +658,16 @@ impl App {
                 operation::focus(search_id()),
                 operation::select_all(search_id()),
             ]),
+            Message::Escape if self.prints.open() => {
+                if self.prints.form.is_some() {
+                    self.prints.form = None;
+                    self.prints.saving = false;
+                } else {
+                    self.prints.confirm_delete = None;
+                    self.prints.note_for = None;
+                }
+                Task::none()
+            }
             Message::Escape if self.org.editing() => self.update(Message::Org(Org::Cancel)),
             Message::Escape if self.org.notice.is_some() && self.screen == Screen::Library => {
                 self.org.notice = None;
@@ -823,6 +851,7 @@ impl App {
                 self.screen = Screen::Model(id);
                 self.model = Some(ModelView::Loading(id));
                 self.org.cancel_edits();
+                self.prints.reset();
                 if self.org.data.as_ref().is_some_and(|(m, _)| *m != id) {
                     self.org.data = None;
                     self.org.notes_md.clear();
@@ -886,6 +915,7 @@ impl App {
                 self.screen = Screen::Library;
                 self.model = None;
                 self.org.cancel_edits();
+                self.prints.reset();
                 Task::none()
             }
             Message::SettingsChanged(settings) => {
@@ -1096,7 +1126,8 @@ impl App {
                 } else {
                     Task::none()
                 };
-                Task::batch([self.run_search(ticket), data])
+                // Smart filter counts follow the print log.
+                Task::batch([self.run_search(ticket), data, self.load_lists()])
             }
             EngineEvent::OrganizeChanged => {
                 let ticket = self.search.refresh();
@@ -1323,13 +1354,16 @@ pub fn error_text(e: &CoreError) -> String {
 fn on_event(event: Event, status: event::Status, _window: window::Id) -> Option<Message> {
     match event {
         Event::Window(window::Event::Resized(size)) => Some(Message::WindowResized(size)),
+        Event::Window(window::Event::FileDropped(path)) => {
+            Some(Message::Prints(Pr::FileDropped(path)))
+        }
         Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
             let free = status == event::Status::Ignored;
             match key.as_ref() {
                 keyboard::Key::Named(key::Named::Escape) => Some(Message::Escape),
                 keyboard::Key::Character(",") if modifiers.command() => Some(Message::OpenSettings),
                 keyboard::Key::Named(key::Named::Enter) if modifiers.command() => {
-                    Some(Message::Org(Org::SaveNotes))
+                    Some(Message::SaveShortcut)
                 }
                 keyboard::Key::Named(key::Named::Enter) if free => Some(Message::OpenSelected),
                 keyboard::Key::Character("o") if free && !modifiers.command() => {
@@ -1341,6 +1375,9 @@ fn on_event(event: Event, status: event::Status, _window: window::Id) -> Option<
                 }
                 keyboard::Key::Character("n") if free && !modifiers.command() => {
                     Some(Message::Org(Org::StartNotes))
+                }
+                keyboard::Key::Character("l") if free && !modifiers.command() => {
+                    Some(Message::Prints(Pr::OpenLog))
                 }
                 keyboard::Key::Character("/") if free => Some(Message::FocusSearch),
                 keyboard::Key::Named(named) if free => match named {
@@ -2214,5 +2251,159 @@ mod tests {
         let _ = a.update(Message::SettingsChanged(s));
         assert_eq!(a.surface(), Surface::Solid);
         assert_eq!(app().surface(), Surface::Solid);
+    }
+
+    fn key(c: &str, modifiers: keyboard::Modifiers) -> Option<Message> {
+        let event = Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Character(c.into()),
+            modified_key: keyboard::Key::Character(c.into()),
+            physical_key: key::Physical::Code(key::Code::KeyL),
+            location: keyboard::Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        });
+        on_event(event, event::Status::Ignored, window::Id::unique())
+    }
+
+    fn petg_data() -> printdex_core::ModelData {
+        use printdex_core::{Material, PrintSettings, Recipe};
+        printdex_core::ModelData {
+            recipe: Some(Recipe {
+                settings: PrintSettings {
+                    material: Some(Material::Petg),
+                    layer_mm: Some(0.2),
+                    printer: Some("Prusa MK4".into()),
+                    ..PrintSettings::default()
+                },
+                ..Recipe::default()
+            }),
+            ..printdex_core::ModelData::default()
+        }
+    }
+
+    /// An app showing a model whose recipe is PETG at 0.20 mm.
+    fn model_open(a: &mut App) -> ModelId {
+        let id = ModelId::new();
+        let _ = a.update(Message::OpenModel(id));
+        let _ = a.update(Message::ModelLoaded(id, Ok(Some(detail(id, &["a.stl"])))));
+        let _ = a.update(Message::Org(crate::org::Org::DataLoaded(
+            id,
+            Ok(Some(Box::new(petg_data()))),
+        )));
+        id
+    }
+
+    #[test]
+    fn l_opens_log_form() {
+        assert!(matches!(
+            key("l", keyboard::Modifiers::empty()),
+            Some(Message::Prints(Pr::OpenLog))
+        ));
+        let mut a = app();
+        model_open(&mut a);
+        let _ = a.update(Message::Prints(Pr::OpenLog));
+        let f = a.prints.form.as_ref().expect("form open");
+        assert_eq!(f.mode, crate::log_form::FormMode::Log);
+        assert!(f.prefilled);
+        assert_eq!(f.material, "PETG");
+        assert_eq!(f.layer, "0.20");
+    }
+
+    #[test]
+    fn l_does_nothing_in_the_library() {
+        let mut a = app();
+        let _ = a.update(Message::Prints(Pr::OpenLog));
+        assert!(a.prints.form.is_none());
+    }
+
+    #[test]
+    fn cancel_discards() {
+        let mut a = app();
+        model_open(&mut a);
+        let _ = a.update(Message::Prints(Pr::OpenLog));
+        let _ = a.update(Message::Prints(Pr::Input(
+            crate::prints::Input::Printer,
+            "Voron".into(),
+        )));
+        // Esc closes the form first, and stays in the model view.
+        let _ = a.update(Message::Escape);
+        assert!(a.prints.form.is_none());
+        assert!(matches!(a.screen, Screen::Model(_)));
+        let _ = a.update(Message::Prints(Pr::OpenLog));
+        assert_eq!(a.prints.form.as_ref().unwrap().printer, "Prusa MK4");
+    }
+
+    #[tokio::test]
+    async fn ctrl_enter_saves_attempt() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open(dir.path()).await.unwrap();
+        let mut a = app();
+        let _ = a.update(Message::Booted(Ok(engine)));
+        model_open(&mut a);
+        let _ = a.update(Message::Prints(Pr::OpenLog));
+        let _ = a.update(Message::SaveShortcut);
+        assert!(a.prints.saving, "save dispatched");
+        // A second Ctrl+Enter while saving does nothing.
+        let _ = a.update(Message::SaveShortcut);
+        assert!(a.prints.saving);
+    }
+
+    #[tokio::test]
+    async fn invalid_form_shows_error_and_stays_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open(dir.path()).await.unwrap();
+        let mut a = app();
+        let _ = a.update(Message::Booted(Ok(engine)));
+        model_open(&mut a);
+        let _ = a.update(Message::Prints(Pr::OpenLog));
+        let _ = a.update(Message::Prints(Pr::Input(
+            crate::prints::Input::Bed,
+            "180".into(),
+        )));
+        let _ = a.update(Message::SaveShortcut);
+        assert!(!a.prints.saving);
+        let f = a.prints.form.as_ref().unwrap();
+        assert!(crate::prints::has_error(f, crate::log_form::Field::Bed));
+    }
+
+    #[tokio::test]
+    async fn save_closes_form_and_reloads() {
+        let mut a = app();
+        model_open(&mut a);
+        let _ = a.update(Message::Prints(Pr::OpenLog));
+        let attempt = printdex_core::AttemptId::new();
+        let _ = a.update(Message::Prints(Pr::Saved(Ok(Some((attempt, 4))))));
+        assert!(a.prints.form.is_none());
+        assert_eq!(a.prints.fresh, Some(attempt));
+        assert_eq!(a.prints.toast.as_deref(), Some("Attempt 4 saved"));
+    }
+
+    #[test]
+    fn dropped_image_attaches_photo() {
+        let mut a = app();
+        model_open(&mut a);
+        // Nothing to attach to without the form.
+        let _ = a.update(Message::Prints(Pr::FileDropped("/tmp/a.png".into())));
+        assert!(a.prints.form.is_none());
+        let _ = a.update(Message::Prints(Pr::OpenLog));
+        let _ = a.update(Message::Prints(Pr::FileDropped("/tmp/a.png".into())));
+        let _ = a.update(Message::Prints(Pr::FileDropped("/tmp/model.stl".into())));
+        assert_eq!(
+            a.prints.form.as_ref().unwrap().photos,
+            vec![PathBuf::from("/tmp/a.png")]
+        );
+    }
+
+    #[test]
+    fn material_chip_filters() {
+        use crate::filters::MatChip;
+        let mut a = app();
+        let _ = a.update(Message::ToggleChip(Chip::Material(MatChip::Petg)));
+        assert_eq!(
+            a.search.query.filter.materials,
+            vec![printdex_core::Material::Petg]
+        );
+        assert!(a.search.loading);
     }
 }

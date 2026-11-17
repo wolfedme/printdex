@@ -26,10 +26,8 @@ pub fn parse_number_query(input: &str) -> Option<NumberQuery> {
         (r, true)
     } else if let Some(r) = s.strip_prefix('#') {
         (r, true)
-    } else if lower.starts_with("no.") {
-        (&s[3..], true)
-    } else if lower.starts_with("no ") {
-        (&s[3..], true)
+    } else if lower.starts_with("no.") || lower.starts_with("no ") {
+        (s.get(3..).unwrap_or_default(), true)
     } else {
         (s, false)
     };

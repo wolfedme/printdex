@@ -9,6 +9,7 @@ use printdex_core::{
 
 use super::organize;
 use super::preview::{self, Look};
+use super::prints;
 use super::statusbar::hint;
 use super::viewer::{self, Scene};
 use super::widgets::{self, date, icon_button};
@@ -117,6 +118,23 @@ fn preview_well<'a>(app: &'a App, p: Palette, pt: &PartInfo) -> (Element<'a, Mes
     (layers.into(), true)
 }
 
+/// The primary "Log a print" button in the header.
+fn log_button<'a>(p: Palette, enabled: bool) -> Element<'a, Message> {
+    button(
+        row![
+            icons::icon(Icon::LogPrint, theme::ICON, p.t.on_primary),
+            text(t("log-a-print")).size(theme::SIZE_BODY),
+        ]
+        .spacing(7)
+        .align_y(Alignment::Center),
+    )
+    .height(theme::CONTROL_HEIGHT)
+    .padding([8.0, theme::S5])
+    .style(move |_, status| p.button_primary(status))
+    .on_press_maybe(enabled.then_some(Message::Prints(crate::prints::Pr::OpenLog)))
+    .into()
+}
+
 fn note<'a>(p: Palette, s: String) -> Element<'a, Message> {
     text(s)
         .size(theme::SIZE_DATA)
@@ -195,6 +213,7 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
                     Palette::button_secondary,
                     open
                 ),
+                log_button(p, app.prints.form.is_none()),
             ]
             .spacing(theme::S4)
             .align_y(Alignment::Center),
@@ -336,14 +355,27 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
     .padding(theme::S6)
     .width(SIDE_WIDTH)
     .style(move |_| p.pane(false, false));
+    let data = app
+        .org
+        .data
+        .as_ref()
+        .filter(|(id, _)| *id == d.id)
+        .map(|(_, data)| data);
+    let mut side = column![].spacing(theme::S6).width(SIDE_WIDTH);
+    side = match (&app.prints.form, data) {
+        (Some(f), _) => side.push(prints::form(app, p, f)),
+        (None, Some(data)) => side
+            .push(prints::recipe_card(p, data))
+            .push(organize)
+            .push(prints::print_log(app, p, data))
+            .push(details),
+        (None, None) => side.push(organize).push(details),
+    };
 
     let body = scrollable(
-        row![
-            main.width(Length::Fill),
-            column![organize, details].spacing(theme::S6)
-        ]
-        .spacing(theme::S8)
-        .padding([theme::S8, theme::S8]),
+        row![main.width(Length::Fill), side]
+            .spacing(theme::S8)
+            .padding([theme::S8, theme::S8]),
     )
     .height(Length::Fill)
     .style(move |_, status| p.scrollbar(status));
@@ -355,6 +387,7 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
             hint(p, "O", t("status-key-open-file")),
             hint(p, "T", t("status-key-tag")),
             hint(p, "N", t("status-key-notes")),
+            hint(p, "L", t("status-key-log")),
             text(t("status-key-turn"))
                 .size(theme::SIZE_CAPTION)
                 .color(p.n.ink_3),
@@ -377,9 +410,21 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
     column![
         header,
         widgets::hairline(p),
-        container(body)
-            .height(Length::Fill)
-            .style(move |_| p.ground()),
+        stack![
+            container(body)
+                .height(Length::Fill)
+                .style(move |_| p.ground()),
+            // "Attempt 4 saved" floats over the bottom of the side column.
+            match app.prints.toast.as_deref() {
+                Some(m) => container(container(prints::toast(p, m)).width(SIDE_WIDTH))
+                    .padding(theme::S8)
+                    .align_bottom(Length::Fill)
+                    .align_right(Length::Fill)
+                    .into(),
+                None => Element::from(Space::new()),
+            },
+        ]
+        .height(Length::Fill),
         widgets::hairline(p),
         status,
     ]

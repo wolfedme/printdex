@@ -237,3 +237,86 @@ error-collection-exists = A collection with that name already exists.
 error-collection-name = Collection names can’t be empty or longer than 80 characters.
 error-tag-invalid = Tags can’t be empty or longer than 64 characters.
 error-text-too-long = That text is too long to save.
+action-close = Close
+status-key-log = Log a print
+outcome-success = Success
+outcome-partial = Partial
+outcome-failed = Failed
+supports-none = None
+supports-normal = Normal
+supports-tree = Tree
+adhesion-none = None
+adhesion-skirt = Skirt
+adhesion-brim = Brim
+adhesion-raft = Raft
+recipe-title = Recipe
+recipe-empty = No recipe yet. Write down the settings that work, or save one from a successful print.
+recipe-write = Write recipe
+recipe-edit = Edit recipe
+recipe-from = from attempt { $n } · { $date }
+recipe-required = Must match: { $fields }
+recipe-orientation = Orientation
+log-title = Print log
+log-count = { $count ->
+    [one] { $n } attempt
+   *[other] { $n } attempts
+}
+log-a-print = Log a print
+log-edit-title = Edit attempt
+log-empty = Nothing printed yet. Log a print to remember what worked and what didn’t.
+log-attempt = Attempt { $n }
+log-show-earlier = { $count ->
+    [one] Show { $n } earlier attempt
+   *[other] Show { $n } earlier attempts
+}
+log-show-fewer = Show fewer
+log-recipe-from-this = The recipe comes from this attempt.
+log-save-recipe = Save as recipe
+log-add-as-note = Add as note
+log-add-note = Add note
+log-note-placeholder = What to remember next time
+log-note-hint = Added to the recipe notes for { $material ->
+    [none] every material
+   *[other] { $material }
+}.
+log-edit = Edit attempt
+log-delete = Delete attempt
+log-delete-confirm = Delete this attempt and its photos?
+log-saved = Attempt { $n } saved
+form-outcome = Outcome
+form-prefilled = Filled in from the recipe. Change what you did differently.
+form-printer = Printer
+form-date = Date
+form-material = Material
+form-filament = Filament
+form-layer = Layer
+form-nozzle = Nozzle
+form-infill = Infill
+form-bed = Bed
+form-hotend = Hotend
+form-walls = Walls
+form-supports = Supports
+form-adhesion = Adhesion
+form-unset = Not set
+form-duration = Print time
+form-notes = Notes
+form-what-went-wrong = What went wrong
+form-photo-add = Add photos, or drop them here
+form-photo-pick = Choose photos
+form-photo-filter = Images
+form-required = Must match next time
+form-recipe-notes = Notes
+form-new-note = Add a note and press Enter
+form-remove-note = Remove note
+form-save-attempt = Save attempt
+form-key-save = Save
+form-error-range = { $field } must be between { $min } and { $max }.
+form-error-number = { $field } must be a number.
+form-error-duration = Write the print time like 2h 15m, or in minutes.
+form-error-date = Use a date like 2026-11-17, today or earlier.
+form-error-photo = That photo can’t be added. Use PNG, JPEG or WebP.
+card-supports = Supports
+card-never-printed = Never printed
+card-printed = Printed { $n }×
+list-last-print = Last print
+filter-material = Material

@@ -16,6 +16,7 @@ const THUMB_COLUMN: f32 = 64.0;
 const PARTS_COLUMN: f32 = 72.0;
 const NUMBER_COLUMN: f32 = 64.0;
 const ADDED_COLUMN: f32 = 112.0;
+const STATUS_COLUMN: f32 = 200.0;
 
 pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     let hits = &app.search.hits;
@@ -35,6 +36,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
             heading(p, "№".to_owned()).width(NUMBER_COLUMN),
             heading(p, t("list-folder")).width(Length::FillPortion(3)),
             heading(p, t("list-parts")).width(PARTS_COLUMN),
+            heading(p, t("list-last-print")).width(STATUS_COLUMN),
             heading(p, t("list-added")).width(ADDED_COLUMN),
         ]
         .spacing(theme::S5)
@@ -112,6 +114,9 @@ fn list_row<'a>(app: &App, p: Palette, hit: &ModelHit) -> Element<'a, Message> {
             .size(theme::SIZE_BODY)
             .font(theme::FONT_MEDIUM)
             .width(PARTS_COLUMN),
+        container(super::prints::status_line(p, hit.last_print.as_ref()))
+            .width(STATUS_COLUMN)
+            .clip(true),
         text(date(hit.created_at))
             .size(theme::SIZE_BODY)
             .color(p.n.ink_2)
