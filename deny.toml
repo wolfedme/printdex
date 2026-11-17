@@ -6,6 +6,11 @@ all-features = false
 
 [advisories]
 # Defaults: vulnerabilities and unsound crates are errors.
+# Unmaintained crates fail only when we depend on them directly (decided by
+# Max, 2026-11-17). The iced stack pulls in several unmaintained crates deep
+# down (rustybuzz and ttf-parser via cosmic-text; zbus/zvariant via winit
+# theme detection and rfd; paste via wgpu) that we cannot replace ourselves.
+unmaintained = "workspace"
 ignore = [
     # SQLite < 3.54 can return stale page-cache memory when a database is
     # opened next to a crafted `-wal` file with a different page size. Needs
