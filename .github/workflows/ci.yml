@@ -49,3 +49,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  bench-smoke:
+    name: bench smoke (20k parts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate library
+        run: cargo run --release -p printdex-cli -- bench gen "$RUNNER_TEMP/lib" --parts 20000
+      - name: Benchmark
+        # Fails only when an unchanged rescan reads file contents (exit 2).
+        # Timings are reported, not enforced: shared runners are too noisy.
+        run: |
+          set -o pipefail
+          echo '### printdex bench (20k parts)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cargo run --release -p printdex-cli -- bench run "$RUNNER_TEMP/lib" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
