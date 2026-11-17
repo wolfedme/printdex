@@ -2,7 +2,7 @@
 
 use iced::widget::{Space, button, column, container, mouse_area, row, scrollable, stack, text};
 use iced::{Alignment, Element, Length};
-use printdex_core::ModelHit;
+use printdex_core::{ModelHit, ThumbTarget};
 
 use crate::app::{App, GRID_PAD_X, GRID_PAD_Y, GridViewport, Message, grid_id};
 use crate::format::{group, parent_path};
@@ -10,6 +10,8 @@ use crate::grid::{COLUMN_GAP, GridMetrics, PANE_PADDING, ROW_GAP};
 use crate::i18n::{Arg, t_args};
 use crate::icons::{self, Icon};
 use crate::theme::{self, Palette};
+
+use super::preview::{Look, preview};
 
 pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     let m = app.metrics();
@@ -58,11 +60,15 @@ fn pane<'a>(app: &App, p: Palette, m: &GridMetrics, hit: &ModelHit) -> Element<'
     let inner_h = (m.well_height - 2.0 * theme::S5).max(0.0);
 
     let mut well = stack![
-        container(icons::placeholder_lifted(
-            inner_w,
-            inner_h,
-            motion.lift(hit.id),
-            motion.shadow_scale(hit.id),
+        container(preview(
+            app,
+            p,
+            ThumbTarget::Model(hit.id),
+            Look {
+                lift: motion.lift(hit.id),
+                shadow: motion.shadow_scale(hit.id),
+                ..Look::still(inner_w, inner_h).labelled()
+            },
         ))
         .padding(theme::S5)
         .width(Length::Fill)

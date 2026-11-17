@@ -75,6 +75,27 @@ pub fn placeholder_lifted<'a, M: 'a>(
     lift: f32,
     shadow_scale: f32,
 ) -> Element<'a, M> {
+    on_bed(width, height, lift, shadow_scale, |w, h| {
+        Svg::new(svg::Handle::from_memory(
+            include_bytes!("../assets/placeholder-model.svg").as_slice(),
+        ))
+        .width(w)
+        .height(h)
+        .into()
+    })
+}
+
+/// A 4:3 model picture fitted into a `width` × `height` box over its
+/// contact shadow, lifted `lift` px, the shadow scaled by `shadow_scale`.
+/// Rendered thumbnails and the placeholder share this geometry: the
+/// model's lowest point sits 80% down, where the shadow is.
+pub fn on_bed<'a, M: 'a>(
+    width: f32,
+    height: f32,
+    lift: f32,
+    shadow_scale: f32,
+    model: impl FnOnce(f32, f32) -> Element<'a, M>,
+) -> Element<'a, M> {
     let fit = (width / PLACEHOLDER_W).min(height / PLACEHOLDER_H).max(0.0);
     let (w, h) = (PLACEHOLDER_W * fit, PLACEHOLDER_H * fit);
     let (x, y) = ((width - w) / 2.0, (height - h) / 2.0);
@@ -85,14 +106,9 @@ pub fn placeholder_lifted<'a, M: 'a>(
     .content_fit(ContentFit::Fill)
     .width(sw)
     .height(h);
-    let model = Svg::new(svg::Handle::from_memory(
-        include_bytes!("../assets/placeholder-model.svg").as_slice(),
-    ))
-    .width(w)
-    .height(h);
     stack![
         pin(shadow).x(x + (w - sw) / 2.0).y(y),
-        pin(model).x(x).y(y - lift),
+        pin(model(w, h)).x(x).y(y - lift),
     ]
     .width(width)
     .height(height)

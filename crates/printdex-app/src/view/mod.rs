@@ -4,6 +4,7 @@ mod empty;
 mod grid;
 mod list;
 mod model;
+mod preview;
 mod settings;
 mod sidebar;
 mod statusbar;

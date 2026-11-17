@@ -12,6 +12,7 @@ mod nav;
 mod search;
 mod settings;
 mod theme;
+mod thumbs;
 mod view;
 
 use std::path::PathBuf;
@@ -27,6 +28,10 @@ struct Cli {
     /// Folder for Printdex's database (defaults to the OS data folder).
     #[arg(long)]
     data_dir: Option<PathBuf>,
+    /// Folder for caches such as thumbnails (defaults to the OS cache
+    /// folder, or `cache` inside --data-dir when that is given).
+    #[arg(long)]
+    cache_dir: Option<PathBuf>,
     /// Folder for settings.toml (defaults to the OS config folder).
     #[arg(long)]
     config_dir: Option<PathBuf>,
@@ -50,6 +55,12 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
+    let cache_dir = match (&cli.cache_dir, &cli.data_dir) {
+        (Some(c), _) => c.clone(),
+        (None, Some(d)) => d.join("cache"),
+        (None, None) => printdex_core::Engine::default_cache_dir()
+            .context("no cache folder for this user; pass --cache-dir")?,
+    };
     let data_dir = match cli.data_dir {
         Some(d) => d,
         None => printdex_core::Engine::default_data_dir()
@@ -66,6 +77,7 @@ fn main() -> anyhow::Result<()> {
         settings.translucency == settings::Translucency::Auto && theme::blur_supported();
     let options = Options {
         data_dir,
+        cache_dir,
         config_dir,
         settings,
         glass_window,

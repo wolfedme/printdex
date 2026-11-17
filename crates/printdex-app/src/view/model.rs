@@ -2,8 +2,9 @@
 
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Element, Length};
-use printdex_core::{ModelDetail, ModelKind, PartInfo, PrintableFormat};
+use printdex_core::{ModelDetail, ModelKind, PartInfo, PrintableFormat, ThumbTarget};
 
+use super::preview::{self, Look};
 use super::statusbar::hint;
 use super::widgets::{self, date, icon_button};
 use crate::app::{App, Message, ModelView};
@@ -16,6 +17,8 @@ use crate::theme::{self, Palette};
 const SIDE_WIDTH: f32 = 384.0;
 /// Height of the large preview well.
 const PREVIEW_HEIGHT: f32 = 340.0;
+/// Width of the preview inside the well (4:3 of its inner height).
+const PREVIEW_WIDTH: f32 = (PREVIEW_HEIGHT - 2.0 * theme::S9) * 4.0 / 3.0;
 const TILE_WIDTH: f32 = 112.0;
 const TILE_WELL: f32 = 76.0;
 
@@ -28,6 +31,15 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
             .height(Length::Fill)
             .style(move |_| p.ground())
             .into(),
+    }
+}
+
+/// A length in mm for the dimension readout: one decimal below 100 mm.
+fn mm(v: f32) -> String {
+    if v < 100.0 {
+        format!("{v:.1}")
+    } else {
+        format!("{v:.0}")
     }
 }
 
@@ -101,18 +113,43 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
 
     // Main column: preview, parts, other files.
     let caption = current.map_or_else(String::new, |pt| {
-        format!(
-            "{} · {} · {}",
-            file_name(&pt.rel_path),
+        let mut parts = vec![
+            file_name(&pt.rel_path).to_owned(),
             size(pt.size),
-            format_label(pt.format)
-        )
+            format_label(pt.format).to_owned(),
+        ];
+        if let Some([x, y, z]) = pt.dims {
+            parts.push(t_args(
+                "model-measured",
+                &[
+                    ("x", Arg::str(mm(x))),
+                    ("y", Arg::str(mm(y))),
+                    ("z", Arg::str(mm(z))),
+                ],
+            ));
+        }
+        if let Some(n) = pt.triangles {
+            parts.push(t_args(
+                "model-triangles",
+                &[("count", Arg::count(n)), ("n", Arg::str(group(n)))],
+            ));
+        }
+        parts.join(" · ")
     });
+    let well: Element<'a, Message> = match current {
+        Some(pt) => preview::preview(
+            app,
+            p,
+            ThumbTarget::Part(pt.id),
+            Look::still(PREVIEW_WIDTH, PREVIEW_HEIGHT - 2.0 * theme::S9).labelled(),
+        ),
+        None => icons::placeholder().into(),
+    };
     let preview = container(
         column![
-            container(icons::placeholder())
+            container(well)
                 .padding(theme::S9)
-                .width(Length::Fill)
+                .center_x(Length::Fill)
                 .height(PREVIEW_HEIGHT)
                 .style(move |_| p.well()),
             text(caption)
@@ -129,7 +166,7 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
     let n = d.parts.len() as u64;
     let mut tiles = row![].spacing(theme::S4);
     for (i, pt) in d.parts.iter().enumerate() {
-        tiles = tiles.push(tile(p, pt, app.motion.part(i, part), i));
+        tiles = tiles.push(tile(app, p, pt, app.motion.part(i, part), i));
     }
     let mut main = column![
         preview,
@@ -233,13 +270,25 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
     .into()
 }
 
-fn tile<'a>(p: Palette, pt: &PartInfo, selected: f32, index: usize) -> Element<'a, Message> {
+fn tile<'a>(
+    app: &App,
+    p: Palette,
+    pt: &PartInfo,
+    selected: f32,
+    index: usize,
+) -> Element<'a, Message> {
+    let inner = TILE_WIDTH - 2.0 * theme::S3 - 2.0 * theme::S4;
     let body = column![
-        container(icons::placeholder())
-            .padding(theme::S4)
-            .width(Length::Fill)
-            .height(TILE_WELL)
-            .style(move |_| p.well()),
+        container(preview::preview(
+            app,
+            p,
+            ThumbTarget::Part(pt.id),
+            Look::still(inner, TILE_WELL - 2.0 * theme::S4),
+        ))
+        .padding(theme::S4)
+        .width(Length::Fill)
+        .height(TILE_WELL)
+        .style(move |_| p.well()),
         container(
             text(file_name(&pt.rel_path).to_owned())
                 .size(theme::SIZE_CAPTION)
