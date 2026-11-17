@@ -122,6 +122,32 @@ impl Db {
         .ok_or(CoreError::LibraryNotFound(id))
     }
 
+    /// Deletes library `id` and, by cascade, its models, parts and assets.
+    /// Returns whether a row was deleted. Never touches files.
+    pub async fn delete_library(&self, id: LibraryId) -> Result<bool> {
+        let r = sqlx::query!("DELETE FROM libraries WHERE id = ?", id)
+            .execute(self.writer())
+            .await?;
+        Ok(r.rows_affected() > 0)
+    }
+
+    /// Sets the display name of library `id`.
+    pub async fn rename_library(&self, id: LibraryId, name: &str) -> Result<()> {
+        let now = now_ms();
+        let r = sqlx::query!(
+            "UPDATE libraries SET display_name = ?, updated_at = ? WHERE id = ?",
+            name,
+            now,
+            id
+        )
+        .execute(self.writer())
+        .await?;
+        if r.rows_affected() == 0 {
+            return Err(CoreError::LibraryNotFound(id));
+        }
+        Ok(())
+    }
+
     /// Records when a full scan of `id` finished.
     pub async fn set_last_full_scan(&self, id: LibraryId, at_ms: i64) -> Result<()> {
         let now = now_ms();
@@ -190,6 +216,21 @@ mod tests {
         assert_eq!(db.library(l.id).await.unwrap(), l);
         db.set_last_full_scan(l.id, 99).await.unwrap();
         assert_eq!(db.library(l.id).await.unwrap().last_full_scan_at, Some(99));
+    }
+
+    #[tokio::test]
+    async fn delete_and_rename_library() {
+        let (_d, db) = open().await;
+        let a = lib("/a");
+        db.insert_library(&a).await.unwrap();
+        db.rename_library(a.id, "Workshop").await.unwrap();
+        assert_eq!(db.library(a.id).await.unwrap().display_name, "Workshop");
+        assert!(db.delete_library(a.id).await.unwrap());
+        assert!(!db.delete_library(a.id).await.unwrap());
+        assert!(matches!(
+            db.rename_library(a.id, "x").await,
+            Err(CoreError::LibraryNotFound(_))
+        ));
     }
 
     #[tokio::test]

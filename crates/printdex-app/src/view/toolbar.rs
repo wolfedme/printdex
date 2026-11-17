@@ -11,12 +11,12 @@ use crate::theme::{self, Palette};
 const SEARCH_WIDTH: f32 = 320.0;
 
 pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
-    let title = match app.search.scope.and_then(|id| app.library(id)) {
+    let title = match app.search.query.scope.and_then(|id| app.library(id)) {
         Some(lib) => lib.display_name.clone(),
         None => t("sidebar-all-models"),
     };
 
-    let field = text_input(&t("toolbar-search"), &app.search.text)
+    let field = text_input(&t("toolbar-search"), &app.search.query.text)
         .id(search_id())
         .on_input(Message::SearchChanged)
         .size(theme::SIZE_BODY)

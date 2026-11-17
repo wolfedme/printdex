@@ -143,6 +143,7 @@ fn clone_error(e: &CoreError) -> CoreError {
         CoreError::LibraryOffline(p) => CoreError::LibraryOffline(p.clone()),
         CoreError::AlreadyScanning(id) => CoreError::AlreadyScanning(*id),
         CoreError::Cancelled => CoreError::Cancelled,
+        CoreError::LibraryNameInvalid => CoreError::LibraryNameInvalid,
         CoreError::Io { path, source } => CoreError::Io {
             path: path.clone(),
             source: std::io::Error::new(source.kind(), source.to_string()),

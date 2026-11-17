@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT m.id as \"id!: ModelId\", m.library_id as \"library_id: LibraryId\",\n                              m.name, m.rel_path, m.kind,\n                              (SELECT count(*) FROM parts p\n                                WHERE p.model_id = m.id AND p.missing_since IS NULL) as \"part_count!: i64\",\n                              m.missing_since IS NOT NULL as \"missing!: bool\"\n                       FROM models m\n                       WHERE m.missing_since IS NULL AND (?1 IS NULL OR m.library_id = ?1)\n                       ORDER BY m.name COLLATE NOCASE, m.rel_path\n                       LIMIT ?2",
+  "query": "SELECT id as \"id!: ModelId\", library_id as \"library_id!: LibraryId\",\n                      name, rel_path, kind, created_at\n               FROM models WHERE id = ? AND missing_since IS NULL",
   "describe": {
     "columns": [
       {
@@ -15,7 +15,7 @@
         }
       },
       {
-        "name": "library_id: LibraryId",
+        "name": "library_id!: LibraryId",
         "ordinal": 1,
         "type_info": "Blob",
         "origin": {
@@ -59,20 +59,19 @@
         }
       },
       {
-        "name": "part_count!: i64",
+        "name": "created_at",
         "ordinal": 5,
         "type_info": "Integer",
-        "origin": "Expression"
-      },
-      {
-        "name": "missing!: bool",
-        "ordinal": 6,
-        "type_info": "Integer",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "created_at"
+          }
+        }
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 1
     },
     "nullable": [
       true,
@@ -80,9 +79,8 @@
       false,
       false,
       false,
-      false,
       false
     ]
   },
-  "hash": "3f68700acc8ff1f8babbcf429d4ab17f3db6f228d1987e0efa6e05f36be1f872"
+  "hash": "85066ebc18fb524b60d678d0d0fc519e6ab359ace2f00f39a426984f6e7728ed"
 }

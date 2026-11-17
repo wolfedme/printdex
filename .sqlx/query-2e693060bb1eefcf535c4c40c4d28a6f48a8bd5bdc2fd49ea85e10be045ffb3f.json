@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT m.id as \"id!: ModelId\", m.library_id as \"library_id: LibraryId\",\n                              m.name, m.rel_path, m.kind,\n                              (SELECT count(*) FROM parts p\n                                WHERE p.model_id = m.id AND p.missing_since IS NULL) as \"part_count!: i64\",\n                              m.missing_since IS NOT NULL as \"missing!: bool\"\n                       FROM models_fts f JOIN models m ON m.rowid = f.rowid\n                       WHERE models_fts MATCH ?1 AND m.missing_since IS NULL\n                         AND (?2 IS NULL OR m.library_id = ?2)\n                       ORDER BY bm25(models_fts, 10.0, 1.0), m.name COLLATE NOCASE\n                       LIMIT ?3",
+  "query": "SELECT m.id as \"id!: ModelId\", m.library_id as \"library_id: LibraryId\",\n                              m.name, m.rel_path, m.kind,\n                              (SELECT count(*) FROM parts p\n                                WHERE p.model_id = m.id AND p.missing_since IS NULL) as \"part_count!: i64\",\n                              m.missing_since IS NOT NULL as \"missing!: bool\"\n                       FROM models m\n                       WHERE m.missing_since IS NULL AND ?1 = ?1 AND (?2 IS NULL OR m.library_id = ?2)\n                         AND (?3 = 0 OR EXISTS (SELECT 1 FROM parts p\n                               WHERE p.model_id = m.id AND p.missing_since IS NULL\n                                 AND (((?3 & 1) != 0 AND p.format = 'stl')\n                                   OR ((?3 & 2) != 0 AND p.format = '3mf')\n                                   OR ((?3 & 4) != 0 AND p.format = 'obj'))))\n                         AND (?4 IS NULL OR ((SELECT count(*) FROM parts p\n                               WHERE p.model_id = m.id AND p.missing_since IS NULL) >= 2) = ?4)\n                       ORDER BY CASE WHEN ?5 THEN m.created_at END DESC,\n                                m.name COLLATE NOCASE, m.rel_path\n                       LIMIT ?6",
   "describe": {
     "columns": [
       {
@@ -72,7 +72,7 @@
       }
     ],
     "parameters": {
-      "Right": 3
+      "Right": 6
     },
     "nullable": [
       true,
@@ -84,5 +84,5 @@
       false
     ]
   },
-  "hash": "89fafc3136b917047bb6021cade6fab3411427e6335e76f53a51ae804a2f69f3"
+  "hash": "2e693060bb1eefcf535c4c40c4d28a6f48a8bd5bdc2fd49ea85e10be045ffb3f"
 }

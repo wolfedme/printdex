@@ -3,7 +3,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use printdex_core::{CoreError, Engine, EngineEvent};
+use printdex_core::{
+    CoreError, Engine, EngineEvent, LibraryStatus, PrintableFormat, SearchFilter, SortOrder,
+};
 use tokio_util::sync::CancellationToken;
 
 struct Fx {
@@ -183,6 +185,8 @@ async fn events_reach_subscribers() {
             EngineEvent::ScanProgress { .. } => continue,
             EngineEvent::ScanFinished { .. } => "finished",
             EngineEvent::ScanFailed { .. } => "failed",
+            EngineEvent::LibraryRemoved(_) => "removed",
+            EngineEvent::LibraryRenamed(_) => "renamed",
         });
     }
     assert_eq!(seen, ["added", "started", "finished"]);
@@ -226,11 +230,81 @@ async fn search_in_scopes_to_library() {
     let lb = f.engine.add_library(&b, None).await.unwrap();
     f.engine.rescan(la.id, go()).await.unwrap();
     f.engine.rescan(lb.id, go()).await.unwrap();
-    let hits = f.engine.search_in(Some(lb.id), "dragon", 10).await.unwrap();
+    let none = SearchFilter::default();
+    let hits = f
+        .engine
+        .search_in(Some(lb.id), "dragon", &none, SortOrder::Name, 10)
+        .await
+        .unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].library_id, lb.id);
-    assert_eq!(f.engine.count(None, "dragon").await.unwrap(), 2);
-    assert_eq!(f.engine.count(Some(la.id), "").await.unwrap(), 2);
+    assert_eq!(f.engine.count(None, "dragon", &none).await.unwrap(), 2);
+    assert_eq!(f.engine.count(Some(la.id), "", &none).await.unwrap(), 2);
     let counts = f.engine.library_counts().await.unwrap();
     assert_eq!((counts[&la.id], counts[&lb.id]), (2, 1));
+}
+
+#[tokio::test]
+async fn model_detail_through_engine() {
+    let f = Fx::new().await;
+    let root = f.lib(&["Bin/a.stl", "Bin/b.3mf", "Bin/photo.jpg"]);
+    let lib = f.engine.add_library(&root, None).await.unwrap();
+    f.engine.rescan(lib.id, go()).await.unwrap();
+    let hit = &f.engine.search("bin", 5).await.unwrap()[0];
+    let detail = f.engine.model(hit.id).await.unwrap().unwrap();
+    assert_eq!(detail.parts.len(), 2);
+    assert_eq!(detail.parts[1].format, PrintableFormat::ThreeMf);
+    assert_eq!(detail.assets.len(), 1);
+}
+
+#[tokio::test]
+async fn remove_library_keeps_files() {
+    let f = Fx::new().await;
+    let root = f.lib(&["Bin/a.stl"]);
+    let lib = f.engine.add_library(&root, None).await.unwrap();
+    f.engine.rescan(lib.id, go()).await.unwrap();
+    let mut events = f.engine.subscribe();
+    f.engine.remove_library(lib.id).await.unwrap();
+    assert!(root.join("Bin/a.stl").is_file());
+    assert!(f.engine.libraries().await.unwrap().is_empty());
+    assert_eq!(f.engine.stats().await.unwrap().models, 0);
+    assert!(
+        matches!(events.recv().await.unwrap(), EngineEvent::LibraryRemoved(id) if id == lib.id)
+    );
+    assert!(matches!(
+        f.engine.remove_library(lib.id).await,
+        Err(CoreError::LibraryNotFound(_))
+    ));
+}
+
+#[tokio::test]
+async fn rename_library_changes_display_name() {
+    let f = Fx::new().await;
+    let lib = f.engine.add_library(&f.lib(&[]), None).await.unwrap();
+    let renamed = f
+        .engine
+        .rename_library(lib.id, "  Workshop SSD ")
+        .await
+        .unwrap();
+    assert_eq!(renamed.display_name, "Workshop SSD");
+    assert!(matches!(
+        f.engine.rename_library(lib.id, "   ").await,
+        Err(CoreError::LibraryNameInvalid)
+    ));
+}
+
+#[tokio::test]
+async fn library_status_offline_when_root_missing() {
+    let f = Fx::new().await;
+    let root = f.lib(&["Bin/a.stl"]);
+    let lib = f.engine.add_library(&root, None).await.unwrap();
+    assert_eq!(
+        f.engine.library_status(lib.id).await.unwrap(),
+        LibraryStatus::Online
+    );
+    fs::rename(&root, f.dir.path().join("unplugged")).unwrap();
+    assert_eq!(
+        f.engine.library_status(lib.id).await.unwrap(),
+        LibraryStatus::Offline
+    );
 }

@@ -11,7 +11,7 @@ use crate::icons::{self, Icon};
 use crate::theme::{self, Palette};
 
 pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
-    let scope = app.search.scope;
+    let scope = app.search.query.scope;
     let mut items = column![
         container(
             text(t("sidebar-libraries").to_uppercase())

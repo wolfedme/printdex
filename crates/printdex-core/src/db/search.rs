@@ -6,6 +6,7 @@ use crate::db::Db;
 use crate::error::Result;
 use crate::grouping::ModelKind;
 use crate::ids::{LibraryId, ModelId};
+use crate::walk::PrintableFormat;
 
 /// One search result.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,6 +30,41 @@ pub struct Stats {
     pub parts: u64,
     pub assets: u64,
     pub missing_models: u64,
+}
+
+/// Structured narrowing of a search. The default narrows nothing.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SearchFilter {
+    /// Keep models with at least one present part in one of these formats.
+    /// Empty keeps every model.
+    pub formats: Vec<PrintableFormat>,
+    /// `Some(true)`: two or more present parts; `Some(false)`: at most one.
+    pub multi_part: Option<bool>,
+}
+
+impl SearchFilter {
+    pub fn is_empty(&self) -> bool {
+        self.formats.is_empty() && self.multi_part.is_none()
+    }
+
+    fn format_mask(&self) -> i64 {
+        self.formats.iter().fold(0, |m, f| {
+            m | match f {
+                PrintableFormat::Stl => 1,
+                PrintableFormat::ThreeMf => 2,
+                PrintableFormat::Obj => 4,
+            }
+        })
+    }
+}
+
+/// Result order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum SortOrder {
+    /// Relevance for text searches, name for blank searches.
+    #[default]
+    Name,
+    RecentlyAdded,
 }
 
 /// Turns what the user typed into a safe FTS5 query: every whitespace-separated
@@ -69,20 +105,35 @@ impl From<HitRow> for ModelHit {
 }
 
 impl Db {
-    /// Models matching `input` across all libraries; see [`Db::search_models_in`].
+    /// Models matching `input` across all libraries, by name; see
+    /// [`Db::search_models_in`].
     pub async fn search_models(&self, input: &str, limit: u32) -> Result<Vec<ModelHit>> {
-        self.search_models_in(None, input, limit).await
+        self.search_models_in(
+            None,
+            input,
+            &SearchFilter::default(),
+            SortOrder::Name,
+            limit,
+        )
+        .await
     }
 
     /// Models matching `input` (prefix match on name and path, name ranked
-    /// higher), or all models by name when `input` is blank. `library`
-    /// limits results to one library. Missing models are left out.
+    /// higher), or all models when `input` is blank, narrowed by `library`
+    /// and `filter`. With [`SortOrder::Name`], text searches are ranked by
+    /// relevance and blank searches sorted by name; [`SortOrder::RecentlyAdded`]
+    /// puts the newest first. Missing models are left out.
     pub async fn search_models_in(
         &self,
         library: Option<LibraryId>,
         input: &str,
+        filter: &SearchFilter,
+        sort: SortOrder,
         limit: u32,
     ) -> Result<Vec<ModelHit>> {
+        let formats = filter.format_mask();
+        let multi = filter.multi_part;
+        let recent = sort == SortOrder::RecentlyAdded;
         let rows = match to_fts_query(input) {
             None => {
                 sqlx::query_as!(
@@ -93,10 +144,22 @@ impl Db {
                                 WHERE p.model_id = m.id AND p.missing_since IS NULL) as "part_count!: i64",
                               m.missing_since IS NOT NULL as "missing!: bool"
                        FROM models m
-                       WHERE m.missing_since IS NULL AND (?1 IS NULL OR m.library_id = ?1)
-                       ORDER BY m.name COLLATE NOCASE, m.rel_path
-                       LIMIT ?2"#,
+                       WHERE m.missing_since IS NULL AND ?1 = ?1 AND (?2 IS NULL OR m.library_id = ?2)
+                         AND (?3 = 0 OR EXISTS (SELECT 1 FROM parts p
+                               WHERE p.model_id = m.id AND p.missing_since IS NULL
+                                 AND (((?3 & 1) != 0 AND p.format = 'stl')
+                                   OR ((?3 & 2) != 0 AND p.format = '3mf')
+                                   OR ((?3 & 4) != 0 AND p.format = 'obj'))))
+                         AND (?4 IS NULL OR ((SELECT count(*) FROM parts p
+                               WHERE p.model_id = m.id AND p.missing_since IS NULL) >= 2) = ?4)
+                       ORDER BY CASE WHEN ?5 THEN m.created_at END DESC,
+                                m.name COLLATE NOCASE, m.rel_path
+                       LIMIT ?6"#,
+                    "",
                     library,
+                    formats,
+                    multi,
+                    recent,
                     limit
                 )
                 .fetch_all(self.reader())
@@ -111,12 +174,22 @@ impl Db {
                                 WHERE p.model_id = m.id AND p.missing_since IS NULL) as "part_count!: i64",
                               m.missing_since IS NOT NULL as "missing!: bool"
                        FROM models_fts f JOIN models m ON m.rowid = f.rowid
-                       WHERE models_fts MATCH ?1 AND m.missing_since IS NULL
-                         AND (?2 IS NULL OR m.library_id = ?2)
-                       ORDER BY bm25(models_fts, 10.0, 1.0), m.name COLLATE NOCASE
-                       LIMIT ?3"#,
+                       WHERE models_fts MATCH ?1 AND m.missing_since IS NULL AND (?2 IS NULL OR m.library_id = ?2)
+                         AND (?3 = 0 OR EXISTS (SELECT 1 FROM parts p
+                               WHERE p.model_id = m.id AND p.missing_since IS NULL
+                                 AND (((?3 & 1) != 0 AND p.format = 'stl')
+                                   OR ((?3 & 2) != 0 AND p.format = '3mf')
+                                   OR ((?3 & 4) != 0 AND p.format = 'obj'))))
+                         AND (?4 IS NULL OR ((SELECT count(*) FROM parts p
+                               WHERE p.model_id = m.id AND p.missing_since IS NULL) >= 2) = ?4)
+                       ORDER BY CASE WHEN ?5 THEN m.created_at END DESC,
+                                bm25(models_fts, 10.0, 1.0), m.name COLLATE NOCASE
+                       LIMIT ?6"#,
                     q,
                     library,
+                    formats,
+                    multi,
+                    recent,
                     limit
                 )
                 .fetch_all(self.reader())
@@ -126,15 +199,32 @@ impl Db {
         Ok(rows.into_iter().map(ModelHit::from).collect())
     }
 
-    /// How many present models match `input` (all of them when blank),
-    /// optionally within one library. Same matching as search, no limit.
-    pub async fn count_models(&self, library: Option<LibraryId>, input: &str) -> Result<u64> {
+    /// How many present models match (all of them when `input` is blank),
+    /// with the same narrowing as search and no limit.
+    pub async fn count_models(
+        &self,
+        library: Option<LibraryId>,
+        input: &str,
+        filter: &SearchFilter,
+    ) -> Result<u64> {
+        let formats = filter.format_mask();
+        let multi = filter.multi_part;
         let n = match to_fts_query(input) {
             None => {
                 sqlx::query_scalar!(
                     r#"SELECT count(*) as "n!: i64" FROM models m
-                       WHERE m.missing_since IS NULL AND (?1 IS NULL OR m.library_id = ?1)"#,
-                    library
+                       WHERE m.missing_since IS NULL AND ?1 = ?1 AND (?2 IS NULL OR m.library_id = ?2)
+                         AND (?3 = 0 OR EXISTS (SELECT 1 FROM parts p
+                               WHERE p.model_id = m.id AND p.missing_since IS NULL
+                                 AND (((?3 & 1) != 0 AND p.format = 'stl')
+                                   OR ((?3 & 2) != 0 AND p.format = '3mf')
+                                   OR ((?3 & 4) != 0 AND p.format = 'obj'))))
+                         AND (?4 IS NULL OR ((SELECT count(*) FROM parts p
+                               WHERE p.model_id = m.id AND p.missing_since IS NULL) >= 2) = ?4)"#,
+                    "",
+                    library,
+                    formats,
+                    multi
                 )
                 .fetch_one(self.reader())
                 .await?
@@ -143,10 +233,18 @@ impl Db {
                 sqlx::query_scalar!(
                     r#"SELECT count(*) as "n!: i64"
                        FROM models_fts f JOIN models m ON m.rowid = f.rowid
-                       WHERE models_fts MATCH ?1 AND m.missing_since IS NULL
-                         AND (?2 IS NULL OR m.library_id = ?2)"#,
+                       WHERE models_fts MATCH ?1 AND m.missing_since IS NULL AND (?2 IS NULL OR m.library_id = ?2)
+                         AND (?3 = 0 OR EXISTS (SELECT 1 FROM parts p
+                               WHERE p.model_id = m.id AND p.missing_since IS NULL
+                                 AND (((?3 & 1) != 0 AND p.format = 'stl')
+                                   OR ((?3 & 2) != 0 AND p.format = '3mf')
+                                   OR ((?3 & 4) != 0 AND p.format = 'obj'))))
+                         AND (?4 IS NULL OR ((SELECT count(*) FROM parts p
+                               WHERE p.model_id = m.id AND p.missing_since IS NULL) >= 2) = ?4)"#,
                     q,
-                    library
+                    library,
+                    formats,
+                    multi
                 )
                 .fetch_one(self.reader())
                 .await?
@@ -411,18 +509,39 @@ mod tests {
         let a = f.model_in(f.lib, "Dragon").await;
         f.model_in(other, "Dragon").await;
         let hits =
-            f.db.search_models_in(Some(f.lib), "dragon", 50)
-                .await
-                .unwrap();
+            f.db.search_models_in(
+                Some(f.lib),
+                "dragon",
+                &SearchFilter::default(),
+                SortOrder::Name,
+                50,
+            )
+            .await
+            .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id, a);
-        let all = f.db.search_models_in(Some(other), "", 50).await.unwrap();
+        let all =
+            f.db.search_models_in(
+                Some(other),
+                "",
+                &SearchFilter::default(),
+                SortOrder::Name,
+                50,
+            )
+            .await
+            .unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(
-            f.db.search_models_in(None, "dragon", 50)
-                .await
-                .unwrap()
-                .len(),
+            f.db.search_models_in(
+                None,
+                "dragon",
+                &SearchFilter::default(),
+                SortOrder::Name,
+                50
+            )
+            .await
+            .unwrap()
+            .len(),
             2
         );
     }
@@ -436,10 +555,30 @@ mod tests {
         }
         f.model("Gone Dragon", "Gone Dragon", true).await;
         f.model_in(other, "Green Dragon").await;
-        assert_eq!(f.db.count_models(None, "drag").await.unwrap(), 3);
-        assert_eq!(f.db.count_models(Some(f.lib), "drag").await.unwrap(), 2);
-        assert_eq!(f.db.count_models(None, "  ").await.unwrap(), 4);
-        assert_eq!(f.db.count_models(Some(other), "").await.unwrap(), 1);
+        assert_eq!(
+            f.db.count_models(None, "drag", &SearchFilter::default())
+                .await
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            f.db.count_models(Some(f.lib), "drag", &SearchFilter::default())
+                .await
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            f.db.count_models(None, "  ", &SearchFilter::default())
+                .await
+                .unwrap(),
+            4
+        );
+        assert_eq!(
+            f.db.count_models(Some(other), "", &SearchFilter::default())
+                .await
+                .unwrap(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -470,5 +609,100 @@ mod tests {
             self.db.insert_library(&lib).await.unwrap();
             lib.id
         }
+    }
+
+    impl Fx {
+        async fn part_fmt(&self, model: ModelId, rel_path: &str, format: &str) {
+            sqlx::query(
+                "INSERT INTO parts (id, model_id, library_id, rel_path, format, size, mtime_ns, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, 1, 1, 1, 1)",
+            )
+            .bind(PartId::new())
+            .bind(model)
+            .bind(self.lib)
+            .bind(rel_path)
+            .bind(format)
+            .execute(self.db.writer())
+            .await
+            .unwrap();
+        }
+
+        async fn hits(&self, q: &str, filter: &SearchFilter, sort: SortOrder) -> Vec<String> {
+            self.db
+                .search_models_in(None, q, filter, sort, 50)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|h| h.name)
+                .collect()
+        }
+    }
+
+    #[tokio::test]
+    async fn search_filters_by_format_and_parts() {
+        let f = fx().await;
+        let bin = f.model("Bin", "Bin", false).await;
+        f.part_fmt(bin, "Bin/a.stl", "stl").await;
+        f.part_fmt(bin, "Bin/b.3mf", "3mf").await;
+        let hook = f.model("Hook", "Hook", false).await;
+        f.part_fmt(hook, "Hook/h.stl", "stl").await;
+        let vase = f.model("Vase", "Vase", false).await;
+        f.part_fmt(vase, "Vase/v.obj", "obj").await;
+
+        let three_mf = SearchFilter {
+            formats: vec![PrintableFormat::ThreeMf],
+            multi_part: None,
+        };
+        assert_eq!(f.hits("", &three_mf, SortOrder::Name).await, ["Bin"]);
+        let stl_or_obj = SearchFilter {
+            formats: vec![PrintableFormat::Stl, PrintableFormat::Obj],
+            multi_part: None,
+        };
+        assert_eq!(
+            f.hits("", &stl_or_obj, SortOrder::Name).await,
+            ["Bin", "Hook", "Vase"]
+        );
+        let multi = SearchFilter {
+            formats: vec![],
+            multi_part: Some(true),
+        };
+        assert_eq!(f.hits("", &multi, SortOrder::Name).await, ["Bin"]);
+        let single = SearchFilter {
+            formats: vec![PrintableFormat::Stl],
+            multi_part: Some(false),
+        };
+        assert_eq!(f.hits("", &single, SortOrder::Name).await, ["Hook"]);
+        assert_eq!(f.hits("ho", &single, SortOrder::Name).await, ["Hook"]);
+        assert_eq!(f.db.count_models(None, "", &single).await.unwrap(), 1);
+        assert_eq!(f.db.count_models(None, "", &multi).await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn sort_by_recently_added() {
+        let f = fx().await;
+        for (name, at) in [("Old", 1_i64), ("New", 3), ("Mid", 2)] {
+            sqlx::query(
+                "INSERT INTO models (id, library_id, rel_path, name, kind, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, 'folder', ?, ?)",
+            )
+            .bind(ModelId::new())
+            .bind(f.lib)
+            .bind(name)
+            .bind(name)
+            .bind(at)
+            .bind(at)
+            .execute(f.db.writer())
+            .await
+            .unwrap();
+        }
+        let none = SearchFilter::default();
+        assert_eq!(
+            f.hits("", &none, SortOrder::RecentlyAdded).await,
+            ["New", "Mid", "Old"]
+        );
+        assert_eq!(
+            f.hits("", &none, SortOrder::Name).await,
+            ["Mid", "New", "Old"]
+        );
     }
 }

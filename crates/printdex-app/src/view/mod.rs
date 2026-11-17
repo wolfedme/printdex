@@ -43,9 +43,11 @@ fn shell(app: &App, p: Palette) -> Element<'_, Message> {
     }
     content = content.push(if app.libraries.is_empty() && app.search.loaded {
         empty::no_library(p)
-    } else if app.search.loaded && app.search.hits.is_empty() && !app.search.text.trim().is_empty()
+    } else if app.search.loaded
+        && app.search.hits.is_empty()
+        && !app.search.query.text.trim().is_empty()
     {
-        empty::no_results(p, &app.search.text)
+        empty::no_results(p, &app.search.query.text)
     } else {
         grid::view(app, p)
     });

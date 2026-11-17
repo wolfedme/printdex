@@ -206,7 +206,7 @@ impl App {
             Message::Libraries(Ok((libraries, counts))) => {
                 self.libraries = libraries;
                 self.counts = counts;
-                if let Some(scope) = self.search.scope
+                if let Some(scope) = self.search.query.scope
                     && self.library(scope).is_none()
                 {
                     return self.set_scope(None);
@@ -219,7 +219,7 @@ impl App {
                 Task::none()
             }
             Message::Engine(event) => self.on_engine_event(event),
-            Message::SearchChanged(text) => match self.search.begin(&text, self.search.scope) {
+            Message::SearchChanged(text) => match self.search.update(|q| q.text = text) {
                 Some(ticket) => self.run_search(ticket),
                 None => Task::none(),
             },
@@ -285,7 +285,7 @@ impl App {
                 }
             }
             Message::Rescan => {
-                let ids: Vec<LibraryId> = match self.search.scope {
+                let ids: Vec<LibraryId> = match self.search.query.scope {
                     Some(id) => vec![id],
                     None => self.libraries.iter().map(|l| l.id).collect(),
                 };
@@ -320,7 +320,7 @@ impl App {
                 operation::select_all(search_id()),
             ]),
             Message::Escape => {
-                if self.search.text.is_empty() {
+                if self.search.query.text.is_empty() {
                     self.selected = None;
                     Task::none()
                 } else {
@@ -345,6 +345,10 @@ impl App {
     fn on_engine_event(&mut self, event: EngineEvent) -> Task<Message> {
         match event {
             EngineEvent::LibraryAdded(_) => Task::none(),
+            EngineEvent::LibraryRemoved(_) | EngineEvent::LibraryRenamed(_) => {
+                let ticket = self.search.refresh();
+                Task::batch([self.load_libraries(), self.run_search(ticket)])
+            }
             EngineEvent::ScanStarted { library } => {
                 self.scans.insert(library, scan_starting());
                 Task::none()
@@ -374,10 +378,9 @@ impl App {
     }
 
     fn set_scope(&mut self, scope: Option<LibraryId>) -> Task<Message> {
-        let text = self.search.text.clone();
         self.viewport = self.viewport.map(|v| GridViewport { offset: 0.0, ..v });
         let scroll = operation::snap_to(grid_id(), RelativeOffset::START);
-        match self.search.begin(&text, scope) {
+        match self.search.update(|q| q.scope = scope) {
             Some(ticket) => Task::batch([self.run_search(ticket), scroll]),
             None => Task::none(),
         }
@@ -433,13 +436,14 @@ impl App {
         Task::perform(
             async move {
                 let result = async {
+                    let q = &ticket.query;
                     let hits = engine
-                        .search_in(ticket.scope, &ticket.text, SEARCH_LIMIT)
+                        .search_in(q.scope, &q.text, &q.filter, q.sort, SEARCH_LIMIT)
                         .await?;
                     let total = if hits.len() < SEARCH_LIMIT as usize {
                         hits.len() as u64
                     } else {
-                        engine.count(ticket.scope, &ticket.text).await?
+                        engine.count(q.scope, &q.text, &q.filter).await?
                     };
                     Ok::<_, CoreError>((hits, total))
                 }
@@ -607,7 +611,7 @@ mod tests {
     fn search_input_starts_query() {
         let mut a = app();
         let _ = a.update(Message::SearchChanged("dra".into()));
-        assert_eq!(a.search.text, "dra");
+        assert_eq!(a.search.query.text, "dra");
         assert!(a.search.loading);
     }
 
@@ -643,7 +647,10 @@ mod tests {
             summary: ScanSummary::default(),
         }));
         assert!(a.search.loading);
-        assert_eq!((a.search.text.as_str(), a.search.scope), ("orc", Some(lib)));
+        assert_eq!(
+            (a.search.query.text.as_str(), a.search.query.scope),
+            ("orc", Some(lib))
+        );
     }
 
     #[test]
@@ -680,7 +687,7 @@ mod tests {
         let lib = LibraryId::new();
         deliver(&mut a, vec![]);
         let _ = a.update(Message::SelectScope(Some(lib)));
-        assert_eq!(a.search.scope, Some(lib));
+        assert_eq!(a.search.query.scope, Some(lib));
         assert!(a.search.loading);
     }
 
@@ -690,7 +697,7 @@ mod tests {
         let _ = a.update(Message::SelectScope(Some(LibraryId::new())));
         deliver(&mut a, vec![]);
         let _ = a.update(Message::Libraries(Ok((vec![], HashMap::new()))));
-        assert_eq!(a.search.scope, None);
+        assert_eq!(a.search.query.scope, None);
     }
 
     #[test]
@@ -715,7 +722,7 @@ mod tests {
         deliver(&mut a, vec![h.clone()]);
         let _ = a.update(Message::Select(h.id));
         let _ = a.update(Message::Escape);
-        assert_eq!(a.search.text, "");
+        assert_eq!(a.search.query.text, "");
         deliver(&mut a, vec![h.clone()]);
         assert_eq!(a.selected, Some(h.id));
         let _ = a.update(Message::Escape);

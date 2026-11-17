@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!: PartId\", rel_path, format, size FROM parts\n               WHERE model_id = ? AND missing_since IS NULL ORDER BY rel_path",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: PartId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "rel_path",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "rel_path"
+          }
+        }
+      },
+      {
+        "name": "format",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "format"
+          }
+        }
+      },
+      {
+        "name": "size",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "size"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "63085c969a6c68a7126e701b237c4fc87285aa36443e3d432843226a18e5472d"
+}
