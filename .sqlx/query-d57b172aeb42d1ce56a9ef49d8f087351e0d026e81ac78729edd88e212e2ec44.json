@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE parts SET dim_x = ?, dim_y = ?, dim_z = ?, triangles = ?, measured_fp = ?\n             WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "d57b172aeb42d1ce56a9ef49d8f087351e0d026e81ac78729edd88e212e2ec44"
+}

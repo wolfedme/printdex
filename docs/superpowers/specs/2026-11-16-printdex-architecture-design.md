@@ -61,7 +61,7 @@ Dependency direction is strictly downward; `core` never depends on `render` or `
 
 - **tokio multi-thread runtime** owns all I/O: directory walks, file reads, DB access, watcher events, (later) HTTP. iced runs with its tokio executor so app and engine share one runtime.
 - **CPU-heavy work** (fingerprint hashing, mesh parsing, decimation, image encoding) runs on a **rayon** pool. Async code hands work over and awaits a oneshot result, so long jobs never occupy tokio workers or the UI thread. *(Claude's call: rayon over `spawn_blocking`, because it bounds CPU parallelism to core count and work-steals well for many small hashes.)*
-- **GPU work** (thumbnail rendering) runs on one dedicated render task holding the wgpu device, fed by a priority queue (on-screen items first, per v1 §7).
+- **Thumbnail rendering** runs from the rayon pool, fed by a priority queue (on-screen items first, per v1 §7). It rasterizes on a headless wgpu device when the machine has a hardware GPU, and on a CPU rasterizer otherwise (no GPU, a software adapter such as llvmpipe/WARP, `PRINTDEX_GPU=off`, or any GPU error, after which the session stays on the CPU). Both paths share framing, shading, edge lines and downsampling, so thumbnails look the same. *(Decided by Max, 2026-11-17: GPU first, CPU fallback.)*
 - Cancellation: every long job takes a cancellation token (`tokio_util::sync::CancellationToken`); scrolling away cancels queued thumbnails, closing a model cancels its preview load.
 
 ### 5.3 Engine ↔ UI contract
@@ -92,9 +92,9 @@ Dependency direction is strictly downward; `core` never depends on `render` or `
 | File watching | notify + notify-debouncer-full | Local disks only; NAS uses periodic rescans. |
 | STL | hand-written parser over plain buffered reads (`BufReader`) | Binary + ASCII; hot path, format is trivial. Fuzzed. No memory mapping: `memmap2` needs `unsafe`, which the workspace forbids *(decided by Max, 2026-11-17)*. |
 | 3MF | zip + quick-xml | Objects, plates (read-only info), embedded thumbnails. |
-| OBJ | tobj | |
+| OBJ | hand-written reader over `BufReader` | Only `v`/`f` lines are needed; streams under the same limits as STL. *(Milestone 2; tobj was the plan.)* |
 | Decimation | meshopt (meshoptimizer bindings) | Threshold left to the builder. |
-| Rendering | wgpu (iced's pinned version), glam | Headless thumbnails + viewport via iced shader widget. |
+| Rendering | wgpu (iced's version) for thumbnails with a CPU rasterizer fallback; wgpu via iced's shader widget (viewport); glam | Shared camera, light and material ramps in `printdex-render`. |
 | Images | image | Decode folder images and 3MF thumbnails; encode cache. |
 | UI | iced (pinned release) | |
 | i18n | fluent + fluent-bundle, with a small `t!`-style helper | See §7. |
@@ -156,7 +156,7 @@ Same milestones as v1 design §10, with the design work slotted in:
 - **Primary platform: Linux** (Max's daily OS). Each milestone is polished on Linux first (Wayland and X11); Windows and macOS must build and pass tests in CI at every milestone and get polish before a public release.
 - **Where things get tested** *(Claude's call, from Max's answer)*:
   - Development and manual checks run in the Linux cloud environment: the app is built and run under Xvfb with Mesa's software renderer (llvmpipe), with screenshots for review. This doubles as the "no capable GPU" check.
-  - Windows and macOS: GitHub Actions runners build, run all tests, and run headless thumbnail rendering (WARP on Windows). Interactive macOS checks happen in an occasional Claude Code session on Max's Mac, mainly before releases.
+  - Windows and macOS: GitHub Actions runners build, run all tests, including thumbnail rendering (GPU tests skip where no adapter exists; the CPU path always runs). Interactive macOS checks happen in an occasional Claude Code session on Max's Mac, mainly before releases.
   - NAS behaviour: no real NAS assumed. Tests run against a filesystem wrapper that injects latency, slow listings, disappearing mounts and unreliable change notifications; a local Samba share in CI is a later addition if the wrapper misses real-world issues.
   - Performance: the CLI `bench` command and a synthetic 100k-part library generator, run in CI to catch regressions; absolute targets are checked against the latency-injected setup.
 

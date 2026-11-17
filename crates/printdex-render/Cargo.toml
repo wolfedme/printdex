@@ -1,0 +1,21 @@
+[package]
+name = "printdex-render"
+description = "Printdex rendering: shared camera and material code, CPU thumbnail renderer."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+glam.workspace = true
+pollster.workspace = true
+wgpu.workspace = true
+printdex-mesh.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+image.workspace = true

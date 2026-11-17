@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT rel_path, size, mtime_ns FROM assets\n               WHERE model_id = ? AND missing_since IS NULL ORDER BY rel_path",
+  "describe": {
+    "columns": [
+      {
+        "name": "rel_path",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "assets",
+            "name": "rel_path"
+          }
+        }
+      },
+      {
+        "name": "size",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "assets",
+            "name": "size"
+          }
+        }
+      },
+      {
+        "name": "mtime_ns",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "assets",
+            "name": "mtime_ns"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d7944fd1fafc236fa55e98d77d94ca7a8316c8aa5cd2a22cb5fe9137002b99f6"
+}

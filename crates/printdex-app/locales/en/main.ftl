@@ -162,3 +162,13 @@ sidebar-offline = Offline since { $time }
 toolbar-retry = Retry
 settings-status-offline = Offline since { $time }
 settings-retry = Retry
+
+## Previews
+preview-rendering = Rendering preview
+preview-too-large = Too large to preview
+preview-unavailable = No preview
+model-measured = { $x } × { $y } × { $z } mm
+model-triangles = { $count ->
+    [one] { $n } triangle
+   *[other] { $n } triangles
+}

@@ -7,13 +7,17 @@ use crate::ids::{AssetId, LibraryId, ModelId, PartId};
 use crate::walk::PrintableFormat;
 
 /// A printable file of a model.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PartInfo {
     pub id: PartId,
     /// Relative to the library root, `/`-separated.
     pub rel_path: String,
     pub format: PrintableFormat,
     pub size: u64,
+    /// Size along X, Y and Z in mm, once the file has been measured.
+    pub dims: Option<[f32; 3]>,
+    /// Triangle count, once the file has been measured.
+    pub triangles: Option<u64>,
 }
 
 /// A non-printable file of a model (image, PDF, readme…).
@@ -25,7 +29,7 @@ pub struct AssetInfo {
 }
 
 /// A model with its present files.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ModelDetail {
     pub id: ModelId,
     pub library_id: LibraryId,
@@ -73,7 +77,12 @@ impl Db {
             return Ok(None);
         };
         let parts = sqlx::query!(
-            r#"SELECT id as "id!: PartId", rel_path, format, size FROM parts
+            r#"SELECT id as "id!: PartId", rel_path, format, size,
+                      CASE WHEN measured_fp IS fp_hash THEN dim_x END as "dim_x?: f64",
+                      CASE WHEN measured_fp IS fp_hash THEN dim_y END as "dim_y?: f64",
+                      CASE WHEN measured_fp IS fp_hash THEN dim_z END as "dim_z?: f64",
+                      CASE WHEN measured_fp IS fp_hash THEN triangles END as "triangles?: i64"
+               FROM parts
                WHERE model_id = ? AND missing_since IS NULL ORDER BY rel_path"#,
             id
         )
@@ -85,6 +94,11 @@ impl Db {
             rel_path: r.rel_path,
             format: format_from_db(&r.format),
             size: size(r.size),
+            dims: match (r.dim_x, r.dim_y, r.dim_z) {
+                (Some(x), Some(y), Some(z)) => Some([x as f32, y as f32, z as f32]),
+                _ => None,
+            },
+            triangles: r.triangles.and_then(|t| u64::try_from(t).ok()),
         })
         .collect();
         let assets = sqlx::query!(

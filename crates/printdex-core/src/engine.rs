@@ -12,6 +12,7 @@ use crate::error::{CoreError, Result};
 use crate::events::EngineEvent;
 use crate::ids::{LibraryId, ModelId};
 use crate::scan::{ScanSummary, scan_library};
+use crate::thumbs::ThumbnailService;
 
 /// Event channel capacity. Slow subscribers miss old events (`Lagged`).
 const EVENT_CAPACITY: usize = 1024;
@@ -42,6 +43,7 @@ pub struct Engine {
     db: Db,
     events: broadcast::Sender<EngineEvent>,
     scanning: Arc<Mutex<HashSet<LibraryId>>>,
+    thumbs: ThumbnailService,
 }
 
 /// Removes a library from the "scanning" set on every exit path.
@@ -61,25 +63,44 @@ fn lock(m: &Mutex<HashSet<LibraryId>>) -> std::sync::MutexGuard<'_, HashSet<Libr
 }
 
 impl Engine {
-    /// Opens the engine with its database at `data_dir/printdex.db`,
-    /// creating the folder and database if needed.
+    /// Opens the engine with its database at `data_dir/printdex.db` and its
+    /// caches in `data_dir/cache`, creating folders and database if needed.
     pub async fn open(data_dir: &Path) -> Result<Engine> {
+        Engine::open_with_cache(data_dir, &data_dir.join("cache")).await
+    }
+
+    /// Like [`Engine::open`], with caches (thumbnails) in `cache_dir`.
+    /// Must be called inside a tokio runtime: it starts the thumbnail
+    /// workers.
+    pub async fn open_with_cache(data_dir: &Path, cache_dir: &Path) -> Result<Engine> {
         std::fs::create_dir_all(data_dir).map_err(|source| CoreError::Io {
             path: data_dir.to_path_buf(),
             source,
         })?;
         let db = Db::open(&data_dir.join("printdex.db")).await?;
         let (events, _) = broadcast::channel(EVENT_CAPACITY);
+        let thumbs = ThumbnailService::start(db.clone(), events.clone(), cache_dir);
         Ok(Engine {
             db,
             events,
             scanning: Arc::new(Mutex::new(HashSet::new())),
+            thumbs,
         })
     }
 
     /// The per-user data folder for Printdex on this OS.
     pub fn default_data_dir() -> Option<PathBuf> {
         directories::ProjectDirs::from("", "", "Printdex").map(|d| d.data_dir().to_path_buf())
+    }
+
+    /// The per-user cache folder for Printdex on this OS.
+    pub fn default_cache_dir() -> Option<PathBuf> {
+        directories::ProjectDirs::from("", "", "Printdex").map(|d| d.cache_dir().to_path_buf())
+    }
+
+    /// The thumbnail queue.
+    pub fn thumbnails(&self) -> &ThumbnailService {
+        &self.thumbs
     }
 
     /// Subscribes to engine events from now on.

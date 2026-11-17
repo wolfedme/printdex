@@ -2,13 +2,13 @@
 
 use iced::widget::{Space, button, column, container, mouse_area, row, scrollable, text};
 use iced::{Alignment, Element, Length};
-use printdex_core::ModelHit;
+use printdex_core::{ModelHit, ThumbTarget};
 
+use super::preview::{Look, preview};
 use super::widgets::date;
 use crate::app::{App, GRID_PAD_X, GRID_PAD_Y, GridViewport, Message, grid_id};
 use crate::format::{group, parent_path};
 use crate::i18n::t;
-use crate::icons;
 use crate::list::{HEADER_HEIGHT, ROW_HEIGHT, visible_rows};
 use crate::theme::{self, Palette};
 
@@ -75,11 +75,16 @@ fn list_row<'a>(app: &App, p: Palette, hit: &ModelHit) -> Element<'a, Message> {
     let hovered = app.hovered == Some(hit.id);
     let id = hit.id;
     let thumb = container(
-        container(icons::placeholder())
-            .padding(theme::S2)
-            .width(40)
-            .height(32)
-            .style(move |_| p.well()),
+        container(preview(
+            app,
+            p,
+            ThumbTarget::Model(hit.id),
+            Look::still(40.0 - 2.0 * theme::S2, 32.0 - 2.0 * theme::S2),
+        ))
+        .padding(theme::S2)
+        .width(40)
+        .height(32)
+        .style(move |_| p.well()),
     )
     .width(THUMB_COLUMN - theme::S5);
     let content = row![

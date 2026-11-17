@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT l.path as lib_path FROM models m JOIN libraries l ON l.id = m.library_id\n               WHERE m.id = ? AND m.missing_since IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "name": "lib_path",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "libraries",
+            "name": "path"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3bc62e4fb8723b439d7db97e47998ca9c1d3516922533091a9962a324d64b773"
+}

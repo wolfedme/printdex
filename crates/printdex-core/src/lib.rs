@@ -12,6 +12,7 @@ pub mod fingerprint;
 pub mod grouping;
 pub mod ids;
 pub mod scan;
+pub mod thumbs;
 pub mod time;
 pub mod walk;
 
@@ -25,6 +26,9 @@ pub use events::{EngineEvent, ScanPhase};
 pub use grouping::ModelKind;
 pub use ids::{AssetId, LibraryId, ModelId, PartId};
 pub use scan::ScanSummary;
+pub use thumbs::{
+    THUMB_HEIGHT, THUMB_WIDTH, ThumbFailure, ThumbKind, ThumbTarget, ThumbnailService,
+};
 pub use walk::PrintableFormat;
 
 /// Version of the engine crate.

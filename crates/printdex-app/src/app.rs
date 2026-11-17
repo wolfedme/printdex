@@ -12,7 +12,7 @@ use iced::widget::{Id, operation};
 use iced::{Event, Size, Subscription, Task, event, window};
 use printdex_core::{
     CoreError, Engine, EngineEvent, Library, LibraryId, LibraryStatus, ModelDetail, ModelHit,
-    ModelId, PartInfo, ScanPhase, ScanSummary,
+    ModelId, PartInfo, ScanPhase, ScanSummary, ThumbTarget,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -24,6 +24,7 @@ use crate::nav::{self, Move};
 use crate::search::{SEARCH_LIMIT, SearchState, Ticket};
 use crate::settings::{Settings, ThemeMode, Translucency, ViewMode};
 use crate::theme::{self, ColorTheme, Mode, Palette, Surface};
+use crate::thumbs::Thumbs;
 
 /// Widget ids the update logic talks to.
 pub fn search_id() -> Id {
@@ -51,6 +52,8 @@ pub const INITIAL_WINDOW: Size = Size::new(1280.0, 800.0);
 #[derive(Clone, Debug)]
 pub struct Options {
     pub data_dir: PathBuf,
+    /// Folder for caches (thumbnails); safe to delete.
+    pub cache_dir: PathBuf,
     /// Where `settings.toml` lives; `None` keeps settings in memory only.
     pub config_dir: Option<PathBuf>,
     /// One-off light/dark override (`--mode`); never saved.
@@ -67,6 +70,7 @@ impl Options {
     #[cfg(test)]
     pub fn in_memory(data_dir: PathBuf) -> Options {
         Options {
+            cache_dir: data_dir.join("cache"),
             data_dir,
             config_dir: None,
             mode: None,
@@ -77,7 +81,7 @@ impl Options {
 }
 
 /// The model view's content.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ModelView {
     Loading(ModelId),
     Loaded {
@@ -168,6 +172,7 @@ pub struct App {
     pub system_mode: Mode,
     pub window: Size,
     pub viewport: Option<GridViewport>,
+    pub thumbs: Thumbs,
     cancel: CancellationToken,
     started: std::time::Instant,
 }
@@ -266,6 +271,7 @@ impl App {
             system_mode: Mode::default(),
             window: INITIAL_WINDOW,
             viewport: None,
+            thumbs: Thumbs::default(),
             cancel: CancellationToken::new(),
             started: std::time::Instant::now(),
         }
@@ -274,8 +280,13 @@ impl App {
     /// Initial state and the tasks that open the engine and read the OS theme.
     pub fn boot(options: Options) -> (App, Task<Message>) {
         let dir = options.data_dir.clone();
+        let cache = options.cache_dir.clone();
         let open = Task::perform(
-            async move { Engine::open(&dir).await.map_err(Arc::new) },
+            async move {
+                Engine::open_with_cache(&dir, &cache)
+                    .await
+                    .map_err(Arc::new)
+            },
             Message::Booted,
         );
         let mode = iced::system::theme().map(Message::SystemMode);
@@ -369,6 +380,61 @@ impl App {
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        let task = self.handle(message);
+        self.request_thumbnails();
+        task
+    }
+
+    /// Items on screen that show a thumbnail, most important first: the
+    /// open model's selected part, its other parts, then grid or list
+    /// items in reading order.
+    pub fn visible_thumbnails(&self) -> Vec<ThumbTarget> {
+        match self.screen {
+            Screen::Model(_) => match &self.model {
+                Some(ModelView::Loaded { detail, part }) => {
+                    let mut out: Vec<ThumbTarget> = detail
+                        .parts
+                        .get(*part)
+                        .map(|p| ThumbTarget::Part(p.id))
+                        .into_iter()
+                        .collect();
+                    out.extend(detail.parts.iter().map(|p| ThumbTarget::Part(p.id)));
+                    out
+                }
+                _ => Vec::new(),
+            },
+            Screen::Settings => Vec::new(),
+            Screen::Library => {
+                let hits = &self.search.hits;
+                let vp = self.grid_viewport();
+                let range = match self.settings.view {
+                    ViewMode::Grid => {
+                        let m = self.metrics();
+                        let rows = m.visible_rows(vp.offset - GRID_PAD_Y, vp.height, hits.len());
+                        rows.start * m.columns..(rows.end * m.columns).min(hits.len())
+                    }
+                    ViewMode::List => crate::list::visible_rows(vp.offset, vp.height, hits.len()),
+                };
+                hits[range]
+                    .iter()
+                    .map(|h| ThumbTarget::Model(h.id))
+                    .collect()
+            }
+        }
+    }
+
+    /// Tells the engine what is on screen without a thumbnail, when that
+    /// changed. Never blocks.
+    fn request_thumbnails(&mut self) {
+        let Some(engine) = &self.engine else {
+            return;
+        };
+        if let Some(wanted) = self.thumbs.request_for(self.visible_thumbnails()) {
+            engine.thumbnails().request_visible(wanted);
+        }
+    }
+
+    fn handle(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Booted(Ok(engine)) => {
                 self.engine = Some(engine);
@@ -864,14 +930,26 @@ impl App {
                 self.scans.insert(library, ScanState { phase, done, total });
                 Task::none()
             }
-            EngineEvent::ScanFinished { library, .. } => {
+            EngineEvent::ScanFinished { library, summary } => {
                 self.scans.remove(&library);
+                if summary.fingerprinted > 0 {
+                    // New or changed files: their thumbnails are new.
+                    self.thumbs.clear();
+                }
                 let ticket = self.search.refresh();
                 let model = match &self.model {
                     Some(m) => self.load_model(m.id()),
                     None => Task::none(),
                 };
                 Task::batch([self.load_libraries(), self.run_search(ticket), model])
+            }
+            EngineEvent::ThumbnailReady { target, path, kind } => {
+                self.thumbs.ready(target, path, kind);
+                Task::none()
+            }
+            EngineEvent::ThumbnailFailed { target, reason } => {
+                self.thumbs.failed(target, reason);
+                Task::none()
             }
             EngineEvent::ScanFailed { library, error } => {
                 self.scans.remove(&library);
@@ -1332,6 +1410,8 @@ mod tests {
                     rel_path: format!("bins/bin/{p}"),
                     format: printdex_core::PrintableFormat::Stl,
                     size: 10,
+                    dims: None,
+                    triangles: None,
                 })
                 .collect(),
             assets: vec![],
@@ -1545,6 +1625,84 @@ mod tests {
         assert_eq!(a.selected, Some(hits[1].id));
         let _ = a.update(Message::OpenSelected);
         assert_eq!(a.screen, Screen::Model(hits[1].id));
+    }
+
+    #[test]
+    fn scroll_requests_visible_models() {
+        let mut a = app();
+        let hits: Vec<ModelHit> = (0..300).map(|i| hit(&format!("m{i:03}"))).collect();
+        deliver(&mut a, hits.clone());
+        let first = ThumbTarget::Model(hits[0].id);
+        let last = ThumbTarget::Model(hits[299].id);
+        let seen = a.visible_thumbnails();
+        assert_eq!(seen.first(), Some(&first), "reading order");
+        assert!(!seen.contains(&last));
+        // Scrolled to the end.
+        let m = a.metrics();
+        let _ = a.update(Message::Scrolled(GridViewport {
+            offset: m.rows(300) as f32 * m.stride() + 2.0 * GRID_PAD_Y - 600.0,
+            height: 600.0,
+        }));
+        let seen = a.visible_thumbnails();
+        assert!(seen.contains(&last));
+        assert!(!seen.contains(&first));
+        assert!(seen.len() < 60, "only what is on screen ({})", seen.len());
+    }
+
+    #[test]
+    fn ready_event_swaps_placeholder() {
+        let mut a = app();
+        let hits = vec![hit("a"), hit("b")];
+        deliver(&mut a, hits.clone());
+        let t = ThumbTarget::Model(hits[0].id);
+        assert!(a.thumbs.pending(t));
+        let _ = a.update(Message::Engine(EngineEvent::ThumbnailReady {
+            target: t,
+            path: "/cache/p00.png".into(),
+            kind: printdex_core::ThumbKind::Render,
+        }));
+        assert!(matches!(
+            a.thumbs.get(t),
+            Some(crate::thumbs::Thumb::Ready { .. })
+        ));
+        let wanted = a.thumbs.request_for(a.visible_thumbnails());
+        assert_eq!(wanted, Some(vec![ThumbTarget::Model(hits[1].id)]));
+    }
+
+    #[test]
+    fn missing_thumb_keeps_placeholder() {
+        let mut a = app();
+        let hits = vec![hit("a")];
+        deliver(&mut a, hits.clone());
+        let t = ThumbTarget::Model(hits[0].id);
+        let _ = a.update(Message::Engine(EngineEvent::ThumbnailFailed {
+            target: t,
+            reason: printdex_core::ThumbFailure::TooLarge,
+        }));
+        assert!(matches!(
+            a.thumbs.get(t),
+            Some(crate::thumbs::Thumb::Failed(
+                printdex_core::ThumbFailure::TooLarge
+            ))
+        ));
+        assert!(!a.thumbs.pending(t), "not asked for again");
+    }
+
+    #[test]
+    fn model_view_requests_parts() {
+        let mut a = app();
+        let id = ModelId::new();
+        let _ = a.update(Message::OpenModel(id));
+        assert!(a.visible_thumbnails().is_empty());
+        let d = detail(id, &["a.stl", "b.stl", "c.stl"]);
+        let parts: Vec<ThumbTarget> = d.parts.iter().map(|p| ThumbTarget::Part(p.id)).collect();
+        let _ = a.update(Message::ModelLoaded(id, Ok(Some(d))));
+        let _ = a.update(Message::SelectPart(2));
+        let seen = a.visible_thumbnails();
+        assert_eq!(seen[0], parts[2], "selected part first");
+        for p in &parts {
+            assert!(seen.contains(p));
+        }
     }
 
     #[test]

@@ -10,6 +10,10 @@ publish = false
 
 [dependencies]
 directories.workspace = true
+fastrand.workspace = true
+image.workspace = true
+printdex-mesh.workspace = true
+printdex-render.workspace = true
 dunce.workspace = true
 ignore.workspace = true
 rayon.workspace = true
@@ -22,6 +26,7 @@ uuid.workspace = true
 xxhash-rust.workspace = true
 
 [dev-dependencies]
+zip.workspace = true
 tempfile.workspace = true
 
 [lints]
