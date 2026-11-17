@@ -57,7 +57,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     .into()
 }
 
-fn hint<'a>(p: Palette, key: &'static str, label: String) -> Element<'a, Message> {
+pub(super) fn hint<'a>(p: Palette, key: &'static str, label: String) -> Element<'a, Message> {
     row![
         container(text(key).size(theme::SIZE_DATA).font(theme::FONT_DATA))
             .padding([0.0, theme::S3])

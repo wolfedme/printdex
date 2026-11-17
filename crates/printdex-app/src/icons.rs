@@ -27,6 +27,23 @@ icon_files! {
     Refresh => "refresh-cw.svg",
     Layers => "layers-2.svg",
     Alert => "triangle-alert.svg",
+    ExternalLink => "external-link.svg",
+    FolderOpen => "folder-open.svg",
+    File => "file.svg",
+    FileText => "file-text.svg",
+    Image => "image.svg",
+    Part => "box.svg",
+    Chevron => "chevron-right.svg",
+    Settings => "settings.svg",
+    Offline => "wifi-off.svg",
+    Plus => "plus.svg",
+    Close => "x.svg",
+    List => "list.svg",
+    Grid => "layout-grid.svg",
+    Check => "check.svg",
+    Sort => "arrow-up-down.svg",
+    Remove => "trash-2.svg",
+    Rename => "pencil.svg",
 }
 
 /// `icon` at `size` px, tinted `color`.

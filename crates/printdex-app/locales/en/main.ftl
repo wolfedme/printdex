@@ -33,6 +33,46 @@ status-libraries = { $count ->
 status-key-search = Search
 status-key-move = Move
 status-key-clear = Clear
+status-key-open-model = Open
+status-key-back = Back to library
+status-key-part = Part
+status-key-open-file = Open file
+status-added = Added { $date }
+
+model-show-in-folder = Show in folder
+model-open = Open
+model-parts = Parts
+model-parts-summary = { $count ->
+    [one] 1 file
+   *[other] { $n } files
+} · { $size }
+model-other-files = Other files
+model-details = Details
+model-detail-library = Library
+model-detail-folder = Folder
+model-detail-parts = Parts
+model-detail-size = Total size
+model-detail-added = Added
+model-detail-kind = Kind
+model-kind-folder = Folder of files
+model-kind-file = Single file
+model-missing-title = This model is no longer in your library
+model-missing-body = Its files were moved or deleted since the last scan.
+model-back = Back to library
+
+date-short = { $day } { $month } { $year }
+month-1 = Jan
+month-2 = Feb
+month-3 = Mar
+month-4 = Apr
+month-5 = May
+month-6 = Jun
+month-7 = Jul
+month-8 = Aug
+month-9 = Sep
+month-10 = Oct
+month-11 = Nov
+month-12 = Dec
 
 empty-library-title = Add a folder with your models
 empty-library-body = Printdex indexes your files where they are. Nothing is moved, renamed or uploaded.
@@ -45,3 +85,4 @@ error-library-offline = The library folder at { $path } can’t be reached.
 error-already-scanning = This library is already being scanned.
 error-other = Something went wrong. Details are in the log.
 error-settings-save = Your settings couldn’t be saved. Details are in the log.
+error-launch = The file couldn’t be opened. Details are in the log.

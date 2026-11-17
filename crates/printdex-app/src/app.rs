@@ -11,7 +11,8 @@ use iced::widget::scrollable::{AbsoluteOffset, RelativeOffset};
 use iced::widget::{Id, operation};
 use iced::{Event, Size, Subscription, Task, event, window};
 use printdex_core::{
-    CoreError, Engine, EngineEvent, Library, LibraryId, ModelHit, ModelId, ScanPhase, ScanSummary,
+    CoreError, Engine, EngineEvent, Library, LibraryId, ModelDetail, ModelHit, ModelId, PartInfo,
+    ScanPhase, ScanSummary,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -69,6 +70,27 @@ impl Options {
     }
 }
 
+/// The model view's content.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ModelView {
+    Loading(ModelId),
+    Loaded {
+        detail: ModelDetail,
+        part: usize,
+    },
+    /// Gone from the library (removed by a rescan, or never there).
+    Missing(ModelId),
+}
+
+impl ModelView {
+    pub fn id(&self) -> ModelId {
+        match self {
+            ModelView::Loading(id) | ModelView::Missing(id) => *id,
+            ModelView::Loaded { detail, .. } => detail.id,
+        }
+    }
+}
+
 /// Which screen fills the main area.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Screen {
@@ -113,6 +135,7 @@ pub struct App {
     pub hovered: Option<ModelId>,
     pub error: Option<String>,
     pub screen: Screen,
+    pub model: Option<ModelView>,
     pub settings: Settings,
     /// The OS's light/dark preference, used when the mode is System.
     pub system_mode: Mode,
@@ -152,6 +175,15 @@ pub enum Message {
     OpenModel(ModelId),
     OpenSettings,
     Back,
+    ModelLoaded(ModelId, Result<Option<ModelDetail>, Arc<CoreError>>),
+    SelectPart(usize),
+    /// Open the selected part with the OS default app (O).
+    OpenPart,
+    /// Open a file with the OS default app.
+    OpenFile(PathBuf),
+    /// Show a file or folder in the OS file manager.
+    ShowInFolder(PathBuf),
+    Launched(Result<(), Arc<std::io::Error>>),
     SettingsChanged(Settings),
     SettingsSaved(Result<(), Arc<std::io::Error>>),
 }
@@ -174,6 +206,7 @@ impl App {
             hovered: None,
             error: None,
             screen: Screen::Library,
+            model: None,
             settings,
             system_mode: Mode::default(),
             window: INITIAL_WINDOW,
@@ -381,6 +414,11 @@ impl App {
                 self.hovered = id;
                 Task::none()
             }
+            Message::Nav(mv) if matches!(self.screen, Screen::Model(_)) => {
+                self.step_part(mv);
+                Task::none()
+            }
+            Message::Nav(_) if self.screen == Screen::Settings => Task::none(),
             Message::Nav(mv) => self.navigate(mv),
             Message::FocusSearch => Task::batch([
                 operation::focus(search_id()),
@@ -413,6 +451,54 @@ impl App {
             Message::OpenModel(id) => {
                 self.selected = Some(id);
                 self.screen = Screen::Model(id);
+                self.model = Some(ModelView::Loading(id));
+                self.load_model(id)
+            }
+            Message::ModelLoaded(id, result) => {
+                // A load for a model that is no longer on screen is stale.
+                if self.model.as_ref().map(ModelView::id) != Some(id) {
+                    return Task::none();
+                }
+                let part = match &self.model {
+                    Some(ModelView::Loaded { part, .. }) => *part,
+                    _ => 0,
+                };
+                self.model = Some(match result {
+                    Ok(Some(detail)) => {
+                        let part = part.min(detail.parts.len().saturating_sub(1));
+                        ModelView::Loaded { detail, part }
+                    }
+                    Ok(None) => ModelView::Missing(id),
+                    Err(e) => {
+                        self.show_error(&e);
+                        ModelView::Missing(id)
+                    }
+                });
+                Task::none()
+            }
+            Message::SelectPart(index) => {
+                if let Some(ModelView::Loaded { detail, part }) = &mut self.model
+                    && index < detail.parts.len()
+                {
+                    *part = index;
+                }
+                Task::none()
+            }
+            Message::OpenPart => match self.current_part().map(|p| p.rel_path.clone()) {
+                Some(rel) if matches!(self.screen, Screen::Model(_)) => {
+                    match self.model_path(&rel) {
+                        Some(path) => self.update(Message::OpenFile(path)),
+                        None => Task::none(),
+                    }
+                }
+                _ => Task::none(),
+            },
+            Message::OpenFile(path) => launch(move || opener::open(&path)),
+            Message::ShowInFolder(path) => launch(move || opener::reveal(&path)),
+            Message::Launched(Ok(())) => Task::none(),
+            Message::Launched(Err(e)) => {
+                tracing::warn!(error = %e, "could not hand the file to the OS");
+                self.error = Some(t("error-launch"));
                 Task::none()
             }
             Message::OpenSettings => {
@@ -421,6 +507,7 @@ impl App {
             }
             Message::Back => {
                 self.screen = Screen::Library;
+                self.model = None;
                 Task::none()
             }
             Message::SettingsChanged(settings) => {
@@ -442,6 +529,49 @@ impl App {
                 Task::none()
             }
         }
+    }
+
+    /// The part selected in the model view.
+    pub fn current_part(&self) -> Option<&PartInfo> {
+        match &self.model {
+            Some(ModelView::Loaded { detail, part }) => detail.parts.get(*part),
+            _ => None,
+        }
+    }
+
+    /// Absolute path of a file of the open model (`rel` is library-relative).
+    pub fn model_path(&self, rel: &str) -> Option<PathBuf> {
+        let Some(ModelView::Loaded { detail, .. }) = &self.model else {
+            return None;
+        };
+        let lib = self.library(detail.library_id)?;
+        Some(rel.split('/').fold(lib.path.clone(), |p, seg| p.join(seg)))
+    }
+
+    fn step_part(&mut self, mv: Move) {
+        if let Some(ModelView::Loaded { detail, part }) = &mut self.model {
+            let n = detail.parts.len();
+            if n == 0 {
+                return;
+            }
+            *part = match mv {
+                Move::Left => part.saturating_sub(1),
+                Move::Right => (*part + 1).min(n - 1),
+                Move::Home => 0,
+                Move::End => n - 1,
+                Move::Up | Move::Down => *part,
+            };
+        }
+    }
+
+    fn load_model(&self, id: ModelId) -> Task<Message> {
+        let Some(engine) = self.engine.clone() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move { engine.model(id).await.map_err(Arc::new) },
+            move |r| Message::ModelLoaded(id, r),
+        )
     }
 
     /// Writes the settings file off the UI thread.
@@ -484,7 +614,11 @@ impl App {
             EngineEvent::ScanFinished { library, .. } => {
                 self.scans.remove(&library);
                 let ticket = self.search.refresh();
-                Task::batch([self.load_libraries(), self.run_search(ticket)])
+                let model = match &self.model {
+                    Some(m) => self.load_model(m.id()),
+                    None => Task::none(),
+                };
+                Task::batch([self.load_libraries(), self.run_search(ticket), model])
             }
             EngineEvent::ScanFailed { library, error } => {
                 self.scans.remove(&library);
@@ -599,6 +733,19 @@ impl App {
     }
 }
 
+/// Runs an OS hand-off (open, reveal) off the UI thread.
+fn launch(f: impl FnOnce() -> Result<(), opener::OpenError> + Send + 'static) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || f().map_err(std::io::Error::other))
+                .await
+                .unwrap_or_else(|e| Err(std::io::Error::other(e)))
+                .map_err(Arc::new)
+        },
+        Message::Launched,
+    )
+}
+
 fn scan_starting() -> ScanState {
     ScanState {
         phase: ScanPhase::Walking,
@@ -634,6 +781,9 @@ fn on_event(event: Event, status: event::Status, _window: window::Id) -> Option<
                 keyboard::Key::Named(key::Named::Escape) => Some(Message::Escape),
                 keyboard::Key::Character(",") if modifiers.command() => Some(Message::OpenSettings),
                 keyboard::Key::Named(key::Named::Enter) if free => Some(Message::OpenSelected),
+                keyboard::Key::Character("o") if free && !modifiers.command() => {
+                    Some(Message::OpenPart)
+                }
                 keyboard::Key::Character("f") if modifiers.command() => Some(Message::FocusSearch),
                 keyboard::Key::Character("/") if free => Some(Message::FocusSearch),
                 keyboard::Key::Named(named) if free => match named {
@@ -895,6 +1045,88 @@ mod tests {
         let _ = a.update(Message::OpenSettings);
         let _ = a.update(Message::Escape);
         assert_eq!(a.screen, Screen::Library);
+    }
+
+    fn detail(id: ModelId, parts: &[&str]) -> ModelDetail {
+        ModelDetail {
+            id,
+            library_id: LibraryId::new(),
+            name: "Bin".into(),
+            rel_path: "bins/bin".into(),
+            kind: ModelKind::Folder,
+            created_at: 0,
+            parts: parts
+                .iter()
+                .map(|p| PartInfo {
+                    id: printdex_core::PartId::new(),
+                    rel_path: format!("bins/bin/{p}"),
+                    format: printdex_core::PrintableFormat::Stl,
+                    size: 10,
+                })
+                .collect(),
+            assets: vec![],
+        }
+    }
+
+    #[test]
+    fn opening_model_loads_detail() {
+        let mut a = app();
+        let id = ModelId::new();
+        let _ = a.update(Message::OpenModel(id));
+        assert_eq!(a.model, Some(ModelView::Loading(id)));
+        let _ = a.update(Message::ModelLoaded(id, Ok(Some(detail(id, &["a.stl"])))));
+        assert!(matches!(a.model, Some(ModelView::Loaded { part: 0, .. })));
+    }
+
+    #[test]
+    fn detail_for_other_model_is_ignored() {
+        let mut a = app();
+        let (first, second) = (ModelId::new(), ModelId::new());
+        let _ = a.update(Message::OpenModel(first));
+        let _ = a.update(Message::OpenModel(second));
+        let _ = a.update(Message::ModelLoaded(
+            first,
+            Ok(Some(detail(first, &["a.stl"]))),
+        ));
+        assert_eq!(a.model, Some(ModelView::Loading(second)));
+    }
+
+    #[test]
+    fn missing_model_shows_notice() {
+        let mut a = app();
+        let id = ModelId::new();
+        let _ = a.update(Message::OpenModel(id));
+        let _ = a.update(Message::ModelLoaded(id, Ok(Some(detail(id, &["a.stl"])))));
+        // A rescan removed it while it was on screen.
+        let _ = a.update(Message::ModelLoaded(id, Ok(None)));
+        assert_eq!(a.model, Some(ModelView::Missing(id)));
+        let _ = a.update(Message::Escape);
+        assert_eq!(a.screen, Screen::Library);
+        assert_eq!(a.model, None);
+    }
+
+    #[test]
+    fn selecting_part_updates_caption() {
+        let mut a = app();
+        let id = ModelId::new();
+        let _ = a.update(Message::OpenModel(id));
+        let _ = a.update(Message::ModelLoaded(
+            id,
+            Ok(Some(detail(id, &["a.stl", "b.stl", "c.stl"]))),
+        ));
+        assert_eq!(a.current_part().unwrap().rel_path, "bins/bin/a.stl");
+        let _ = a.update(Message::SelectPart(2));
+        assert_eq!(a.current_part().unwrap().rel_path, "bins/bin/c.stl");
+        let _ = a.update(Message::Nav(Move::Left));
+        assert_eq!(a.current_part().unwrap().rel_path, "bins/bin/b.stl");
+        let _ = a.update(Message::SelectPart(9));
+        assert_eq!(a.current_part().unwrap().rel_path, "bins/bin/b.stl");
+        // A reload keeps the selected part.
+        let _ = a.update(Message::ModelLoaded(
+            id,
+            Ok(Some(detail(id, &["a.stl", "b.stl", "c.stl"]))),
+        ));
+        assert_eq!(a.current_part().unwrap().rel_path, "bins/bin/b.stl");
     }
 
     #[test]

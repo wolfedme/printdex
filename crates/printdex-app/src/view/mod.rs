@@ -2,14 +2,16 @@
 
 mod empty;
 mod grid;
+mod model;
 mod sidebar;
 mod statusbar;
 mod toolbar;
+mod widgets;
 
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Alignment, Element, Length};
 
-use crate::app::{App, Boot, Message};
+use crate::app::{App, Boot, Message, Screen};
 use crate::i18n::{Arg, t, t_args};
 use crate::icons::{self, Icon};
 use crate::theme::{self, Palette};
@@ -37,6 +39,19 @@ pub fn view(app: &App) -> Element<'_, Message> {
 }
 
 fn shell(app: &App, p: Palette) -> Element<'_, Message> {
+    let main = match app.screen {
+        Screen::Model(_) => model::view(app, p),
+        Screen::Library | Screen::Settings => library(app, p),
+    };
+    row![
+        sidebar::view(app, p),
+        container(Space::new().width(1).height(Length::Fill)).style(move |_| p.hairline()),
+        main,
+    ]
+    .into()
+}
+
+fn library(app: &App, p: Palette) -> Element<'_, Message> {
     let mut content = column![].height(Length::Fill);
     if let Some(error) = &app.error {
         content = content.push(container(error_line(p, error)).padding([theme::S5, theme::S7]));
@@ -52,7 +67,7 @@ fn shell(app: &App, p: Palette) -> Element<'_, Message> {
         grid::view(app, p)
     });
 
-    let main = column![
+    column![
         toolbar::view(app, p),
         hairline(p),
         container(content)
@@ -60,12 +75,6 @@ fn shell(app: &App, p: Palette) -> Element<'_, Message> {
             .style(move |_| p.ground()),
         hairline(p),
         statusbar::view(app, p),
-    ];
-
-    row![
-        sidebar::view(app, p),
-        container(Space::new().width(1).height(Length::Fill)).style(move |_| p.hairline()),
-        main,
     ]
     .into()
 }

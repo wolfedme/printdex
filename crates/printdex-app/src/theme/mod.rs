@@ -517,6 +517,26 @@ impl Palette {
         }
     }
 
+    /// Ghost button: text only until hovered.
+    pub fn button_ghost(&self, status: button::Status) -> button::Style {
+        let (bg, fg) = match status {
+            button::Status::Hovered => (Some(self.n.rule_soft.into()), self.n.ink),
+            button::Status::Pressed => (Some(self.n.rule.into()), self.n.ink),
+            button::Status::Disabled => (None, self.n.ink_3),
+            button::Status::Active => (None, self.n.ink_2),
+        };
+        button::Style {
+            background: bg,
+            text_color: fg,
+            border: Border {
+                radius: RADIUS_CONTROL.into(),
+                ..Border::default()
+            },
+            shadow: Shadow::default(),
+            snap: true,
+        }
+    }
+
     /// Sidebar row; `active` is the current scope.
     pub fn rail_item(&self, active: bool, status: button::Status) -> button::Style {
         let bg = if active {
