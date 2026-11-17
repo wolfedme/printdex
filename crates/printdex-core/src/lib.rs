@@ -15,13 +15,17 @@ pub mod scan;
 pub mod time;
 pub mod walk;
 
-pub use db::{Library, LibraryKind, ModelHit, Stats};
-pub use engine::Engine;
+pub use db::{
+    AssetInfo, Library, LibraryKind, ModelDetail, ModelHit, PartInfo, SearchFilter, SortOrder,
+    Stats,
+};
+pub use engine::{Engine, LibraryStatus};
 pub use error::{CoreError, Result};
 pub use events::{EngineEvent, ScanPhase};
 pub use grouping::ModelKind;
 pub use ids::{AssetId, LibraryId, ModelId, PartId};
 pub use scan::ScanSummary;
+pub use walk::PrintableFormat;
 
 /// Version of the engine crate.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

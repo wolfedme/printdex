@@ -9,8 +9,11 @@
 //! ([`ThemeTokens`]). Neutral ink and rules depend only on light/dark, and
 //! status colours never change with the colour theme.
 
-use iced::widget::{button, container, scrollable, text_input};
+use iced::overlay::menu;
+use iced::widget::{button, container, pick_list, scrollable, text_input, toggler};
 use iced::{Background, Border, Color, Font, Shadow, font};
+
+mod presets;
 
 // ---------- spacing, radii, sizes ----------
 
@@ -70,12 +73,12 @@ pub const FONT_DATA: Font = Font::with_name(MONO);
 
 /// Font files bundled with the app (SIL OFL 1.1, Latin subset).
 pub const FONT_FILES: [&[u8]; 6] = [
-    include_bytes!("../assets/fonts/Figtree-400.ttf"),
-    include_bytes!("../assets/fonts/Figtree-500.ttf"),
-    include_bytes!("../assets/fonts/Figtree-600.ttf"),
-    include_bytes!("../assets/fonts/Figtree-700.ttf"),
-    include_bytes!("../assets/fonts/JetBrainsMono-400.ttf"),
-    include_bytes!("../assets/fonts/JetBrainsMono-500.ttf"),
+    include_bytes!("../../assets/fonts/Figtree-400.ttf"),
+    include_bytes!("../../assets/fonts/Figtree-500.ttf"),
+    include_bytes!("../../assets/fonts/Figtree-600.ttf"),
+    include_bytes!("../../assets/fonts/Figtree-700.ttf"),
+    include_bytes!("../../assets/fonts/JetBrainsMono-400.ttf"),
+    include_bytes!("../../assets/fonts/JetBrainsMono-500.ttf"),
 ];
 
 // ---------- colours ----------
@@ -121,13 +124,89 @@ pub enum Mode {
     Dark,
 }
 
-/// The user's colour theme (Settings > Appearance > Colour theme).
-/// Graphite signal is the default; the other DESIGN.md presets are added
-/// as entries here.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// The user's colour theme (Settings > Appearance > Colour theme). The
+/// tokens come from `presets.rs`, generated from `.impeccable/design.json`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum ColorTheme {
     #[default]
     GraphiteSignal,
+    VioletFrost,
+    SmokedQuartz,
+    SeaGlass,
+    AmberResin,
+    RosePetg,
+    Glacier,
+}
+
+impl ColorTheme {
+    /// Every preset, in the order Settings shows them.
+    pub const ALL: [ColorTheme; 7] = [
+        ColorTheme::GraphiteSignal,
+        ColorTheme::VioletFrost,
+        ColorTheme::SmokedQuartz,
+        ColorTheme::SeaGlass,
+        ColorTheme::AmberResin,
+        ColorTheme::RosePetg,
+        ColorTheme::Glacier,
+    ];
+
+    /// Stable name used in the settings file.
+    pub fn key(self) -> &'static str {
+        match self {
+            ColorTheme::GraphiteSignal => "graphite",
+            ColorTheme::VioletFrost => "frost",
+            ColorTheme::SmokedQuartz => "quartz",
+            ColorTheme::SeaGlass => "seaglass",
+            ColorTheme::AmberResin => "resin",
+            ColorTheme::RosePetg => "rose",
+            ColorTheme::Glacier => "glacier",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<ColorTheme> {
+        ColorTheme::ALL.into_iter().find(|t| t.key() == key)
+    }
+}
+
+/// Translucent glass over an OS blur, or opaque.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Surface {
+    Glass,
+    #[default]
+    Solid,
+}
+
+/// Whether the OS can blur what is behind a transparent window. iced 0.14
+/// (winit) blurs on macOS and on KDE Plasma; elsewhere glass would show
+/// the desktop unblurred, so the app uses the solid set instead.
+pub fn blur_supported() -> bool {
+    blur_supported_on(
+        std::env::consts::OS,
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+    )
+}
+
+fn blur_supported_on(os: &str, desktop: Option<&str>) -> bool {
+    match os {
+        "macos" => true,
+        "linux" => desktop.is_some_and(|d| d.split(':').any(|p| p.eq_ignore_ascii_case("kde"))),
+        _ => false,
+    }
+}
+
+/// Kinds of status badge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Badge {
+    Ok,
+    Busy,
+    Offline,
+}
+
+/// One colour theme in one mode: the glass set and its solid twin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThemeSet {
+    pub glass: ThemeTokens,
+    pub solid: ThemeTokens,
 }
 
 /// Tokens a colour theme may change: glass tint and the accent set.
@@ -171,34 +250,6 @@ pub struct Status {
     pub partial_soft: Color,
     pub offline: Color,
 }
-
-const GRAPHITE_LIGHT: ThemeTokens = ThemeTokens {
-    ground: hex("#f0f3fa"),
-    surface: hex("#fcfdff"),
-    tray: hex("#e9edf5"),
-    rail: hex("#e1e8f6"),
-    rail_hi: hex("#f5f8ff"),
-    accent: hex("#9f8600"),
-    accent_soft: hex("#f7edb2"),
-    accent_ink: hex("#755c00"),
-    primary: hex("#9f8600"),
-    primary_hi: hex("#907600"),
-    on_primary: hex("#191100"),
-};
-
-const GRAPHITE_DARK: ThemeTokens = ThemeTokens {
-    ground: hex("#14161a"),
-    surface: hex("#222429"),
-    tray: hex("#1c1e23"),
-    rail: hex("#0c0f17"),
-    rail_hi: hex("#1f242e"),
-    accent: hex("#fadf27"),
-    accent_soft: hex("#413801"),
-    accent_ink: hex("#f4e06a"),
-    primary: hex("#fadf27"),
-    primary_hi: hex("#fff043"),
-    on_primary: hex("#191100"),
-};
 
 const NEUTRAL_LIGHT: Neutral = Neutral {
     edge: hex("#d9dfe5"),
@@ -245,11 +296,16 @@ const STATUS_DARK: Status = Status {
 };
 
 impl ColorTheme {
-    /// The theme-dependent tokens for `mode`.
-    pub fn tokens(self, mode: Mode) -> ThemeTokens {
-        match (self, mode) {
-            (ColorTheme::GraphiteSignal, Mode::Light) => GRAPHITE_LIGHT,
-            (ColorTheme::GraphiteSignal, Mode::Dark) => GRAPHITE_DARK,
+    /// The theme-dependent tokens for `mode` and `surface`.
+    pub fn tokens(self, mode: Mode, surface: Surface) -> ThemeTokens {
+        let (light, dark) = presets::preset(self);
+        let set = match mode {
+            Mode::Light => light,
+            Mode::Dark => dark,
+        };
+        match surface {
+            Surface::Glass => set.glass,
+            Surface::Solid => set.solid,
         }
     }
 }
@@ -258,26 +314,77 @@ impl ColorTheme {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
     pub mode: Mode,
+    pub surface: Surface,
     pub t: ThemeTokens,
     pub n: Neutral,
     pub status: Status,
 }
 
 impl Palette {
-    pub fn new(theme: ColorTheme, mode: Mode) -> Palette {
-        let (n, status) = match mode {
+    pub fn new(theme: ColorTheme, mode: Mode, surface: Surface) -> Palette {
+        let (mut n, status) = match mode {
             Mode::Light => (NEUTRAL_LIGHT, STATUS_LIGHT),
             Mode::Dark => (NEUTRAL_DARK, STATUS_DARK),
         };
+        if surface == Surface::Glass {
+            // The bright 1px edge of glass panes (DESIGN.md "Elevation").
+            n.edge = match mode {
+                Mode::Light => hex("#ffffffe6"),
+                Mode::Dark => hex("#ffffff1a"),
+            };
+        }
         Palette {
             mode,
-            t: theme.tokens(mode),
+            surface,
+            t: theme.tokens(mode, surface),
             n,
             status,
         }
     }
 
     /// The iced theme, so built-in widget defaults also fit the palette.
+    /// `a` faded `amount` of the way into `b` (theme cross-fades).
+    pub fn blend(a: &Palette, b: &Palette, amount: f32) -> Palette {
+        let c = |x: Color, y: Color| lerp(x, y, amount);
+        Palette {
+            mode: b.mode,
+            surface: b.surface,
+            t: ThemeTokens {
+                ground: c(a.t.ground, b.t.ground),
+                surface: c(a.t.surface, b.t.surface),
+                tray: c(a.t.tray, b.t.tray),
+                rail: c(a.t.rail, b.t.rail),
+                rail_hi: c(a.t.rail_hi, b.t.rail_hi),
+                accent: c(a.t.accent, b.t.accent),
+                accent_soft: c(a.t.accent_soft, b.t.accent_soft),
+                accent_ink: c(a.t.accent_ink, b.t.accent_ink),
+                primary: c(a.t.primary, b.t.primary),
+                primary_hi: c(a.t.primary_hi, b.t.primary_hi),
+                on_primary: c(a.t.on_primary, b.t.on_primary),
+            },
+            n: Neutral {
+                edge: c(a.n.edge, b.n.edge),
+                rail_rule: c(a.n.rail_rule, b.n.rail_rule),
+                ink: c(a.n.ink, b.n.ink),
+                ink_2: c(a.n.ink_2, b.n.ink_2),
+                ink_3: c(a.n.ink_3, b.n.ink_3),
+                rule: c(a.n.rule, b.n.rule),
+                rule_soft: c(a.n.rule_soft, b.n.rule_soft),
+                on_rail: c(a.n.on_rail, b.n.on_rail),
+                on_rail_2: c(a.n.on_rail_2, b.n.on_rail_2),
+            },
+            status: Status {
+                ok: c(a.status.ok, b.status.ok),
+                ok_soft: c(a.status.ok_soft, b.status.ok_soft),
+                fail: c(a.status.fail, b.status.fail),
+                fail_soft: c(a.status.fail_soft, b.status.fail_soft),
+                partial: c(a.status.partial, b.status.partial),
+                partial_soft: c(a.status.partial_soft, b.status.partial_soft),
+                offline: c(a.status.offline, b.status.offline),
+            },
+        }
+    }
+
     pub fn iced_theme(&self) -> iced::Theme {
         iced::Theme::custom(
             "Printdex",
@@ -332,6 +439,32 @@ impl Palette {
         }
     }
 
+    /// Model pane part way into its selected look (`amount` 0..=1), for
+    /// the selection cross-fade.
+    pub fn pane_fade(&self, amount: f32, hovered: bool) -> container::Style {
+        if amount <= 0.0 {
+            return self.pane(false, hovered);
+        }
+        if amount >= 1.0 {
+            return self.pane(true, hovered);
+        }
+        let off = self.pane(false, hovered);
+        let on = self.pane(true, hovered);
+        let bg = |s: &container::Style| match s.background {
+            Some(Background::Color(c)) => c,
+            _ => Color::TRANSPARENT,
+        };
+        container::Style {
+            background: Some(lerp(bg(&off), bg(&on), amount).into()),
+            border: Border {
+                color: lerp(off.border.color, on.border.color, amount),
+                width: off.border.width + (on.border.width - off.border.width) * amount,
+                radius: RADIUS_PANE.into(),
+            },
+            ..on
+        }
+    }
+
     /// Model pane; `selected` adds the Signal Wash and the 2px accent ring.
     pub fn pane(&self, selected: bool, hovered: bool) -> container::Style {
         let (bg, border) = if selected {
@@ -363,6 +496,89 @@ impl Palette {
             border,
             shadow: Shadow::default(),
             snap: true,
+        }
+    }
+
+    /// A list row part way into its selected look (`amount` 0..=1).
+    pub fn list_row_fade(&self, amount: f32, hovered: bool) -> container::Style {
+        let base = if hovered {
+            self.n.rule_soft
+        } else {
+            Color::TRANSPARENT
+        };
+        let bg = if amount <= 0.0 {
+            base
+        } else {
+            lerp(base, self.t.accent_soft, amount)
+        };
+        container::Style {
+            background: (bg.a > 0.0).then(|| bg.into()),
+            text_color: Some(self.n.ink),
+            ..container::Style::default()
+        }
+    }
+
+    /// The tray behind a segmented control.
+    pub fn segmented(&self) -> container::Style {
+        container::Style {
+            background: Some(self.n.rule_soft.into()),
+            border: Border {
+                color: self.n.rule,
+                width: 1.0,
+                radius: RADIUS_CONTROL.into(),
+            },
+            ..container::Style::default()
+        }
+    }
+
+    /// Status badge in the libraries table.
+    pub fn badge(&self, kind: Badge) -> container::Style {
+        let (bg, fg) = match kind {
+            Badge::Ok => (self.status.ok_soft, self.status.ok),
+            Badge::Busy => (self.t.accent_soft, self.t.accent_ink),
+            Badge::Offline => (self.n.rule_soft, self.status.offline),
+        };
+        container::Style {
+            background: Some(bg.into()),
+            text_color: Some(fg),
+            border: Border {
+                radius: 6.0.into(),
+                ..Border::default()
+            },
+            ..container::Style::default()
+        }
+    }
+
+    /// Tooltip bubble: opaque surface with an edge.
+    pub fn tooltip(&self) -> container::Style {
+        container::Style {
+            background: Some(
+                Color {
+                    a: 1.0,
+                    ..self.t.surface
+                }
+                .into(),
+            ),
+            text_color: Some(self.n.ink),
+            border: Border {
+                color: self.n.edge,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..container::Style::default()
+        }
+    }
+
+    /// A small filled square, for colour swatches.
+    pub fn swatch(&self, color: Color) -> container::Style {
+        container::Style {
+            background: Some(color.into()),
+            border: Border {
+                color: self.n.rule,
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..container::Style::default()
         }
     }
 
@@ -461,6 +677,131 @@ impl Palette {
         }
     }
 
+    /// One segment of a segmented control.
+    pub fn segment(&self, active: bool, status: button::Status) -> button::Style {
+        let (bg, fg) = if active {
+            (Some(self.t.accent_soft.into()), self.t.accent_ink)
+        } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+            (Some(self.n.rule_soft.into()), self.n.ink)
+        } else {
+            (None, self.n.ink_2)
+        };
+        button::Style {
+            background: bg,
+            text_color: fg,
+            border: Border {
+                radius: (RADIUS_CONTROL - 3.0).into(),
+                ..Border::default()
+            },
+            shadow: Shadow::default(),
+            snap: true,
+        }
+    }
+
+    /// The sort pick list: a secondary control.
+    pub fn pick(&self, status: pick_list::Status) -> pick_list::Style {
+        let hovered = matches!(status, pick_list::Status::Hovered);
+        pick_list::Style {
+            text_color: self.n.ink,
+            placeholder_color: self.n.ink_3,
+            handle_color: self.n.ink_3,
+            background: Background::Color(if hovered {
+                mix(self.t.surface, self.n.ink, 0.06)
+            } else {
+                self.t.surface
+            }),
+            border: Border {
+                color: if matches!(status, pick_list::Status::Opened { .. }) {
+                    self.t.accent
+                } else {
+                    self.n.rule
+                },
+                width: 1.0,
+                radius: RADIUS_CONTROL.into(),
+            },
+        }
+    }
+
+    /// The sort pick list's open menu.
+    pub fn pick_menu(&self) -> menu::Style {
+        menu::Style {
+            // Menus float over content: always opaque.
+            background: Background::Color(Color {
+                a: 1.0,
+                ..self.t.surface
+            }),
+            border: Border {
+                color: self.n.edge,
+                width: 1.0,
+                radius: RADIUS_CONTROL.into(),
+            },
+            text_color: self.n.ink,
+            selected_text_color: self.t.accent_ink,
+            selected_background: Background::Color(self.t.accent_soft),
+            shadow: Shadow::default(),
+        }
+    }
+
+    /// Destructive confirmation button.
+    pub fn button_danger(&self, status: button::Status) -> button::Style {
+        let bg = match status {
+            button::Status::Hovered | button::Status::Pressed => {
+                mix(self.status.fail, self.n.ink, 0.15)
+            }
+            _ => self.status.fail,
+        };
+        button::Style {
+            background: Some(bg.into()),
+            text_color: Color::WHITE,
+            border: Border {
+                radius: RADIUS_CONTROL.into(),
+                ..Border::default()
+            },
+            shadow: Shadow::default(),
+            snap: true,
+        }
+    }
+
+    pub fn toggler(&self, status: toggler::Status) -> toggler::Style {
+        let (toggler::Status::Active { is_toggled: on }
+        | toggler::Status::Hovered { is_toggled: on }
+        | toggler::Status::Disabled { is_toggled: on }) = status;
+        toggler::Style {
+            background: Background::Color(if on { self.t.primary } else { self.n.rule }),
+            background_border_width: 0.0,
+            background_border_color: Color::TRANSPARENT,
+            foreground: Background::Color(Color {
+                a: 1.0,
+                ..self.t.surface
+            }),
+            foreground_border_width: 0.0,
+            foreground_border_color: Color::TRANSPARENT,
+            text_color: Some(self.n.ink),
+            border_radius: None,
+            padding_ratio: 0.1,
+        }
+    }
+
+    /// Ghost button: text only until hovered.
+    pub fn button_ghost(&self, status: button::Status) -> button::Style {
+        let (bg, fg) = match status {
+            button::Status::Hovered => (Some(self.n.rule_soft.into()), self.n.ink),
+            button::Status::Pressed => (Some(self.n.rule.into()), self.n.ink),
+            button::Status::Disabled => (None, self.n.ink_3),
+            button::Status::Active => (None, self.n.ink_2),
+        };
+        button::Style {
+            background: bg,
+            text_color: fg,
+            border: Border {
+                radius: RADIUS_CONTROL.into(),
+                ..Border::default()
+            },
+            shadow: Shadow::default(),
+            snap: true,
+        }
+    }
+
     /// Sidebar row; `active` is the current scope.
     pub fn rail_item(&self, active: bool, status: button::Status) -> button::Style {
         let bg = if active {
@@ -542,6 +883,17 @@ impl Palette {
     }
 }
 
+/// Linear blend of two colours, alpha included.
+pub fn lerp(a: Color, b: Color, amount: f32) -> Color {
+    let t = amount.clamp(0.0, 1.0);
+    Color {
+        r: a.r + (b.r - a.r) * t,
+        g: a.g + (b.g - a.g) * t,
+        b: a.b + (b.b - a.b) * t,
+        a: a.a + (b.a - a.a) * t,
+    }
+}
+
 /// Mixes `amount` of `b` into `a` (alpha of `a` kept).
 pub fn mix(a: Color, b: Color, amount: f32) -> Color {
     Color {
@@ -567,7 +919,7 @@ mod tests {
     #[test]
     fn solid_set_is_opaque() {
         for mode in [Mode::Light, Mode::Dark] {
-            let p = Palette::new(ColorTheme::GraphiteSignal, mode);
+            let p = Palette::new(ColorTheme::GraphiteSignal, mode, Surface::Solid);
             for c in [
                 p.t.ground,
                 p.t.surface,
@@ -586,8 +938,8 @@ mod tests {
 
     #[test]
     fn mode_switches_palette() {
-        let light = Palette::new(ColorTheme::GraphiteSignal, Mode::Light);
-        let dark = Palette::new(ColorTheme::GraphiteSignal, Mode::Dark);
+        let light = Palette::new(ColorTheme::GraphiteSignal, Mode::Light, Surface::Solid);
+        let dark = Palette::new(ColorTheme::GraphiteSignal, Mode::Dark, Surface::Solid);
         assert_eq!(light.n.ink, hex("#181d27"));
         assert_eq!(dark.n.ink, hex("#eceef4"));
         assert_eq!(dark.t.accent, hex("#fadf27"));
@@ -597,7 +949,7 @@ mod tests {
     #[test]
     fn status_colours_do_not_depend_on_colour_theme() {
         for mode in [Mode::Light, Mode::Dark] {
-            let p = Palette::new(ColorTheme::default(), mode);
+            let p = Palette::new(ColorTheme::default(), mode, Surface::Solid);
             let expected = if mode == Mode::Light {
                 STATUS_LIGHT
             } else {
@@ -608,10 +960,85 @@ mod tests {
     }
 
     #[test]
+    fn blur_only_where_the_os_provides_it() {
+        assert!(blur_supported_on("macos", None));
+        assert!(blur_supported_on("linux", Some("KDE")));
+        assert!(blur_supported_on("linux", Some("ubuntu:KDE")));
+        assert!(!blur_supported_on("linux", Some("GNOME")));
+        assert!(!blur_supported_on("linux", None));
+        assert!(!blur_supported_on("windows", None));
+    }
+
+    #[test]
+    fn seven_presets_with_unique_keys() {
+        assert_eq!(ColorTheme::ALL.len(), 7);
+        for t in ColorTheme::ALL {
+            assert_eq!(ColorTheme::from_key(t.key()), Some(t));
+        }
+        assert_eq!(ColorTheme::from_key("nope"), None);
+    }
+
+    #[test]
+    fn every_preset_has_opaque_solid_twins() {
+        for t in ColorTheme::ALL {
+            for mode in [Mode::Light, Mode::Dark] {
+                let s = t.tokens(mode, Surface::Solid);
+                for c in [
+                    s.ground,
+                    s.surface,
+                    s.tray,
+                    s.rail,
+                    s.rail_hi,
+                    s.accent_soft,
+                ] {
+                    assert!((c.a - 1.0).abs() < 0.01, "{t:?} {mode:?}: {c:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn glass_alphas_match_design() {
+        let near = |c: Color, a: f32| (c.a - a).abs() < 0.01;
+        for t in ColorTheme::ALL {
+            let l = t.tokens(Mode::Light, Surface::Glass);
+            let d = t.tokens(Mode::Dark, Surface::Glass);
+            assert!(near(l.rail, 0.82) && near(d.rail, 0.82), "{t:?} rail");
+            assert!(near(l.ground, 0.86) && near(d.ground, 0.84), "{t:?} ground");
+        }
+    }
+
+    #[test]
+    fn presets_never_change_status_colours() {
+        for t in ColorTheme::ALL {
+            for mode in [Mode::Light, Mode::Dark] {
+                let a = Palette::new(t, mode, Surface::Glass).status;
+                let b = Palette::new(ColorTheme::default(), mode, Surface::Solid).status;
+                assert_eq!(a, b);
+            }
+        }
+    }
+
+    #[test]
+    fn accent_text_contrast_holds_in_every_preset() {
+        for t in ColorTheme::ALL {
+            for mode in [Mode::Light, Mode::Dark] {
+                let p = Palette::new(t, mode, Surface::Solid);
+                let c = contrast(p.t.accent_ink, p.t.accent_soft);
+                assert!(c >= 4.5, "{t:?} {mode:?}: {c}");
+                assert!(
+                    contrast(p.n.on_rail, p.t.rail) >= 4.5,
+                    "{t:?} {mode:?} rail"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn text_contrast_on_panes_is_readable() {
         // WCAG AA for body text (4.5:1) on the pane and rail fills.
         for mode in [Mode::Light, Mode::Dark] {
-            let p = Palette::new(ColorTheme::default(), mode);
+            let p = Palette::new(ColorTheme::default(), mode, Surface::Solid);
             assert!(contrast(p.n.ink, p.t.surface) >= 4.5);
             assert!(contrast(p.n.ink_2, p.t.surface) >= 4.5);
             assert!(contrast(p.n.on_rail, p.t.rail) >= 4.5);

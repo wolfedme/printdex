@@ -7,14 +7,34 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
-use crate::db::{Db, Library, LibraryKind, ModelHit, Stats};
+use crate::db::{Db, Library, LibraryKind, ModelDetail, ModelHit, SearchFilter, SortOrder, Stats};
 use crate::error::{CoreError, Result};
 use crate::events::EngineEvent;
-use crate::ids::LibraryId;
+use crate::ids::{LibraryId, ModelId};
 use crate::scan::{ScanSummary, scan_library};
 
 /// Event channel capacity. Slow subscribers miss old events (`Lagged`).
 const EVENT_CAPACITY: usize = 1024;
+
+/// How long a reachability check may take before the library counts as offline.
+pub const STATUS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Whether a library's folder is reachable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LibraryStatus {
+    Online,
+    Offline,
+}
+
+async fn folder_status(path: PathBuf) -> LibraryStatus {
+    let check = tokio::task::spawn_blocking(move || {
+        std::fs::read_dir(&path).is_ok_and(|mut d| d.next().is_none_or(|e| e.is_ok()))
+    });
+    match tokio::time::timeout(STATUS_TIMEOUT, check).await {
+        Ok(Ok(true)) => LibraryStatus::Online,
+        _ => LibraryStatus::Offline,
+    }
+}
 
 /// Handle to a Printdex engine. Cheap to clone; clones share everything.
 #[derive(Clone, Debug)]
@@ -133,19 +153,66 @@ impl Engine {
         self.db.search_models(query, limit).await
     }
 
-    /// Searches models within one library, or all when `library` is `None`.
+    /// Searches models within one library (or all when `library` is
+    /// `None`), narrowed by `filter`, in `sort` order.
     pub async fn search_in(
         &self,
         library: Option<LibraryId>,
         query: &str,
+        filter: &SearchFilter,
+        sort: SortOrder,
         limit: u32,
     ) -> Result<Vec<ModelHit>> {
-        self.db.search_models_in(library, query, limit).await
+        self.db
+            .search_models_in(library, query, filter, sort, limit)
+            .await
     }
 
     /// Number of models a search would return without a limit.
-    pub async fn count(&self, library: Option<LibraryId>, query: &str) -> Result<u64> {
-        self.db.count_models(library, query).await
+    pub async fn count(
+        &self,
+        library: Option<LibraryId>,
+        query: &str,
+        filter: &SearchFilter,
+    ) -> Result<u64> {
+        self.db.count_models(library, query, filter).await
+    }
+
+    /// Model `id` with its present files; `None` when it is gone.
+    pub async fn model(&self, id: ModelId) -> Result<Option<ModelDetail>> {
+        self.db.model_detail(id).await
+    }
+
+    /// Removes library `id` and everything Printdex knows about it. Files
+    /// on disk are never touched. Fails while the library is scanning.
+    pub async fn remove_library(&self, id: LibraryId) -> Result<()> {
+        if lock(&self.scanning).contains(&id) {
+            return Err(CoreError::AlreadyScanning(id));
+        }
+        if !self.db.delete_library(id).await? {
+            return Err(CoreError::LibraryNotFound(id));
+        }
+        let _ = self.events.send(EngineEvent::LibraryRemoved(id));
+        Ok(())
+    }
+
+    /// Renames library `id`. Blank names are rejected.
+    pub async fn rename_library(&self, id: LibraryId, name: &str) -> Result<Library> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(CoreError::LibraryNameInvalid);
+        }
+        self.db.rename_library(id, name).await?;
+        let lib = self.db.library(id).await?;
+        let _ = self.events.send(EngineEvent::LibraryRenamed(lib.clone()));
+        Ok(lib)
+    }
+
+    /// Whether library `id`'s folder can be listed right now. Gives up
+    /// after [`STATUS_TIMEOUT`] (a hung network share counts as offline).
+    pub async fn library_status(&self, id: LibraryId) -> Result<LibraryStatus> {
+        let lib = self.db.library(id).await?;
+        Ok(folder_status(lib.path).await)
     }
 
     /// Present-model counts per library; libraries without models are absent.

@@ -16,6 +16,8 @@ pub enum CoreError {
     LibraryPathInvalid(PathBuf),
     #[error("library overlaps an existing library at {}", existing.display())]
     LibraryOverlaps { existing: PathBuf },
+    #[error("library name is empty")]
+    LibraryNameInvalid,
     #[error("library folder is offline or unreadable: {}", .0.display())]
     LibraryOffline(PathBuf),
     #[error("library is already being scanned: {0}")]

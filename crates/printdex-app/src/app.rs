@@ -11,19 +11,27 @@ use iced::widget::scrollable::{AbsoluteOffset, RelativeOffset};
 use iced::widget::{Id, operation};
 use iced::{Event, Size, Subscription, Task, event, window};
 use printdex_core::{
-    CoreError, Engine, EngineEvent, Library, LibraryId, ModelHit, ModelId, ScanPhase, ScanSummary,
+    CoreError, Engine, EngineEvent, Library, LibraryId, LibraryStatus, ModelDetail, ModelHit,
+    ModelId, PartInfo, ScanPhase, ScanSummary,
 };
 use tokio_util::sync::CancellationToken;
 
+use crate::filters::{self, Chip};
 use crate::grid::GridMetrics;
 use crate::i18n::{Arg, t, t_args};
+use crate::motion::Motion;
 use crate::nav::{self, Move};
 use crate::search::{SEARCH_LIMIT, SearchState, Ticket};
-use crate::theme::{self, ColorTheme, Mode, Palette};
+use crate::settings::{Settings, ThemeMode, Translucency, ViewMode};
+use crate::theme::{self, ColorTheme, Mode, Palette, Surface};
 
 /// Widget ids the update logic talks to.
 pub fn search_id() -> Id {
     Id::new("search")
+}
+
+pub fn rename_id() -> Id {
+    Id::new("rename")
 }
 
 pub fn grid_id() -> Id {
@@ -39,12 +47,72 @@ pub const GRID_PAD_X: f32 = theme::S7;
 /// Initial window size (the DESIGN.md mock width).
 pub const INITIAL_WINDOW: Size = Size::new(1280.0, 800.0);
 
-/// Where the engine keeps its data.
+/// Startup options from the command line and the settings file.
 #[derive(Clone, Debug)]
 pub struct Options {
     pub data_dir: PathBuf,
-    /// Fixed light/dark; `None` follows the OS.
+    /// Where `settings.toml` lives; `None` keeps settings in memory only.
+    pub config_dir: Option<PathBuf>,
+    /// One-off light/dark override (`--mode`); never saved.
     pub mode: Option<Mode>,
+    /// Settings as loaded at startup.
+    pub settings: Settings,
+    /// Whether the window was created transparent with an OS blur. Fixed
+    /// for the window's lifetime.
+    pub glass_window: bool,
+}
+
+impl Options {
+    /// Options for tests and tools: no settings file, solid window.
+    #[cfg(test)]
+    pub fn in_memory(data_dir: PathBuf) -> Options {
+        Options {
+            data_dir,
+            config_dir: None,
+            mode: None,
+            settings: Settings::default(),
+            glass_window: false,
+        }
+    }
+}
+
+/// The model view's content.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ModelView {
+    Loading(ModelId),
+    Loaded {
+        detail: ModelDetail,
+        part: usize,
+    },
+    /// Gone from the library (removed by a rescan, or never there).
+    Missing(ModelId),
+}
+
+impl ModelView {
+    pub fn id(&self) -> ModelId {
+        match self {
+            ModelView::Loading(id) | ModelView::Missing(id) => *id,
+            ModelView::Loaded { detail, .. } => detail.id,
+        }
+    }
+}
+
+/// The section shown on the Settings screen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SettingsSection {
+    #[default]
+    Libraries,
+    Appearance,
+    About,
+}
+
+/// Which screen fills the main area.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Screen {
+    #[default]
+    Library,
+    Model(ModelId),
+    Settings,
 }
 
 /// Startup state.
@@ -81,8 +149,23 @@ pub struct App {
     pub selected: Option<ModelId>,
     pub hovered: Option<ModelId>,
     pub error: Option<String>,
-    pub color_theme: ColorTheme,
-    pub mode: Mode,
+    pub screen: Screen,
+    pub model: Option<ModelView>,
+    /// Active filter chips, in the order they were added.
+    pub chips: Vec<Chip>,
+    pub filter_menu: bool,
+    pub settings_section: SettingsSection,
+    /// The library whose "Remove" asks for confirmation.
+    pub confirm_remove: Option<LibraryId>,
+    /// Libraries whose folder can't be reached, with the time it was
+    /// noticed ("14:02"). Their models stay browsable.
+    pub offline: HashMap<LibraryId, String>,
+    /// The library being renamed, with the edited name.
+    pub renaming: Option<(LibraryId, String)>,
+    pub settings: Settings,
+    pub motion: Motion,
+    /// The OS's light/dark preference, used when the mode is System.
+    pub system_mode: Mode,
     pub window: Size,
     pub viewport: Option<GridViewport>,
     cancel: CancellationToken,
@@ -114,12 +197,47 @@ pub enum Message {
     Escape,
     SystemMode(iced::theme::Mode),
     DismissError,
+    /// Open the selected model (Enter).
+    OpenSelected,
+    OpenModel(ModelId),
+    OpenSettings,
+    Back,
+    ShowSection(SettingsSection),
+    AskRemove(LibraryId),
+    CancelRemove,
+    ConfirmRemove(LibraryId),
+    StartRename(LibraryId),
+    RenameInput(String),
+    CommitRename,
+    CancelRename,
+    /// Result of a remove or rename.
+    LibraryChanged(Result<(), Arc<CoreError>>),
+    RescanLibrary(LibraryId),
+    /// A reachability check finished; `scan` starts a scan when online.
+    Status(LibraryId, Result<LibraryStatus, Arc<CoreError>>, bool),
+    ToggleFilterMenu,
+    ToggleChip(Chip),
+    ModelLoaded(ModelId, Result<Option<ModelDetail>, Arc<CoreError>>),
+    SelectPart(usize),
+    /// Open the selected part with the OS default app (O).
+    OpenPart,
+    /// Open a file with the OS default app.
+    OpenFile(PathBuf),
+    /// Show a file or folder in the OS file manager.
+    ShowInFolder(PathBuf),
+    Launched(Result<(), Arc<std::io::Error>>),
+    SettingsChanged(Settings),
+    /// A window frame while something animates.
+    Frame(std::time::Instant),
+    SettingsSaved(Result<(), Arc<std::io::Error>>),
 }
 
 impl App {
     /// State before the engine is open.
     pub fn new(options: Options) -> App {
-        let mode = options.mode.unwrap_or_default();
+        let settings = options.settings;
+        let mut search = SearchState::default();
+        search.query.sort = settings.sort;
         App {
             options,
             engine: None,
@@ -127,12 +245,25 @@ impl App {
             libraries: Vec::new(),
             counts: HashMap::new(),
             scans: HashMap::new(),
-            search: SearchState::default(),
+            search,
             selected: None,
             hovered: None,
             error: None,
-            color_theme: ColorTheme::default(),
-            mode,
+            screen: Screen::Library,
+            model: None,
+            motion: {
+                let mut m = Motion::new(std::time::Instant::now());
+                m.reduce = settings.reduce_motion;
+                m
+            },
+            chips: Vec::new(),
+            filter_menu: false,
+            settings_section: SettingsSection::default(),
+            confirm_remove: None,
+            offline: HashMap::new(),
+            renaming: None,
+            settings,
+            system_mode: Mode::default(),
             window: INITIAL_WINDOW,
             viewport: None,
             cancel: CancellationToken::new(),
@@ -151,8 +282,55 @@ impl App {
         (App::new(options), Task::batch([open, mode]))
     }
 
+    /// Light or dark right now: the `--mode` override, else the setting,
+    /// else the OS.
+    pub fn mode(&self) -> Mode {
+        match (self.options.mode, self.settings.mode) {
+            (Some(m), _) => m,
+            (None, ThemeMode::Light) => Mode::Light,
+            (None, ThemeMode::Dark) => Mode::Dark,
+            (None, ThemeMode::System) => self.system_mode,
+        }
+    }
+
+    /// Glass only in a transparent window and while translucency is on.
+    pub fn surface(&self) -> Surface {
+        if self.options.glass_window && self.settings.translucency == Translucency::Auto {
+            Surface::Glass
+        } else {
+            Surface::Solid
+        }
+    }
+
+    pub fn color_theme(&self) -> ColorTheme {
+        self.settings.color_theme
+    }
+
+    /// The palette the settings ask for, without any cross-fade.
+    pub fn target_palette(&self) -> Palette {
+        Palette::new(self.color_theme(), self.mode(), self.surface())
+    }
+
+    /// The palette to draw now (mid cross-fade after a theme change).
     pub fn palette(&self) -> Palette {
-        Palette::new(self.color_theme, self.mode)
+        self.motion.palette(self.target_palette())
+    }
+
+    /// Runs `f`, cross-fading the colours if it changed the palette.
+    fn fade_palette(&mut self, f: impl FnOnce(&mut App)) {
+        let before = self.target_palette();
+        let shown = self.palette();
+        f(self);
+        if self.target_palette() != before {
+            self.motion
+                .palette_changed(shown, std::time::Instant::now());
+        }
+    }
+
+    fn set_selected(&mut self, id: Option<ModelId>) {
+        self.motion
+            .selection_changed(self.selected, id, std::time::Instant::now());
+        self.selected = id;
     }
 
     pub fn title(&self) -> String {
@@ -204,14 +382,22 @@ impl App {
                 Task::none()
             }
             Message::Libraries(Ok((libraries, counts))) => {
+                // Check reachability once for libraries seen for the first time.
+                let checks: Vec<_> = libraries
+                    .iter()
+                    .filter(|l| self.library(l.id).is_none())
+                    .map(|l| self.check_status(l.id, false))
+                    .collect();
                 self.libraries = libraries;
                 self.counts = counts;
-                if let Some(scope) = self.search.scope
+                self.offline
+                    .retain(|id, _| self.libraries.iter().any(|l| l.id == *id));
+                if let Some(scope) = self.search.query.scope
                     && self.library(scope).is_none()
                 {
-                    return self.set_scope(None);
+                    return Task::batch([self.set_scope(None), Task::batch(checks)]);
                 }
-                Task::none()
+                Task::batch(checks)
             }
             Message::Libraries(Err(e)) | Message::Results(_, Err(e)) => {
                 self.show_error(&e);
@@ -219,7 +405,7 @@ impl App {
                 Task::none()
             }
             Message::Engine(event) => self.on_engine_event(event),
-            Message::SearchChanged(text) => match self.search.begin(&text, self.search.scope) {
+            Message::SearchChanged(text) => match self.search.update(|q| q.text = text) {
                 Some(ticket) => self.run_search(ticket),
                 None => Task::none(),
             },
@@ -236,7 +422,11 @@ impl App {
                 }
                 Task::none()
             }
-            Message::SelectScope(scope) => self.set_scope(scope),
+            Message::SelectScope(scope) => {
+                self.screen = Screen::Library;
+                self.model = None;
+                self.set_scope(scope)
+            }
             Message::PickLibrary => Task::perform(
                 async {
                     rfd::AsyncFileDialog::new()
@@ -278,6 +468,10 @@ impl App {
                         Task::none()
                     }
                     Err(e) if matches!(*e, CoreError::Cancelled) => Task::none(),
+                    Err(e) if matches!(*e, CoreError::LibraryOffline(_)) => {
+                        self.mark_offline(id);
+                        Task::none()
+                    }
                     Err(e) => {
                         self.show_error(&e);
                         Task::none()
@@ -285,17 +479,15 @@ impl App {
                 }
             }
             Message::Rescan => {
-                let ids: Vec<LibraryId> = match self.search.scope {
+                let ids: Vec<LibraryId> = match self.search.query.scope {
                     Some(id) => vec![id],
                     None => self.libraries.iter().map(|l| l.id).collect(),
                 };
-                let mut tasks = Vec::new();
-                for id in ids {
-                    if let std::collections::hash_map::Entry::Vacant(e) = self.scans.entry(id) {
-                        e.insert(scan_starting());
-                        tasks.push(self.start_scan(id));
-                    }
-                }
+                let tasks: Vec<_> = ids
+                    .into_iter()
+                    .filter(|id| !self.scans.contains_key(id))
+                    .map(|id| self.check_status(id, true))
+                    .collect();
                 Task::batch(tasks)
             }
             Message::Scrolled(viewport) => {
@@ -307,44 +499,358 @@ impl App {
                 Task::none()
             }
             Message::Select(id) => {
-                self.selected = Some(id);
+                self.motion.pressed(id, std::time::Instant::now());
+                self.set_selected(Some(id));
                 Task::none()
             }
             Message::Hover(id) => {
+                self.motion
+                    .hover_changed(self.hovered, id, std::time::Instant::now());
                 self.hovered = id;
                 Task::none()
             }
+            Message::Nav(mv) if matches!(self.screen, Screen::Model(_)) => {
+                self.step_part(mv);
+                Task::none()
+            }
+            Message::Nav(_) if self.screen == Screen::Settings => Task::none(),
             Message::Nav(mv) => self.navigate(mv),
             Message::FocusSearch => Task::batch([
                 operation::focus(search_id()),
                 operation::select_all(search_id()),
             ]),
+            Message::Escape if self.renaming.is_some() => self.update(Message::CancelRename),
+            Message::Escape if self.confirm_remove.is_some() => self.update(Message::CancelRemove),
+            Message::Escape if self.screen != Screen::Library => self.update(Message::Back),
+            Message::Escape if self.filter_menu => {
+                self.filter_menu = false;
+                Task::none()
+            }
             Message::Escape => {
-                if self.search.text.is_empty() {
-                    self.selected = None;
+                if self.search.query.text.is_empty() {
+                    self.set_selected(None);
                     Task::none()
                 } else {
                     self.update(Message::SearchChanged(String::new()))
                 }
             }
-            Message::SystemMode(_) if self.options.mode.is_some() => Task::none(),
             Message::SystemMode(mode) => {
-                self.mode = match mode {
+                let mode = match mode {
                     iced::theme::Mode::Dark => Mode::Dark,
                     iced::theme::Mode::Light | iced::theme::Mode::None => Mode::Light,
                 };
+                self.fade_palette(|app| app.system_mode = mode);
+                Task::none()
+            }
+            Message::Frame(now) => {
+                self.motion.now = now;
                 Task::none()
             }
             Message::DismissError => {
                 self.error = None;
                 Task::none()
             }
+            Message::ShowSection(section) => {
+                self.settings_section = section;
+                Task::none()
+            }
+            Message::AskRemove(id) => {
+                self.confirm_remove = Some(id);
+                Task::none()
+            }
+            Message::CancelRemove => {
+                self.confirm_remove = None;
+                Task::none()
+            }
+            Message::ConfirmRemove(id) => {
+                // Only the library whose confirmation is showing.
+                if self.confirm_remove.take() != Some(id) {
+                    return Task::none();
+                }
+                let Some(engine) = self.engine.clone() else {
+                    return Task::none();
+                };
+                Task::perform(
+                    async move { engine.remove_library(id).await.map_err(Arc::new) },
+                    Message::LibraryChanged,
+                )
+            }
+            Message::StartRename(id) => {
+                let name = self
+                    .library(id)
+                    .map(|l| l.display_name.clone())
+                    .unwrap_or_default();
+                self.renaming = Some((id, name));
+                Task::batch([
+                    operation::focus(rename_id()),
+                    operation::select_all(rename_id()),
+                ])
+            }
+            Message::RenameInput(name) => {
+                if let Some((_, current)) = &mut self.renaming {
+                    *current = name;
+                }
+                Task::none()
+            }
+            Message::CancelRename => {
+                self.renaming = None;
+                Task::none()
+            }
+            Message::CommitRename => {
+                let Some((id, name)) = self.renaming.take() else {
+                    return Task::none();
+                };
+                if name.trim().is_empty()
+                    || self.library(id).map(|l| l.display_name.as_str()) == Some(name.trim())
+                {
+                    return Task::none();
+                }
+                let Some(engine) = self.engine.clone() else {
+                    return Task::none();
+                };
+                Task::perform(
+                    async move {
+                        engine
+                            .rename_library(id, &name)
+                            .await
+                            .map(|_| ())
+                            .map_err(Arc::new)
+                    },
+                    Message::LibraryChanged,
+                )
+            }
+            Message::LibraryChanged(Ok(())) => Task::none(),
+            Message::LibraryChanged(Err(e)) => {
+                self.show_error(&e);
+                Task::none()
+            }
+            Message::RescanLibrary(id) => {
+                if self.scans.contains_key(&id) {
+                    return Task::none();
+                }
+                self.check_status(id, true)
+            }
+            Message::Status(id, Ok(LibraryStatus::Offline), _) => {
+                self.mark_offline(id);
+                Task::none()
+            }
+            Message::Status(id, Ok(LibraryStatus::Online), scan) => {
+                self.offline.remove(&id);
+                if scan && let std::collections::hash_map::Entry::Vacant(e) = self.scans.entry(id) {
+                    e.insert(scan_starting());
+                    return self.start_scan(id);
+                }
+                Task::none()
+            }
+            Message::Status(_, Err(e), _) => {
+                self.show_error(&e);
+                Task::none()
+            }
+            Message::ToggleFilterMenu => {
+                self.filter_menu = !self.filter_menu;
+                Task::none()
+            }
+            Message::ToggleChip(chip) => {
+                filters::toggle(&mut self.chips, chip);
+                if self.chips.contains(&chip) {
+                    self.motion.chip_added(chip, std::time::Instant::now());
+                }
+                let filter = filters::to_filter(&self.chips);
+                match self.search.update(|q| q.filter = filter) {
+                    Some(ticket) => self.run_search(ticket),
+                    None => Task::none(),
+                }
+            }
+            Message::OpenSelected => match (self.screen, self.selected) {
+                (Screen::Library, Some(id)) => self.update(Message::OpenModel(id)),
+                _ => Task::none(),
+            },
+            Message::OpenModel(id) => {
+                self.selected = Some(id);
+                self.screen = Screen::Model(id);
+                self.model = Some(ModelView::Loading(id));
+                self.load_model(id)
+            }
+            Message::ModelLoaded(id, result) => {
+                // A load for a model that is no longer on screen is stale.
+                if self.model.as_ref().map(ModelView::id) != Some(id) {
+                    return Task::none();
+                }
+                let part = match &self.model {
+                    Some(ModelView::Loaded { part, .. }) => *part,
+                    _ => 0,
+                };
+                self.model = Some(match result {
+                    Ok(Some(detail)) => {
+                        let part = part.min(detail.parts.len().saturating_sub(1));
+                        ModelView::Loaded { detail, part }
+                    }
+                    Ok(None) => ModelView::Missing(id),
+                    Err(e) => {
+                        self.show_error(&e);
+                        ModelView::Missing(id)
+                    }
+                });
+                Task::none()
+            }
+            Message::SelectPart(index) => {
+                if let Some(ModelView::Loaded { detail, part }) = &mut self.model
+                    && index < detail.parts.len()
+                {
+                    self.motion
+                        .part_changed(*part, index, std::time::Instant::now());
+                    *part = index;
+                }
+                Task::none()
+            }
+            Message::OpenPart => match self.current_part().map(|p| p.rel_path.clone()) {
+                Some(rel) if matches!(self.screen, Screen::Model(_)) => {
+                    match self.model_path(&rel) {
+                        Some(path) => self.update(Message::OpenFile(path)),
+                        None => Task::none(),
+                    }
+                }
+                _ => Task::none(),
+            },
+            Message::OpenFile(path) => launch(move || opener::open(&path)),
+            Message::ShowInFolder(path) => launch(move || opener::reveal(&path)),
+            Message::Launched(Ok(())) => Task::none(),
+            Message::Launched(Err(e)) => {
+                tracing::warn!(error = %e, "could not hand the file to the OS");
+                self.error = Some(t("error-launch"));
+                Task::none()
+            }
+            Message::OpenSettings => {
+                self.screen = Screen::Settings;
+                Task::none()
+            }
+            Message::Back => {
+                self.screen = Screen::Library;
+                self.model = None;
+                Task::none()
+            }
+            Message::SettingsChanged(settings) => {
+                let mut old = self.settings;
+                self.fade_palette(|app| old = std::mem::replace(&mut app.settings, settings));
+                self.motion.reduce = settings.reduce_motion;
+                if old.view != settings.view {
+                    // The other layout starts at the top.
+                    self.viewport = None;
+                }
+                let search = if old.sort == settings.sort {
+                    Task::none()
+                } else {
+                    match self.search.update(|q| q.sort = settings.sort) {
+                        Some(ticket) => self.run_search(ticket),
+                        None => Task::none(),
+                    }
+                };
+                Task::batch([search, self.save_settings()])
+            }
+            Message::SettingsSaved(Ok(())) => Task::none(),
+            Message::SettingsSaved(Err(e)) => {
+                tracing::warn!(error = %e, "could not save settings");
+                self.error = Some(t("error-settings-save"));
+                Task::none()
+            }
         }
+    }
+
+    fn mark_offline(&mut self, id: LibraryId) {
+        self.offline
+            .entry(id)
+            .or_insert_with(|| jiff::ZonedDateTime::now().strftime("%H:%M").to_string());
+    }
+
+    fn check_status(&self, id: LibraryId, scan: bool) -> Task<Message> {
+        let Some(engine) = self.engine.clone() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move { engine.library_status(id).await.map_err(Arc::new) },
+            move |r| Message::Status(id, r, scan),
+        )
+    }
+
+    /// The part selected in the model view.
+    pub fn current_part(&self) -> Option<&PartInfo> {
+        match &self.model {
+            Some(ModelView::Loaded { detail, part }) => detail.parts.get(*part),
+            _ => None,
+        }
+    }
+
+    /// Absolute path of a file of the open model (`rel` is library-relative).
+    pub fn model_path(&self, rel: &str) -> Option<PathBuf> {
+        let Some(ModelView::Loaded { detail, .. }) = &self.model else {
+            return None;
+        };
+        let lib = self.library(detail.library_id)?;
+        Some(rel.split('/').fold(lib.path.clone(), |p, seg| p.join(seg)))
+    }
+
+    fn step_part(&mut self, mv: Move) {
+        if let Some(ModelView::Loaded { detail, part }) = &mut self.model {
+            let n = detail.parts.len();
+            if n == 0 {
+                return;
+            }
+            let next = match mv {
+                Move::Left => part.saturating_sub(1),
+                Move::Right => (*part + 1).min(n - 1),
+                Move::Home => 0,
+                Move::End => n - 1,
+                Move::Up | Move::Down => *part,
+            };
+            self.motion
+                .part_changed(*part, next, std::time::Instant::now());
+            *part = next;
+        }
+    }
+
+    fn load_model(&self, id: ModelId) -> Task<Message> {
+        let Some(engine) = self.engine.clone() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move { engine.model(id).await.map_err(Arc::new) },
+            move |r| Message::ModelLoaded(id, r),
+        )
+    }
+
+    /// Writes the settings file off the UI thread.
+    fn save_settings(&self) -> Task<Message> {
+        let Some(dir) = self.options.config_dir.clone() else {
+            return Task::none();
+        };
+        let settings = self.settings;
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || settings.save(&dir))
+                    .await
+                    .unwrap_or_else(|e| Err(std::io::Error::other(e)))
+                    .map_err(Arc::new)
+            },
+            Message::SettingsSaved,
+        )
     }
 
     fn on_engine_event(&mut self, event: EngineEvent) -> Task<Message> {
         match event {
             EngineEvent::LibraryAdded(_) => Task::none(),
+            EngineEvent::LibraryRenamed(lib) => {
+                if let Some(l) = self.libraries.iter_mut().find(|l| l.id == lib.id) {
+                    *l = lib;
+                }
+                let ticket = self.search.refresh();
+                Task::batch([self.load_libraries(), self.run_search(ticket)])
+            }
+            EngineEvent::LibraryRemoved(id) => {
+                self.libraries.retain(|l| l.id != id);
+                self.counts.remove(&id);
+                let ticket = self.search.refresh();
+                Task::batch([self.load_libraries(), self.run_search(ticket)])
+            }
             EngineEvent::ScanStarted { library } => {
                 self.scans.insert(library, scan_starting());
                 Task::none()
@@ -361,12 +867,18 @@ impl App {
             EngineEvent::ScanFinished { library, .. } => {
                 self.scans.remove(&library);
                 let ticket = self.search.refresh();
-                Task::batch([self.load_libraries(), self.run_search(ticket)])
+                let model = match &self.model {
+                    Some(m) => self.load_model(m.id()),
+                    None => Task::none(),
+                };
+                Task::batch([self.load_libraries(), self.run_search(ticket), model])
             }
             EngineEvent::ScanFailed { library, error } => {
                 self.scans.remove(&library);
-                if !matches!(*error, CoreError::Cancelled) {
-                    self.show_error(&error);
+                match *error {
+                    CoreError::Cancelled => {}
+                    CoreError::LibraryOffline(_) => self.mark_offline(library),
+                    _ => self.show_error(&error),
                 }
                 Task::none()
             }
@@ -374,10 +886,9 @@ impl App {
     }
 
     fn set_scope(&mut self, scope: Option<LibraryId>) -> Task<Message> {
-        let text = self.search.text.clone();
         self.viewport = self.viewport.map(|v| GridViewport { offset: 0.0, ..v });
         let scroll = operation::snap_to(grid_id(), RelativeOffset::START);
-        match self.search.begin(&text, scope) {
+        match self.search.update(|q| q.scope = scope) {
             Some(ticket) => Task::batch([self.run_search(ticket), scroll]),
             None => Task::none(),
         }
@@ -386,10 +897,21 @@ impl App {
     fn navigate(&mut self, mv: Move) -> Task<Message> {
         let metrics = self.metrics();
         let len = self.search.hits.len();
-        let Some(index) = nav::step(self.selected_index(), mv, metrics.columns, len) else {
+        let columns = match self.settings.view {
+            ViewMode::Grid => metrics.columns,
+            ViewMode::List => 1,
+        };
+        let Some(index) = nav::step(self.selected_index(), mv, columns, len) else {
             return Task::none();
         };
-        self.selected = Some(self.search.hits[index].id);
+        self.set_selected(Some(self.search.hits[index].id));
+        if self.settings.view == ViewMode::List {
+            let vp = self.grid_viewport();
+            return match crate::list::scroll_target(index, vp.offset, vp.height) {
+                Some(y) => operation::scroll_to(grid_id(), AbsoluteOffset { x: 0.0, y }),
+                None => Task::none(),
+            };
+        }
         let row = index / metrics.columns.max(1);
         let vp = self.grid_viewport();
         // Rows start below the grid's top padding: row coordinates are
@@ -433,13 +955,14 @@ impl App {
         Task::perform(
             async move {
                 let result = async {
+                    let q = &ticket.query;
                     let hits = engine
-                        .search_in(ticket.scope, &ticket.text, SEARCH_LIMIT)
+                        .search_in(q.scope, &q.text, &q.filter, q.sort, SEARCH_LIMIT)
                         .await?;
                     let total = if hits.len() < SEARCH_LIMIT as usize {
                         hits.len() as u64
                     } else {
-                        engine.count(ticket.scope, &ticket.text).await?
+                        engine.count(q.scope, &q.text, &q.filter).await?
                     };
                     Ok::<_, CoreError>((hits, total))
                 }
@@ -466,6 +989,9 @@ impl App {
             event::listen_with(on_event),
             iced::system::theme_changes().map(Message::SystemMode),
         ];
+        if self.motion.animating(std::time::Instant::now()) {
+            subs.push(window::frames().map(Message::Frame));
+        }
         if let Some(engine) = &self.engine {
             subs.push(Subscription::run_with(
                 EngineSub(engine.clone()),
@@ -474,6 +1000,19 @@ impl App {
         }
         Subscription::batch(subs)
     }
+}
+
+/// Runs an OS hand-off (open, reveal) off the UI thread.
+fn launch(f: impl FnOnce() -> Result<(), opener::OpenError> + Send + 'static) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || f().map_err(std::io::Error::other))
+                .await
+                .unwrap_or_else(|e| Err(std::io::Error::other(e)))
+                .map_err(Arc::new)
+        },
+        Message::Launched,
+    )
 }
 
 fn scan_starting() -> ScanState {
@@ -509,6 +1048,11 @@ fn on_event(event: Event, status: event::Status, _window: window::Id) -> Option<
             let free = status == event::Status::Ignored;
             match key.as_ref() {
                 keyboard::Key::Named(key::Named::Escape) => Some(Message::Escape),
+                keyboard::Key::Character(",") if modifiers.command() => Some(Message::OpenSettings),
+                keyboard::Key::Named(key::Named::Enter) if free => Some(Message::OpenSelected),
+                keyboard::Key::Character("o") if free && !modifiers.command() => {
+                    Some(Message::OpenPart)
+                }
                 keyboard::Key::Character("f") if modifiers.command() => Some(Message::FocusSearch),
                 keyboard::Key::Character("/") if free => Some(Message::FocusSearch),
                 keyboard::Key::Named(named) if free => match named {
@@ -557,10 +1101,7 @@ mod tests {
     use printdex_core::ModelKind;
 
     fn app() -> App {
-        App::new(Options {
-            data_dir: PathBuf::from("/nonexistent"),
-            mode: None,
-        })
+        App::new(Options::in_memory(PathBuf::from("/nonexistent")))
     }
 
     fn hit(name: &str) -> ModelHit {
@@ -572,6 +1113,7 @@ mod tests {
             kind: ModelKind::Folder,
             part_count: 1,
             missing: false,
+            created_at: 0,
         }
     }
 
@@ -607,7 +1149,7 @@ mod tests {
     fn search_input_starts_query() {
         let mut a = app();
         let _ = a.update(Message::SearchChanged("dra".into()));
-        assert_eq!(a.search.text, "dra");
+        assert_eq!(a.search.query.text, "dra");
         assert!(a.search.loading);
     }
 
@@ -643,7 +1185,10 @@ mod tests {
             summary: ScanSummary::default(),
         }));
         assert!(a.search.loading);
-        assert_eq!((a.search.text.as_str(), a.search.scope), ("orc", Some(lib)));
+        assert_eq!(
+            (a.search.query.text.as_str(), a.search.query.scope),
+            ("orc", Some(lib))
+        );
     }
 
     #[test]
@@ -680,7 +1225,7 @@ mod tests {
         let lib = LibraryId::new();
         deliver(&mut a, vec![]);
         let _ = a.update(Message::SelectScope(Some(lib)));
-        assert_eq!(a.search.scope, Some(lib));
+        assert_eq!(a.search.query.scope, Some(lib));
         assert!(a.search.loading);
     }
 
@@ -690,7 +1235,7 @@ mod tests {
         let _ = a.update(Message::SelectScope(Some(LibraryId::new())));
         deliver(&mut a, vec![]);
         let _ = a.update(Message::Libraries(Ok((vec![], HashMap::new()))));
-        assert_eq!(a.search.scope, None);
+        assert_eq!(a.search.query.scope, None);
     }
 
     #[test]
@@ -715,7 +1260,7 @@ mod tests {
         deliver(&mut a, vec![h.clone()]);
         let _ = a.update(Message::Select(h.id));
         let _ = a.update(Message::Escape);
-        assert_eq!(a.search.text, "");
+        assert_eq!(a.search.query.text, "");
         deliver(&mut a, vec![h.clone()]);
         assert_eq!(a.selected, Some(h.id));
         let _ = a.update(Message::Escape);
@@ -726,18 +1271,396 @@ mod tests {
     fn follows_system_dark_mode() {
         let mut a = app();
         let _ = a.update(Message::SystemMode(iced::theme::Mode::Dark));
-        assert_eq!(a.mode, Mode::Dark);
+        assert_eq!(a.mode(), Mode::Dark);
         let _ = a.update(Message::SystemMode(iced::theme::Mode::Light));
-        assert_eq!(a.mode, Mode::Light);
+        assert_eq!(a.mode(), Mode::Light);
     }
 
     #[test]
     fn fixed_mode_ignores_system() {
         let mut a = App::new(Options {
-            data_dir: PathBuf::from("/nonexistent"),
             mode: Some(Mode::Dark),
+            ..Options::in_memory(PathBuf::from("/nonexistent"))
         });
         let _ = a.update(Message::SystemMode(iced::theme::Mode::Light));
-        assert_eq!(a.mode, Mode::Dark);
+        assert_eq!(a.mode(), Mode::Dark);
+        // The override is not a setting.
+        assert_eq!(a.settings.mode, ThemeMode::System);
+    }
+
+    #[test]
+    fn enter_opens_selected_model() {
+        let mut a = app();
+        let h = hit("orc");
+        deliver(&mut a, vec![h.clone()]);
+        let _ = a.update(Message::OpenSelected);
+        assert_eq!(a.screen, Screen::Library);
+        let _ = a.update(Message::Select(h.id));
+        let _ = a.update(Message::OpenSelected);
+        assert_eq!(a.screen, Screen::Model(h.id));
+    }
+
+    #[test]
+    fn escape_returns_to_library() {
+        let mut a = app();
+        let h = hit("orc");
+        let _ = a.update(Message::SearchChanged("orc".into()));
+        deliver(&mut a, vec![h.clone()]);
+        let _ = a.update(Message::OpenModel(h.id));
+        let _ = a.update(Message::Escape);
+        assert_eq!(a.screen, Screen::Library);
+        // Back keeps the search and the selection.
+        assert_eq!(a.search.query.text, "orc");
+        assert_eq!(a.selected, Some(h.id));
+        let _ = a.update(Message::OpenSettings);
+        let _ = a.update(Message::Escape);
+        assert_eq!(a.screen, Screen::Library);
+    }
+
+    fn detail(id: ModelId, parts: &[&str]) -> ModelDetail {
+        ModelDetail {
+            id,
+            library_id: LibraryId::new(),
+            name: "Bin".into(),
+            rel_path: "bins/bin".into(),
+            kind: ModelKind::Folder,
+            created_at: 0,
+            parts: parts
+                .iter()
+                .map(|p| PartInfo {
+                    id: printdex_core::PartId::new(),
+                    rel_path: format!("bins/bin/{p}"),
+                    format: printdex_core::PrintableFormat::Stl,
+                    size: 10,
+                })
+                .collect(),
+            assets: vec![],
+        }
+    }
+
+    fn library(name: &str) -> Library {
+        Library {
+            id: LibraryId::new(),
+            path: PathBuf::from("/srv").join(name),
+            display_name: name.into(),
+            kind: printdex_core::LibraryKind::Local,
+            sidecar_enabled: false,
+            last_full_scan_at: None,
+        }
+    }
+
+    #[test]
+    fn offline_library_is_marked_and_kept() {
+        let mut a = app();
+        let lib = library("NAS");
+        let h = ModelHit {
+            library_id: lib.id,
+            ..hit("orc")
+        };
+        a.libraries.push(lib.clone());
+        deliver(&mut a, vec![h.clone()]);
+        let _ = a.update(Message::Status(lib.id, Ok(LibraryStatus::Offline), true));
+        assert!(a.offline.contains_key(&lib.id));
+        assert!(a.scans.is_empty(), "no scan of an offline library");
+        assert_eq!(a.libraries.len(), 1);
+        assert_eq!(a.search.hits, vec![h]);
+        assert_eq!(a.error, None);
+    }
+
+    #[test]
+    fn rescan_of_offline_library_shows_offline_not_error() {
+        let mut a = app();
+        let lib = library("NAS");
+        a.libraries.push(lib.clone());
+        let _ = a.update(Message::ScanDone(
+            lib.id,
+            Err(Arc::new(CoreError::LibraryOffline(lib.path.clone()))),
+        ));
+        assert_eq!(a.error, None);
+        assert!(a.offline.contains_key(&lib.id));
+        let other = library("USB");
+        a.libraries.push(other.clone());
+        let _ = a.update(Message::Engine(EngineEvent::ScanFailed {
+            library: other.id,
+            error: Arc::new(CoreError::LibraryOffline(other.path.clone())),
+        }));
+        assert_eq!(a.error, None);
+        assert!(a.offline.contains_key(&other.id));
+    }
+
+    #[test]
+    fn retry_brings_library_back() {
+        let mut a = app();
+        let lib = library("NAS");
+        a.libraries.push(lib.clone());
+        let _ = a.update(Message::Status(lib.id, Ok(LibraryStatus::Offline), false));
+        let since = a.offline[&lib.id].clone();
+        // A second offline report keeps the first time.
+        let _ = a.update(Message::Status(lib.id, Ok(LibraryStatus::Offline), false));
+        assert_eq!(a.offline[&lib.id], since);
+        let _ = a.update(Message::Status(lib.id, Ok(LibraryStatus::Online), true));
+        assert!(!a.offline.contains_key(&lib.id));
+        assert!(a.scans.contains_key(&lib.id));
+    }
+
+    #[test]
+    fn remove_requires_confirmation() {
+        let mut a = app();
+        let lib = library("NAS");
+        a.libraries.push(lib.clone());
+        // Without the confirmation showing, nothing is removed.
+        let task = a.update(Message::ConfirmRemove(lib.id));
+        assert_eq!(task.units(), 0);
+        let _ = a.update(Message::AskRemove(lib.id));
+        assert_eq!(a.confirm_remove, Some(lib.id));
+        let _ = a.update(Message::Escape);
+        assert_eq!(a.confirm_remove, None);
+        assert_eq!(a.screen, Screen::Library);
+        let _ = a.update(Message::AskRemove(lib.id));
+        let _ = a.update(Message::ConfirmRemove(LibraryId::new()));
+        assert_eq!(a.confirm_remove, None);
+        // The engine's event drops it from the sidebar.
+        let _ = a.update(Message::Engine(EngineEvent::LibraryRemoved(lib.id)));
+        assert!(a.libraries.is_empty());
+    }
+
+    #[test]
+    fn rename_library_updates_sidebar() {
+        let mut a = app();
+        let lib = library("NAS");
+        a.libraries.push(lib.clone());
+        let _ = a.update(Message::StartRename(lib.id));
+        assert_eq!(a.renaming, Some((lib.id, "NAS".into())));
+        let _ = a.update(Message::RenameInput("NAS prints".into()));
+        let _ = a.update(Message::CommitRename);
+        assert_eq!(a.renaming, None);
+        let renamed = Library {
+            display_name: "NAS prints".into(),
+            ..lib.clone()
+        };
+        let _ = a.update(Message::Engine(EngineEvent::LibraryRenamed(renamed)));
+        assert_eq!(a.library(lib.id).unwrap().display_name, "NAS prints");
+    }
+
+    #[test]
+    fn changing_colour_theme_saves_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut a = App::new(Options {
+            config_dir: Some(dir.path().to_path_buf()),
+            ..Options::in_memory(PathBuf::from("/nonexistent"))
+        });
+        let s = Settings {
+            color_theme: ColorTheme::Glacier,
+            ..a.settings
+        };
+        let task = a.update(Message::SettingsChanged(s));
+        assert_eq!(a.color_theme(), ColorTheme::Glacier);
+        assert_eq!(
+            a.target_palette(),
+            Palette::new(ColorTheme::Glacier, a.mode(), Surface::Solid)
+        );
+        assert!(task.units() > 0, "a save was started");
+        // Without a config folder nothing is written.
+        let mut b = app();
+        assert_eq!(b.update(Message::SettingsChanged(s)).units(), 0);
+    }
+
+    #[test]
+    fn system_mode_follows_os() {
+        let mut a = app();
+        let s = Settings {
+            mode: ThemeMode::Dark,
+            ..a.settings
+        };
+        let _ = a.update(Message::SettingsChanged(s));
+        let _ = a.update(Message::SystemMode(iced::theme::Mode::Light));
+        assert_eq!(a.mode(), Mode::Dark);
+        let s = Settings {
+            mode: ThemeMode::System,
+            ..a.settings
+        };
+        let _ = a.update(Message::SettingsChanged(s));
+        assert_eq!(a.mode(), Mode::Light);
+        let _ = a.update(Message::SystemMode(iced::theme::Mode::Dark));
+        assert_eq!(a.mode(), Mode::Dark);
+    }
+
+    #[test]
+    fn chips_combine_with_text() {
+        let mut a = app();
+        let _ = a.update(Message::SearchChanged("bin".into()));
+        let _ = a.update(Message::ToggleChip(Chip::Format(
+            printdex_core::PrintableFormat::ThreeMf,
+        )));
+        assert_eq!(a.search.query.text, "bin");
+        assert_eq!(
+            a.search.query.filter.formats,
+            vec![printdex_core::PrintableFormat::ThreeMf]
+        );
+        assert!(a.search.loading);
+        let _ = a.update(Message::ToggleChip(Chip::Format(
+            printdex_core::PrintableFormat::ThreeMf,
+        )));
+        assert!(a.search.query.filter.is_empty());
+    }
+
+    #[test]
+    fn chips_survive_scope_change() {
+        let mut a = app();
+        let _ = a.update(Message::ToggleChip(Chip::MultiPart(true)));
+        let _ = a.update(Message::SelectScope(Some(LibraryId::new())));
+        assert_eq!(a.chips, vec![Chip::MultiPart(true)]);
+        assert_eq!(a.search.query.filter.multi_part, Some(true));
+    }
+
+    #[test]
+    fn theme_change_cross_fades() {
+        let mut a = app();
+        let before = a.palette();
+        let s = Settings {
+            color_theme: ColorTheme::RosePetg,
+            ..a.settings
+        };
+        let _ = a.update(Message::SettingsChanged(s));
+        // Right after the change the old colours still show...
+        assert_eq!(a.palette().t.accent, before.t.accent);
+        assert!(a.motion.animating(a.motion.now));
+        // ...and the new ones once the fade is over.
+        let _ = a.update(Message::Frame(a.motion.now + crate::motion::THEME));
+        assert_eq!(a.palette(), a.target_palette());
+    }
+
+    #[test]
+    fn list_mode_moves_by_row() {
+        let mut a = app();
+        let hits: Vec<_> = (0..12).map(|i| hit(&format!("m{i}"))).collect();
+        deliver(&mut a, hits.clone());
+        let s = Settings {
+            view: ViewMode::List,
+            ..a.settings
+        };
+        let _ = a.update(Message::SettingsChanged(s));
+        let _ = a.update(Message::Nav(Move::Down));
+        let _ = a.update(Message::Nav(Move::Down));
+        assert_eq!(a.selected, Some(hits[1].id));
+        let _ = a.update(Message::OpenSelected);
+        assert_eq!(a.screen, Screen::Model(hits[1].id));
+    }
+
+    #[test]
+    fn opening_model_loads_detail() {
+        let mut a = app();
+        let id = ModelId::new();
+        let _ = a.update(Message::OpenModel(id));
+        assert_eq!(a.model, Some(ModelView::Loading(id)));
+        let _ = a.update(Message::ModelLoaded(id, Ok(Some(detail(id, &["a.stl"])))));
+        assert!(matches!(a.model, Some(ModelView::Loaded { part: 0, .. })));
+    }
+
+    #[test]
+    fn detail_for_other_model_is_ignored() {
+        let mut a = app();
+        let (first, second) = (ModelId::new(), ModelId::new());
+        let _ = a.update(Message::OpenModel(first));
+        let _ = a.update(Message::OpenModel(second));
+        let _ = a.update(Message::ModelLoaded(
+            first,
+            Ok(Some(detail(first, &["a.stl"]))),
+        ));
+        assert_eq!(a.model, Some(ModelView::Loading(second)));
+    }
+
+    #[test]
+    fn missing_model_shows_notice() {
+        let mut a = app();
+        let id = ModelId::new();
+        let _ = a.update(Message::OpenModel(id));
+        let _ = a.update(Message::ModelLoaded(id, Ok(Some(detail(id, &["a.stl"])))));
+        // A rescan removed it while it was on screen.
+        let _ = a.update(Message::ModelLoaded(id, Ok(None)));
+        assert_eq!(a.model, Some(ModelView::Missing(id)));
+        let _ = a.update(Message::Escape);
+        assert_eq!(a.screen, Screen::Library);
+        assert_eq!(a.model, None);
+    }
+
+    #[test]
+    fn selecting_part_updates_caption() {
+        let mut a = app();
+        let id = ModelId::new();
+        let _ = a.update(Message::OpenModel(id));
+        let _ = a.update(Message::ModelLoaded(
+            id,
+            Ok(Some(detail(id, &["a.stl", "b.stl", "c.stl"]))),
+        ));
+        assert_eq!(a.current_part().unwrap().rel_path, "bins/bin/a.stl");
+        let _ = a.update(Message::SelectPart(2));
+        assert_eq!(a.current_part().unwrap().rel_path, "bins/bin/c.stl");
+        let _ = a.update(Message::Nav(Move::Left));
+        assert_eq!(a.current_part().unwrap().rel_path, "bins/bin/b.stl");
+        let _ = a.update(Message::SelectPart(9));
+        assert_eq!(a.current_part().unwrap().rel_path, "bins/bin/b.stl");
+        // A reload keeps the selected part.
+        let _ = a.update(Message::ModelLoaded(
+            id,
+            Ok(Some(detail(id, &["a.stl", "b.stl", "c.stl"]))),
+        ));
+        assert_eq!(a.current_part().unwrap().rel_path, "bins/bin/b.stl");
+    }
+
+    #[test]
+    fn ctrl_comma_opens_settings() {
+        let event = Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Character(",".into()),
+            modified_key: keyboard::Key::Character(",".into()),
+            physical_key: key::Physical::Code(key::Code::Comma),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::COMMAND,
+            text: None,
+            repeat: false,
+        });
+        let msg = on_event(event, event::Status::Ignored, window::Id::unique());
+        assert!(matches!(msg, Some(Message::OpenSettings)));
+    }
+
+    #[test]
+    fn settings_mode_wins_over_system() {
+        let mut a = app();
+        let _ = a.update(Message::SystemMode(iced::theme::Mode::Dark));
+        let s = Settings {
+            mode: ThemeMode::Light,
+            ..a.settings
+        };
+        let _ = a.update(Message::SettingsChanged(s));
+        assert_eq!(a.mode(), Mode::Light);
+    }
+
+    #[test]
+    fn changing_sort_reruns_search() {
+        let mut a = app();
+        deliver(&mut a, vec![]);
+        let s = Settings {
+            sort: printdex_core::SortOrder::RecentlyAdded,
+            ..a.settings
+        };
+        let _ = a.update(Message::SettingsChanged(s));
+        assert!(a.search.loading);
+        assert_eq!(a.search.query.sort, printdex_core::SortOrder::RecentlyAdded);
+    }
+
+    #[test]
+    fn glass_needs_transparent_window_and_translucency() {
+        let mut a = App::new(Options {
+            glass_window: true,
+            ..Options::in_memory(PathBuf::from("/nonexistent"))
+        });
+        assert_eq!(a.surface(), Surface::Glass);
+        let s = Settings {
+            translucency: Translucency::Off,
+            ..a.settings
+        };
+        let _ = a.update(Message::SettingsChanged(s));
+        assert_eq!(a.surface(), Surface::Solid);
+        assert_eq!(app().surface(), Surface::Solid);
     }
 }

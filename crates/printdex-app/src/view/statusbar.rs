@@ -45,6 +45,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
             Space::new().width(Length::Fill),
             hint(p, "/", t("status-key-search")),
             hint(p, "↑↓←→", t("status-key-move")),
+            hint(p, "Enter", t("status-key-open-model")),
             hint(p, "Esc", t("status-key-clear")),
         ]
         .spacing(theme::S4)
@@ -57,7 +58,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     .into()
 }
 
-fn hint<'a>(p: Palette, key: &'static str, label: String) -> Element<'a, Message> {
+pub(super) fn hint<'a>(p: Palette, key: &'static str, label: String) -> Element<'a, Message> {
     row![
         container(text(key).size(theme::SIZE_DATA).font(theme::FONT_DATA))
             .padding([0.0, theme::S3])

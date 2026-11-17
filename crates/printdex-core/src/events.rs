@@ -19,6 +19,8 @@ pub enum ScanPhase {
 #[derive(Clone, Debug)]
 pub enum EngineEvent {
     LibraryAdded(Library),
+    LibraryRemoved(LibraryId),
+    LibraryRenamed(Library),
     ScanStarted {
         library: LibraryId,
     },

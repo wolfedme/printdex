@@ -6,7 +6,7 @@ use printdex_core::ModelHit;
 
 use crate::app::{App, GRID_PAD_X, GRID_PAD_Y, GridViewport, Message, grid_id};
 use crate::format::{group, parent_path};
-use crate::grid::{COLUMN_GAP, GridMetrics, ROW_GAP};
+use crate::grid::{COLUMN_GAP, GridMetrics, PANE_PADDING, ROW_GAP};
 use crate::i18n::{Arg, t_args};
 use crate::icons::{self, Icon};
 use crate::theme::{self, Palette};
@@ -51,15 +51,23 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
 }
 
 fn pane<'a>(app: &App, p: Palette, m: &GridMetrics, hit: &ModelHit) -> Element<'a, Message> {
-    let selected = app.selected == Some(hit.id);
     let hovered = app.hovered == Some(hit.id);
+    let motion = &app.motion;
+    let selection = motion.selection(hit.id, app.selected);
+    let inner_w = (m.pane_width - 2.0 * PANE_PADDING - 2.0 * theme::S5).max(0.0);
+    let inner_h = (m.well_height - 2.0 * theme::S5).max(0.0);
 
     let mut well = stack![
-        container(icons::placeholder())
-            .padding(theme::S5)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(move |_| p.well()),
+        container(icons::placeholder_lifted(
+            inner_w,
+            inner_h,
+            motion.lift(hit.id),
+            motion.shadow_scale(hit.id),
+        ))
+        .padding(theme::S5)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(move |_| p.well()),
     ]
     .width(Length::Fill)
     .height(m.well_height);
@@ -118,7 +126,11 @@ fn pane<'a>(app: &App, p: Palette, m: &GridMetrics, hit: &ModelHit) -> Element<'
         .width(m.pane_width)
         .height(m.row_height)
         .clip(true)
-        .style(move |_| p.pane(selected, hovered));
+        .style(move |_| p.pane_fade(selection, hovered));
+    let card = container(card).padding(iced::Padding {
+        top: motion.sink(id),
+        ..iced::Padding::ZERO
+    });
 
     mouse_area(
         button(card)
@@ -126,6 +138,7 @@ fn pane<'a>(app: &App, p: Palette, m: &GridMetrics, hit: &ModelHit) -> Element<'
             .style(move |_, _| p.bare())
             .on_press(Message::Select(id)),
     )
+    .on_double_click(Message::OpenModel(id))
     .on_enter(Message::Hover(Some(id)))
     .on_exit(Message::Hover(None))
     .into()

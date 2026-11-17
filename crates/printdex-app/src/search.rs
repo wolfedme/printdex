@@ -1,25 +1,32 @@
 //! Search sequencing: every keystroke starts a query, and results of an
 //! older query never replace those of a newer one.
 
-use printdex_core::{LibraryId, ModelHit};
+use printdex_core::{LibraryId, ModelHit, SearchFilter, SortOrder};
 
 /// Maximum results per query; the status bar says when a result is capped.
 pub const SEARCH_LIMIT: u32 = 5_000;
+
+/// Everything that decides which models are shown.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Query {
+    pub text: String,
+    pub scope: Option<LibraryId>,
+    pub filter: SearchFilter,
+    pub sort: SortOrder,
+}
 
 /// Identifies one query run. Carried by the async task and handed back with
 /// its results.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ticket {
     pub generation: u64,
-    pub text: String,
-    pub scope: Option<LibraryId>,
+    pub query: Query,
 }
 
 /// Current query and its latest accepted results.
 #[derive(Debug, Default)]
 pub struct SearchState {
-    pub text: String,
-    pub scope: Option<LibraryId>,
+    pub query: Query,
     generation: u64,
     pub hits: Vec<ModelHit>,
     pub total: u64,
@@ -29,14 +36,20 @@ pub struct SearchState {
 }
 
 impl SearchState {
-    /// Sets text and scope; returns a ticket when the query changed.
-    pub fn begin(&mut self, text: &str, scope: Option<LibraryId>) -> Option<Ticket> {
-        if self.loaded && text == self.text && scope == self.scope {
+    /// Replaces the query; returns a ticket when it changed.
+    pub fn begin(&mut self, query: Query) -> Option<Ticket> {
+        if self.loaded && query == self.query {
             return None;
         }
-        self.text = text.to_owned();
-        self.scope = scope;
+        self.query = query;
         Some(self.refresh())
+    }
+
+    /// Changes the query with `f`; returns a ticket when it changed.
+    pub fn update(&mut self, f: impl FnOnce(&mut Query)) -> Option<Ticket> {
+        let mut q = self.query.clone();
+        f(&mut q);
+        self.begin(q)
     }
 
     /// Re-runs the current query (after a scan, for example).
@@ -45,8 +58,7 @@ impl SearchState {
         self.loading = true;
         Ticket {
             generation: self.generation,
-            text: self.text.clone(),
-            scope: self.scope,
+            query: self.query.clone(),
         }
     }
 
@@ -82,14 +94,15 @@ mod tests {
             kind: ModelKind::Folder,
             part_count: 1,
             missing: false,
+            created_at: 0,
         }
     }
 
     #[test]
     fn stale_results_are_dropped() {
         let mut s = SearchState::default();
-        let t1 = s.begin("d", None).unwrap();
-        let t2 = s.begin("dr", None).unwrap();
+        let t1 = s.update(|q| q.text = "d".into()).unwrap();
+        let t2 = s.update(|q| q.text = "dr".into()).unwrap();
         assert!(!s.accept(&t1, vec![hit("Dog"), hit("Dragon")], 2));
         assert!(s.hits.is_empty());
         assert!(s.loading);
@@ -101,26 +114,32 @@ mod tests {
     #[test]
     fn same_text_does_not_restart() {
         let mut s = SearchState::default();
-        let t = s.begin("dragon", None).unwrap();
+        let t = s.update(|q| q.text = "dragon".into()).unwrap();
         s.accept(&t, vec![], 0);
-        assert_eq!(s.begin("dragon", None), None);
-        assert!(s.begin("dragon", Some(LibraryId::new())).is_some());
+        assert_eq!(s.update(|q| q.text = "dragon".into()), None);
+        assert!(s.update(|q| q.scope = Some(LibraryId::new())).is_some());
+        assert!(s.update(|q| q.sort = SortOrder::RecentlyAdded).is_some());
     }
 
     #[test]
     fn refresh_keeps_text_and_scope() {
         let mut s = SearchState::default();
         let lib = LibraryId::new();
-        let t1 = s.begin("orc", Some(lib)).unwrap();
+        let t1 = s
+            .update(|q| {
+                q.text = "orc".into();
+                q.scope = Some(lib);
+            })
+            .unwrap();
         let t2 = s.refresh();
-        assert_eq!((t2.text.as_str(), t2.scope), ("orc", Some(lib)));
+        assert_eq!((t2.query.text.as_str(), t2.query.scope), ("orc", Some(lib)));
         assert!(t2.generation > t1.generation);
     }
 
     #[test]
     fn capped_when_total_exceeds_hits() {
         let mut s = SearchState::default();
-        let t = s.begin("", None).unwrap();
+        let t = s.refresh();
         s.accept(&t, vec![hit("a")], 7);
         assert!(s.capped());
     }

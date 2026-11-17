@@ -31,6 +31,9 @@ iced = { version = "0.14", features = ["tokio", "svg", "advanced"] }
 fluent-bundle = "0.16"
 unic-langid = { version = "0.9", features = ["macros"] }
 rfd = "0.15"
+toml = "1"
+jiff = "1"
+opener = { version = "0.9", features = ["reveal"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

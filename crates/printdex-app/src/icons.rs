@@ -1,7 +1,8 @@
 //! Bundled Lucide icons (ISC) and the placeholder preview, as SVG handles.
 
 use iced::widget::svg::{self, Svg};
-use iced::{Color, Length};
+use iced::widget::{pin, stack};
+use iced::{Color, ContentFit, Element, Length};
 
 macro_rules! icon_files {
     ($($name:ident => $file:literal),* $(,)?) => {
@@ -27,6 +28,21 @@ icon_files! {
     Refresh => "refresh-cw.svg",
     Layers => "layers-2.svg",
     Alert => "triangle-alert.svg",
+    ExternalLink => "external-link.svg",
+    FolderOpen => "folder-open.svg",
+    File => "file.svg",
+    FileText => "file-text.svg",
+    Image => "image.svg",
+    Chevron => "chevron-right.svg",
+    Settings => "settings.svg",
+    Offline => "wifi-off.svg",
+    Plus => "plus.svg",
+    Close => "x.svg",
+    List => "list.svg",
+    Grid => "layout-grid.svg",
+    Check => "check.svg",
+    Remove => "trash-2.svg",
+    Rename => "pencil.svg",
 }
 
 /// `icon` at `size` px, tinted `color`.
@@ -44,4 +60,41 @@ pub fn placeholder<'a>() -> Svg<'a> {
     ))
     .width(Length::Fill)
     .height(Length::Fill)
+}
+
+/// Size of the placeholder's view box.
+const PLACEHOLDER_W: f32 = 160.0;
+const PLACEHOLDER_H: f32 = 120.0;
+
+/// The placeholder model fitted into a `width` × `height` box, lifted
+/// `lift` px off its contact shadow, which is scaled by `shadow_scale`
+/// (the hover motion in DESIGN.md).
+pub fn placeholder_lifted<'a, M: 'a>(
+    width: f32,
+    height: f32,
+    lift: f32,
+    shadow_scale: f32,
+) -> Element<'a, M> {
+    let fit = (width / PLACEHOLDER_W).min(height / PLACEHOLDER_H).max(0.0);
+    let (w, h) = (PLACEHOLDER_W * fit, PLACEHOLDER_H * fit);
+    let (x, y) = ((width - w) / 2.0, (height - h) / 2.0);
+    let sw = w * shadow_scale;
+    let shadow = Svg::new(svg::Handle::from_memory(
+        include_bytes!("../assets/placeholder-shadow.svg").as_slice(),
+    ))
+    .content_fit(ContentFit::Fill)
+    .width(sw)
+    .height(h);
+    let model = Svg::new(svg::Handle::from_memory(
+        include_bytes!("../assets/placeholder-model.svg").as_slice(),
+    ))
+    .width(w)
+    .height(h);
+    stack![
+        pin(shadow).x(x + (w - sw) / 2.0).y(y),
+        pin(model).x(x).y(y - lift),
+    ]
+    .width(width)
+    .height(height)
+    .into()
 }
