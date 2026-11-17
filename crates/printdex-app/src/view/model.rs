@@ -6,6 +6,7 @@ use printdex_core::{
     Detail, ModelDetail, ModelKind, PartInfo, PrintableFormat, ThumbFailure, ThumbTarget,
 };
 
+use super::organize;
 use super::preview::{self, Look};
 use super::statusbar::hint;
 use super::viewer::{self, Scene};
@@ -91,7 +92,8 @@ fn preview_well<'a>(app: &'a App, p: Palette, pt: &PartInfo) -> (Element<'a, Mes
     } else {
         Space::new().into()
     };
-    let shader = viewer::shader_view(Some(Scene::new(loaded, v.view))).map(Message::Viewer);
+    let shader =
+        viewer::shader_view(Some(Scene::new(loaded, v.view, v.material))).map(Message::Viewer);
     let mut actions = row![Space::new().width(Length::Fill)].spacing(theme::S3);
     if loaded.decimated && loaded.detail == Detail::Preview {
         actions = actions.push(small_button(
@@ -279,6 +281,7 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
             )),
         ),
         tiles.wrap().vertical_spacing(theme::S4),
+        organize::notes(&app.org, p, d.id),
     ]
     .spacing(theme::S5);
 
@@ -309,6 +312,10 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
     } else {
         parent_path(&d.rel_path).to_owned()
     };
+    let organize = container(organize::side(&app.org, p, d.id))
+        .padding(theme::S6)
+        .width(SIDE_WIDTH)
+        .style(move |_| p.pane(false, false));
     let details = container(
         column![
             widgets::section(p, t("model-details"), None),
@@ -326,9 +333,12 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
     .style(move |_| p.pane(false, false));
 
     let body = scrollable(
-        row![main.width(Length::Fill), details]
-            .spacing(theme::S8)
-            .padding([theme::S8, theme::S8]),
+        row![
+            main.width(Length::Fill),
+            column![organize, details].spacing(theme::S6)
+        ]
+        .spacing(theme::S8)
+        .padding([theme::S8, theme::S8]),
     )
     .height(Length::Fill)
     .style(move |_, status| p.scrollbar(status));
@@ -338,6 +348,8 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
             hint(p, "Esc", t("status-key-back")),
             hint(p, "←→", t("status-key-part")),
             hint(p, "O", t("status-key-open-file")),
+            hint(p, "T", t("status-key-tag")),
+            hint(p, "N", t("status-key-notes")),
             text(t("status-key-turn"))
                 .size(theme::SIZE_CAPTION)
                 .color(p.n.ink_3),

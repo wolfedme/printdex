@@ -137,11 +137,10 @@ fn latest(col: &str) -> String {
 
 /// SQL for a model's preview material key.
 fn material_sql() -> String {
-    format!(
-        "coalesce((SELECT r.material FROM recipes r WHERE r.model_id = m.id), \
-         (SELECT a.material FROM attempts a WHERE a.model_id = m.id AND a.material IS NOT NULL \
-          ORDER BY a.printed_at DESC, a.id DESC LIMIT 1))"
-    )
+    "coalesce((SELECT r.material FROM recipes r WHERE r.model_id = m.id), \
+     (SELECT a.material FROM attempts a WHERE a.model_id = m.id AND a.material IS NOT NULL \
+      ORDER BY a.printed_at DESC, a.id DESC LIMIT 1))"
+        .to_owned()
 }
 
 /// Pushes `FROM … WHERE …` for a search: present models in `scope`,

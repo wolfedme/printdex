@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT p.attempt_id as \"attempt!: AttemptId\", p.file_name, a.model_id as \"model!: ModelId\"\n               FROM attempt_photos p JOIN attempts a ON a.id = p.attempt_id WHERE p.id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "attempt!: AttemptId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "attempt_photos",
+            "name": "attempt_id"
+          }
+        }
+      },
+      {
+        "name": "file_name",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "attempt_photos",
+            "name": "file_name"
+          }
+        }
+      },
+      {
+        "name": "model!: ModelId",
+        "ordinal": 2,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "attempts",
+            "name": "model_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b3f76c6b153fb1f4c34fe3a0791ed466286590e302eeb902ae463703a679596f"
+}

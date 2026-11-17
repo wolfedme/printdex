@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!: CollectionId\" FROM collections WHERE name_key = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: CollectionId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "collections",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "18b6a1422b6e69d5c6750df819d4b804e35bce374907d56018a5bfff144fcde5"
+}

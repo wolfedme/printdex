@@ -2,7 +2,7 @@
 //! one. The engine does the work; this only keeps image handles and asks
 //! for what is visible.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 use iced::widget::image;
@@ -29,6 +29,8 @@ pub struct Thumbs {
     order: VecDeque<ThumbTarget>,
     /// What was last asked of the engine.
     requested: Vec<ThumbTarget>,
+    /// Shown, but asked for again (the model's material changed).
+    stale: HashSet<ThumbTarget>,
 }
 
 impl Thumbs {
@@ -38,7 +40,14 @@ impl Thumbs {
 
     /// Whether `target` is still waiting for its first result.
     pub fn pending(&self, target: ThumbTarget) -> bool {
-        !self.known.contains_key(&target)
+        !self.known.contains_key(&target) || self.stale.contains(&target)
+    }
+
+    /// Keeps showing `targets` but asks the engine again (it re-renders
+    /// when the model's material changed, else answers from its cache).
+    pub fn refresh(&mut self, targets: impl IntoIterator<Item = ThumbTarget>) {
+        self.stale.extend(targets);
+        self.requested.clear();
     }
 
     pub fn ready(&mut self, target: ThumbTarget, path: PathBuf, kind: ThumbKind) {
@@ -61,6 +70,7 @@ impl Thumbs {
     }
 
     fn insert(&mut self, target: ThumbTarget, thumb: Thumb) {
+        self.stale.remove(&target);
         if self.known.insert(target, thumb).is_none() {
             self.order.push_back(target);
         }
@@ -76,6 +86,7 @@ impl Thumbs {
         self.known.clear();
         self.order.clear();
         self.requested.clear();
+        self.stale.clear();
     }
 
     /// The visible items without a result, when that differs from the last
@@ -113,6 +124,18 @@ mod tests {
         t.failed(m(2), ThumbFailure::Invalid);
         assert_eq!(t.request_for(vec![m(1), m(2)]), Some(vec![]));
         assert_eq!(t.request_for(vec![m(1), m(2)]), None);
+    }
+
+    #[test]
+    fn refreshed_thumbs_stay_shown_and_are_asked_again() {
+        let mut t = Thumbs::default();
+        t.ready(m(1), "/x/p1.png".into(), ThumbKind::Render);
+        assert_eq!(t.request_for(vec![m(1)]), None);
+        t.refresh([m(1)]);
+        assert!(t.get(m(1)).is_some());
+        assert_eq!(t.request_for(vec![m(1)]), Some(vec![m(1)]));
+        t.ready(m(1), "/x/p2.png".into(), ThumbKind::Render);
+        assert_eq!(t.request_for(vec![m(1)]), Some(vec![]));
     }
 
     #[test]

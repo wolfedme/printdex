@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE models SET sidecar_mtime_ns = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "3358d96e70c3bf5696227fe4db63c5b9f25a302f63205cc5bad69564c491ca59"
+}

@@ -28,7 +28,7 @@ pub use search::{
     to_fts_query,
 };
 pub use sidecars::{SidecarState, SidecarTarget};
-pub use thumbs::{IMAGE_EXTENSIONS, ImageSource, ModelSources, PartSource};
+pub use thumbs::{IMAGE_EXTENSIONS, ImageSource, ModelSources, PartSource, render_material};
 
 /// Handle to the Printdex database. Cheap to clone.
 #[derive(Clone, Debug)]

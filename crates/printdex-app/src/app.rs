@@ -12,7 +12,7 @@ use iced::widget::{Id, operation};
 use iced::{Event, Size, Subscription, Task, event, window};
 use printdex_core::{
     CoreError, Engine, EngineEvent, Library, LibraryId, LibraryStatus, ModelDetail, ModelHit,
-    ModelId, PartInfo, ScanPhase, ScanSummary, ThumbTarget,
+    ModelId, PartInfo, ScanPhase, ScanSummary, Scope, SortOrder, ThumbTarget,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -21,6 +21,7 @@ use crate::grid::GridMetrics;
 use crate::i18n::{Arg, t, t_args};
 use crate::motion::Motion;
 use crate::nav::{self, Move};
+use crate::org::{Org, OrgState};
 use crate::search::{SEARCH_LIMIT, SearchState, Ticket};
 use crate::settings::{Settings, ThemeMode, Translucency, ViewMode};
 use crate::theme::{self, ColorTheme, Mode, Palette, Surface};
@@ -180,6 +181,8 @@ pub struct App {
     /// Thumbnail cache size on disk, when last measured.
     pub cache_usage: Option<u64>,
     pub clearing_cache: bool,
+    /// Tags, collections, notes and source of the open model.
+    pub org: OrgState,
     cancel: CancellationToken,
     started: std::time::Instant,
 }
@@ -194,7 +197,10 @@ pub enum Message {
     Engine(EngineEvent),
     SearchChanged(String),
     Results(Ticket, Result<(Vec<ModelHit>, u64), Arc<CoreError>>),
-    SelectScope(Option<LibraryId>),
+    SelectScope(Scope),
+    /// A sort picked inside a collection (not saved).
+    QuerySort(SortOrder),
+    Org(Org),
     PickLibrary,
     LibraryPicked(Option<PathBuf>),
     LibraryAdded(Result<Library, Arc<CoreError>>),
@@ -287,6 +293,7 @@ impl App {
             viewer: Viewer::default(),
             cache_usage: None,
             clearing_cache: false,
+            org: OrgState::default(),
             cancel: CancellationToken::new(),
             started: std::time::Instant::now(),
         }
@@ -481,6 +488,7 @@ impl App {
                     self.load_libraries(),
                     self.run_search(ticket),
                     self.apply_cache_limit(),
+                    self.load_lists(),
                 ])
             }
             Message::Booted(Err(e)) => {
@@ -499,10 +507,10 @@ impl App {
                 self.counts = counts;
                 self.offline
                     .retain(|id, _| self.libraries.iter().any(|l| l.id == *id));
-                if let Some(scope) = self.search.query.scope
+                if let Scope::Library(scope) = self.search.query.scope
                     && self.library(scope).is_none()
                 {
-                    return Task::batch([self.set_scope(None), Task::batch(checks)]);
+                    return Task::batch([self.set_scope(Scope::All), Task::batch(checks)]);
                 }
                 Task::batch(checks)
             }
@@ -512,6 +520,11 @@ impl App {
                 Task::none()
             }
             Message::Engine(event) => self.on_engine_event(event),
+            Message::QuerySort(sort) => match self.search.update(|q| q.sort = sort) {
+                Some(ticket) => self.run_search(ticket),
+                None => Task::none(),
+            },
+            Message::Org(msg) => self.handle_org(msg),
             Message::SearchChanged(text) => match self.search.update(|q| q.text = text) {
                 Some(ticket) => self.run_search(ticket),
                 None => Task::none(),
@@ -532,6 +545,7 @@ impl App {
             Message::SelectScope(scope) => {
                 self.screen = Screen::Library;
                 self.model = None;
+                self.org.cancel_edits();
                 self.set_scope(scope)
             }
             Message::PickLibrary => Task::perform(
@@ -587,8 +601,8 @@ impl App {
             }
             Message::Rescan => {
                 let ids: Vec<LibraryId> = match self.search.query.scope {
-                    Some(id) => vec![id],
-                    None => self.libraries.iter().map(|l| l.id).collect(),
+                    Scope::Library(id) => vec![id],
+                    _ => self.libraries.iter().map(|l| l.id).collect(),
                 };
                 let tasks: Vec<_> = ids
                     .into_iter()
@@ -626,6 +640,11 @@ impl App {
                 operation::focus(search_id()),
                 operation::select_all(search_id()),
             ]),
+            Message::Escape if self.org.editing() => self.update(Message::Org(Org::Cancel)),
+            Message::Escape if self.org.notice.is_some() && self.screen == Screen::Library => {
+                self.org.notice = None;
+                Task::none()
+            }
             Message::Escape if self.renaming.is_some() => self.update(Message::CancelRename),
             Message::Escape if self.confirm_remove.is_some() => self.update(Message::CancelRemove),
             Message::Escape if self.screen != Screen::Library => self.update(Message::Back),
@@ -803,7 +822,12 @@ impl App {
                 self.selected = Some(id);
                 self.screen = Screen::Model(id);
                 self.model = Some(ModelView::Loading(id));
-                self.load_model(id)
+                self.org.cancel_edits();
+                if self.org.data.as_ref().is_some_and(|(m, _)| *m != id) {
+                    self.org.data = None;
+                    self.org.notes_md.clear();
+                }
+                Task::batch([self.load_model(id), self.load_data(id)])
             }
             Message::ModelLoaded(id, result) => {
                 // A load for a model that is no longer on screen is stale.
@@ -861,6 +885,7 @@ impl App {
             Message::Back => {
                 self.screen = Screen::Library;
                 self.model = None;
+                self.org.cancel_edits();
                 Task::none()
             }
             Message::SettingsChanged(settings) => {
@@ -1042,10 +1067,57 @@ impl App {
                 }
                 let ticket = self.search.refresh();
                 let model = match &self.model {
-                    Some(m) => self.load_model(m.id()),
+                    Some(m) => Task::batch([self.load_model(m.id()), self.load_data(m.id())]),
                     None => Task::none(),
                 };
-                Task::batch([self.load_libraries(), self.run_search(ticket), model])
+                Task::batch([
+                    self.load_libraries(),
+                    self.run_search(ticket),
+                    model,
+                    self.load_lists(),
+                ])
+            }
+            EngineEvent::ModelDataChanged(id) => {
+                // Tags and recipes change what cards show and what matches.
+                let ticket = self.search.refresh();
+                let open = self.model.as_ref().map(ModelView::id) == Some(id);
+                if open {
+                    // The preview material may have changed.
+                    let mut targets = vec![ThumbTarget::Model(id)];
+                    if let Some(ModelView::Loaded { detail, .. }) = &self.model {
+                        targets.extend(detail.parts.iter().map(|p| ThumbTarget::Part(p.id)));
+                    }
+                    self.thumbs.refresh(targets);
+                } else {
+                    self.thumbs.refresh([ThumbTarget::Model(id)]);
+                }
+                let data = if open {
+                    self.load_data(id)
+                } else {
+                    Task::none()
+                };
+                Task::batch([self.run_search(ticket), data])
+            }
+            EngineEvent::OrganizeChanged => {
+                let ticket = self.search.refresh();
+                Task::batch([self.load_lists(), self.run_search(ticket)])
+            }
+            EngineEvent::SidecarForeign { library } => {
+                let name = self
+                    .library(library)
+                    .map(|l| l.display_name.clone())
+                    .unwrap_or_default();
+                self.org.notice = Some(t_args(
+                    "notice-sidecar-foreign",
+                    &[("library", Arg::str(name))],
+                ));
+                Task::none()
+            }
+            EngineEvent::LibraryChanged(lib) => {
+                if let Some(l) = self.libraries.iter_mut().find(|l| l.id == lib.id) {
+                    *l = lib;
+                }
+                Task::none()
             }
             EngineEvent::ThumbnailReady {
                 target,
@@ -1075,10 +1147,20 @@ impl App {
         }
     }
 
-    fn set_scope(&mut self, scope: Option<LibraryId>) -> Task<Message> {
+    pub(crate) fn set_scope(&mut self, scope: Scope) -> Task<Message> {
+        self.org.collection_edit = None;
         self.viewport = self.viewport.map(|v| GridViewport { offset: 0.0, ..v });
         let scroll = operation::snap_to(grid_id(), RelativeOffset::START);
-        match self.search.update(|q| q.scope = scope) {
+        // A collection keeps its own order; elsewhere the saved sort applies.
+        let sort = if matches!(scope, Scope::Collection(_)) {
+            SortOrder::Collection
+        } else {
+            self.settings.sort
+        };
+        match self.search.update(|q| {
+            q.scope = scope;
+            q.sort = sort;
+        }) {
             Some(ticket) => Task::batch([self.run_search(ticket), scroll]),
             None => Task::none(),
         }
@@ -1119,7 +1201,7 @@ impl App {
         }
     }
 
-    fn show_error(&mut self, e: &CoreError) {
+    pub(crate) fn show_error(&mut self, e: &CoreError) {
         tracing::warn!(error = %e, "engine error");
         self.error = Some(error_text(e));
     }
@@ -1147,12 +1229,12 @@ impl App {
                 let result = async {
                     let q = &ticket.query;
                     let hits = engine
-                        .search_in(q.scope, &q.text, &q.filter, q.sort, SEARCH_LIMIT)
+                        .search_in(&q.scope, &q.text, &q.filter, q.sort, SEARCH_LIMIT)
                         .await?;
                     let total = if hits.len() < SEARCH_LIMIT as usize {
                         hits.len() as u64
                     } else {
-                        engine.count(q.scope, &q.text, &q.filter).await?
+                        engine.count(&q.scope, &q.text, &q.filter).await?
                     };
                     Ok::<_, CoreError>((hits, total))
                 }
@@ -1193,7 +1275,9 @@ impl App {
 }
 
 /// Runs an OS hand-off (open, reveal) off the UI thread.
-fn launch(f: impl FnOnce() -> Result<(), opener::OpenError> + Send + 'static) -> Task<Message> {
+pub(crate) fn launch(
+    f: impl FnOnce() -> Result<(), opener::OpenError> + Send + 'static,
+) -> Task<Message> {
     Task::perform(
         async move {
             tokio::task::spawn_blocking(move || f().map_err(std::io::Error::other))
@@ -1226,6 +1310,11 @@ pub fn error_text(e: &CoreError) -> String {
             &[("path", Arg::str(path.display().to_string()))],
         ),
         CoreError::AlreadyScanning(_) => t("error-already-scanning"),
+        CoreError::TagInvalid => t("error-tag-invalid"),
+        CoreError::SourceInvalid => t("error-source-invalid"),
+        CoreError::CollectionExists => t("error-collection-exists"),
+        CoreError::CollectionNameInvalid => t("error-collection-name"),
+        CoreError::TextTooLong => t("error-text-too-long"),
         _ => t("error-other"),
     }
 }
@@ -1239,11 +1328,20 @@ fn on_event(event: Event, status: event::Status, _window: window::Id) -> Option<
             match key.as_ref() {
                 keyboard::Key::Named(key::Named::Escape) => Some(Message::Escape),
                 keyboard::Key::Character(",") if modifiers.command() => Some(Message::OpenSettings),
+                keyboard::Key::Named(key::Named::Enter) if modifiers.command() => {
+                    Some(Message::Org(Org::SaveNotes))
+                }
                 keyboard::Key::Named(key::Named::Enter) if free => Some(Message::OpenSelected),
                 keyboard::Key::Character("o") if free && !modifiers.command() => {
                     Some(Message::OpenPart)
                 }
                 keyboard::Key::Character("f") if modifiers.command() => Some(Message::FocusSearch),
+                keyboard::Key::Character("t") if free && !modifiers.command() => {
+                    Some(Message::Org(Org::StartTag))
+                }
+                keyboard::Key::Character("n") if free && !modifiers.command() => {
+                    Some(Message::Org(Org::StartNotes))
+                }
                 keyboard::Key::Character("/") if free => Some(Message::FocusSearch),
                 keyboard::Key::Named(named) if free => match named {
                     key::Named::ArrowLeft => Some(Message::Nav(Move::Left)),
@@ -1304,6 +1402,9 @@ mod tests {
             part_count: 1,
             missing: false,
             created_at: 0,
+            material: None,
+            recipe: None,
+            last_print: None,
         }
     }
 
@@ -1367,7 +1468,7 @@ mod tests {
         let lib = LibraryId::new();
         let _ = a.update(Message::SearchChanged("orc".into()));
         deliver(&mut a, vec![hit("Orc")]);
-        let _ = a.update(Message::SelectScope(Some(lib)));
+        let _ = a.update(Message::SelectScope(Scope::Library(lib)));
         deliver(&mut a, vec![]);
         assert!(!a.search.loading);
         let _ = a.update(Message::Engine(EngineEvent::ScanFinished {
@@ -1376,8 +1477,8 @@ mod tests {
         }));
         assert!(a.search.loading);
         assert_eq!(
-            (a.search.query.text.as_str(), a.search.query.scope),
-            ("orc", Some(lib))
+            (a.search.query.text.as_str(), &a.search.query.scope),
+            ("orc", &Scope::Library(lib))
         );
     }
 
@@ -1414,18 +1515,18 @@ mod tests {
         let mut a = app();
         let lib = LibraryId::new();
         deliver(&mut a, vec![]);
-        let _ = a.update(Message::SelectScope(Some(lib)));
-        assert_eq!(a.search.query.scope, Some(lib));
+        let _ = a.update(Message::SelectScope(Scope::Library(lib)));
+        assert_eq!(a.search.query.scope, Scope::Library(lib));
         assert!(a.search.loading);
     }
 
     #[test]
     fn removed_scope_falls_back_to_all() {
         let mut a = app();
-        let _ = a.update(Message::SelectScope(Some(LibraryId::new())));
+        let _ = a.update(Message::SelectScope(Scope::Library(LibraryId::new())));
         deliver(&mut a, vec![]);
         let _ = a.update(Message::Libraries(Ok((vec![], HashMap::new()))));
-        assert_eq!(a.search.query.scope, None);
+        assert_eq!(a.search.query.scope, Scope::All);
     }
 
     #[test]
@@ -1505,6 +1606,184 @@ mod tests {
         let _ = a.update(Message::OpenSettings);
         let _ = a.update(Message::Escape);
         assert_eq!(a.screen, Screen::Library);
+    }
+
+    use crate::org::{CollectionEdit, Lists};
+    use printdex_core::{CollectionId, CollectionInfo, ModelData, SortOrder, TagCount};
+
+    /// Opens a model and delivers its data.
+    fn open_with_data(a: &mut App, data: ModelData) -> ModelId {
+        let h = hit("orc");
+        deliver(a, vec![h.clone()]);
+        let _ = a.update(Message::OpenModel(h.id));
+        let _ = a.update(Message::Org(Org::DataLoaded(
+            h.id,
+            Ok(Some(Box::new(data))),
+        )));
+        h.id
+    }
+
+    #[test]
+    fn selecting_collection_scopes_search_in_collection_order() {
+        let mut a = app();
+        deliver(&mut a, vec![]);
+        let c = CollectionId::new();
+        let _ = a.update(Message::SelectScope(Scope::Collection(c)));
+        assert_eq!(a.search.query.scope, Scope::Collection(c));
+        assert_eq!(a.search.query.sort, SortOrder::Collection);
+        assert!(a.search.loading);
+        // Elsewhere the saved sort applies again.
+        deliver(&mut a, vec![]);
+        let _ = a.update(Message::SelectScope(Scope::All));
+        assert_eq!(a.search.query.sort, a.settings.sort);
+    }
+
+    #[test]
+    fn selecting_tag_scopes_search() {
+        let mut a = app();
+        deliver(&mut a, vec![]);
+        let _ = a.update(Message::SelectScope(Scope::Tag("pla".into())));
+        assert_eq!(a.search.query.scope, Scope::Tag("pla".into()));
+        assert!(a.search.loading);
+    }
+
+    #[test]
+    fn deleted_collection_scope_falls_back_to_all() {
+        let mut a = app();
+        let c = CollectionId::new();
+        let _ = a.update(Message::SelectScope(Scope::Collection(c)));
+        deliver(&mut a, vec![]);
+        let _ = a.update(Message::Org(Org::Lists(Ok(Lists::default()))));
+        assert_eq!(a.search.query.scope, Scope::All);
+    }
+
+    #[test]
+    fn model_data_changed_reloads_open_model() {
+        let mut a = app();
+        let id = open_with_data(&mut a, ModelData::default());
+        a.thumbs.ready(
+            ThumbTarget::Model(id),
+            "/x/a.png".into(),
+            printdex_core::ThumbKind::Render,
+        );
+        let _ = a.update(Message::Engine(EngineEvent::ModelDataChanged(id)));
+        // Cards rerun (tags match) and the preview is asked again (material).
+        assert!(a.search.loading);
+        assert!(a.thumbs.pending(ThumbTarget::Model(id)));
+        assert!(a.thumbs.get(ThumbTarget::Model(id)).is_some());
+    }
+
+    #[test]
+    fn data_for_another_model_is_ignored() {
+        let mut a = app();
+        let id = open_with_data(&mut a, ModelData::default());
+        let other = ModelId::new();
+        let data = ModelData {
+            notes: "other".into(),
+            ..ModelData::default()
+        };
+        let _ = a.update(Message::Org(Org::DataLoaded(
+            other,
+            Ok(Some(Box::new(data))),
+        )));
+        assert_eq!(a.org.data_for(id).map(|d| d.notes.as_str()), Some(""));
+    }
+
+    #[test]
+    fn t_opens_tag_input_only_in_model_view() {
+        let mut a = app();
+        let _ = a.update(Message::Org(Org::StartTag));
+        assert_eq!(a.org.tag_input, None);
+        open_with_data(&mut a, ModelData::default());
+        let _ = a.update(Message::Org(Org::StartTag));
+        assert_eq!(a.org.tag_input.as_deref(), Some(""));
+        // Enter with text keeps the field open for the next tag.
+        let _ = a.update(Message::Org(Org::TagInput("pla".into())));
+        let _ = a.update(Message::Org(Org::SubmitTag));
+        assert_eq!(a.org.tag_input.as_deref(), Some(""));
+        // Enter on an empty field closes it.
+        let _ = a.update(Message::Org(Org::SubmitTag));
+        assert_eq!(a.org.tag_input, None);
+    }
+
+    #[test]
+    fn n_starts_editing_notes_and_save_shows_them() {
+        let mut a = app();
+        let data = ModelData {
+            notes: "Print *flat*".into(),
+            ..ModelData::default()
+        };
+        let id = open_with_data(&mut a, data);
+        assert!(!a.org.notes_md.is_empty());
+        let _ = a.update(Message::Org(Org::StartNotes));
+        let text = a.org.notes_edit.as_ref().map(text_editor_text);
+        assert_eq!(text.as_deref(), Some("Print *flat*"));
+        a.org.notes_edit = Some(iced::widget::text_editor::Content::with_text("Brim\n"));
+        let _ = a.update(Message::Org(Org::SaveNotes));
+        assert!(a.org.notes_edit.is_none());
+        assert_eq!(a.org.data_for(id).map(|d| d.notes.as_str()), Some("Brim"));
+    }
+
+    fn text_editor_text(c: &iced::widget::text_editor::Content) -> String {
+        c.text().trim_end_matches('\n').to_owned()
+    }
+
+    #[test]
+    fn escape_cancels_editing_before_leaving() {
+        let mut a = app();
+        open_with_data(&mut a, ModelData::default());
+        let _ = a.update(Message::Org(Org::StartNotes));
+        let _ = a.update(Message::Escape);
+        assert!(a.org.notes_edit.is_none());
+        assert!(
+            matches!(a.screen, Screen::Model(_)),
+            "first Esc only cancels"
+        );
+        let _ = a.update(Message::Escape);
+        assert_eq!(a.screen, Screen::Library);
+    }
+
+    #[test]
+    fn invalid_source_is_refused_in_words() {
+        let mut a = app();
+        open_with_data(&mut a, ModelData::default());
+        let _ = a.update(Message::Org(Org::StartSource));
+        let _ = a.update(Message::Org(Org::SourceInput("ftp://x".into())));
+        let _ = a.update(Message::Org(Org::SaveSource));
+        assert!(a.error.is_some());
+        assert!(
+            a.org.source_edit.is_some(),
+            "the field stays open to fix it"
+        );
+    }
+
+    #[test]
+    fn collection_delete_needs_confirmation() {
+        let mut a = app();
+        let c = CollectionId::new();
+        let _ = a.update(Message::Org(Org::Lists(Ok(Lists {
+            collections: vec![CollectionInfo {
+                id: c,
+                name: "Desk".into(),
+                count: 2,
+            }],
+            tags: vec![TagCount {
+                name: "pla".into(),
+                count: 1,
+            }],
+            ..Lists::default()
+        }))));
+        let _ = a.update(Message::SelectScope(Scope::Collection(c)));
+        // A stray confirm does nothing.
+        let _ = a.update(Message::Org(Org::ConfirmDeleteCollection(c)));
+        assert_eq!(a.org.collection_edit, None);
+        let _ = a.update(Message::Org(Org::AskDeleteCollection(c)));
+        assert_eq!(
+            a.org.collection_edit,
+            Some(CollectionEdit::ConfirmDelete(c))
+        );
+        let _ = a.update(Message::Escape);
+        assert_eq!(a.org.collection_edit, None);
     }
 
     fn detail(id: ModelId, parts: &[&str]) -> ModelDetail {
@@ -1700,7 +1979,7 @@ mod tests {
     fn chips_survive_scope_change() {
         let mut a = app();
         let _ = a.update(Message::ToggleChip(Chip::MultiPart(true)));
-        let _ = a.update(Message::SelectScope(Some(LibraryId::new())));
+        let _ = a.update(Message::SelectScope(Scope::Library(LibraryId::new())));
         assert_eq!(a.chips, vec![Chip::MultiPart(true)]);
         assert_eq!(a.search.query.filter.multi_part, Some(true));
     }

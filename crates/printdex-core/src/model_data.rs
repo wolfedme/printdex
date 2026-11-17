@@ -444,6 +444,23 @@ pub struct ModelData {
     pub attempts: Vec<Attempt>,
 }
 
+impl ModelData {
+    /// The material previews are drawn in: the recipe's, else the latest
+    /// attempt's (same rule as the thumbnail cache).
+    pub fn preview_material(&self) -> printdex_render::Material {
+        let m = self
+            .recipe
+            .as_ref()
+            .and_then(|r| r.settings.material.as_ref())
+            .or_else(|| {
+                self.attempts
+                    .first()
+                    .and_then(|a| a.settings.material.as_ref())
+            });
+        crate::db::render_material(m.map(Material::key).as_deref())
+    }
+}
+
 /// The matching key for a tag or collection name: trimmed, inner whitespace
 /// collapsed to one space, lower-cased.
 pub fn name_key(name: &str) -> String {

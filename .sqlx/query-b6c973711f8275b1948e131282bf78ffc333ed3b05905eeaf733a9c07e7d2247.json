@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT notes, source_url FROM models WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "notes",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "notes"
+          }
+        }
+      },
+      {
+        "name": "source_url",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "source_url"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "b6c973711f8275b1948e131282bf78ffc333ed3b05905eeaf733a9c07e7d2247"
+}

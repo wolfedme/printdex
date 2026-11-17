@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!: ModelId\" FROM models m\n               WHERE library_id = ? AND missing_since IS NULL\n                 AND (data_updated_at IS NOT NULL\n                      OR EXISTS (SELECT 1 FROM recipes r WHERE r.model_id = m.id)\n                      OR EXISTS (SELECT 1 FROM attempts a WHERE a.model_id = m.id))",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: ModelId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "d16b4f97f750053d95a288827d00a0f2e2532949275a503c1e1ae597c2a3fa28"
+}

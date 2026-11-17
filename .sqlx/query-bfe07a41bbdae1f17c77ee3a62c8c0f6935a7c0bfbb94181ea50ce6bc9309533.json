@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE libraries SET sidecar_enabled = ?, updated_at = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "bfe07a41bbdae1f17c77ee3a62c8c0f6935a7c0bfbb94181ea50ce6bc9309533"
+}

@@ -186,3 +186,54 @@ model-triangles = { $count ->
     [one] { $n } triangle
    *[other] { $n } triangles
 }
+
+## Organizing
+sidebar-collections = Collections
+sidebar-new-collection = Collection name
+sidebar-collections-empty = No collections yet
+sidebar-smart = Smart filters
+sidebar-tags = Tags
+sidebar-tags-empty = No tags yet
+sidebar-tags-all = Show all { $count } tags
+sidebar-tags-fewer = Show fewer tags
+smart-never-printed = Never printed
+smart-failed-last = Failed last time
+smart-added-week = Added this week
+header-tag = Tagged “{ $tag }”
+sort-collection = Collection order
+collection-rename = Rename collection
+collection-delete = Delete collection
+collection-delete-confirm = Delete this collection? Its models stay in your library.
+collection-new = New collection…
+collection-add-model = Add to collection
+collection-remove-model = Remove from collection
+action-save = Save
+action-cancel = Cancel
+model-tags = Tags
+model-collections = Collections
+model-source = Source
+model-notes = Notes
+tag-add = Tag
+tag-remove = Remove tag
+tag-placeholder = Add a tag
+tag-hint = Enter adds the tag. Esc closes.
+source-add = Add source link
+source-edit = Edit source link
+source-placeholder = https://…
+notes-empty = No notes yet. Press N to write some.
+notes-placeholder = What to remember about this model. Markdown works.
+notes-edit = Edit notes
+notes-key-save = Save
+notes-key-cancel = Cancel
+status-key-tag = Tag
+status-key-notes = Notes
+settings-sidecars = Sidecar files
+settings-sidecars-body = Printdex can keep a small .printdex.toml file next to each model you tag, note or log. It holds what you wrote, so it travels with the folder and survives reinstalling. Printdex never writes any other file into a library.
+settings-sidecars-on = Writes .printdex.toml next to models you organize
+settings-sidecars-off = Writes nothing into this library
+notice-sidecar-foreign = { $library } has notes and tags from another Printdex install. They were added to this one.
+error-source-invalid = That link can’t be used. Use a web address starting with http:// or https://.
+error-collection-exists = A collection with that name already exists.
+error-collection-name = Collection names can’t be empty or longer than 80 characters.
+error-tag-invalid = Tags can’t be empty or longer than 64 characters.
+error-text-too-long = That text is too long to save.

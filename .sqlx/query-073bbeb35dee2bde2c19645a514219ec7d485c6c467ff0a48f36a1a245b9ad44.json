@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!: PhotoId\", file_name FROM attempt_photos WHERE attempt_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: PhotoId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "attempt_photos",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "file_name",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "attempt_photos",
+            "name": "file_name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "073bbeb35dee2bde2c19645a514219ec7d485c6c467ff0a48f36a1a245b9ad44"
+}

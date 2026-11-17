@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO attempt_photos (id, attempt_id, file_name, created_at) VALUES (?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "27c008815a343564e0d6af5c027f1ce24313c422d6777d0ac12d74bbc69482a5"
+}

@@ -11,6 +11,7 @@ use crate::app::{App, Message, SettingsSection, rename_id};
 use crate::format::{group, size};
 use crate::i18n::{Arg, t, t_args};
 use crate::icons::{self, Icon};
+use crate::org::Org;
 use crate::settings::{CACHE_LIMITS_MB, Settings, ThemeMode, Translucency};
 use crate::theme::{self, Badge, ColorTheme, Palette, Surface};
 
@@ -173,9 +174,46 @@ fn libraries(app: &App, p: Palette) -> Element<'_, Message> {
             Palette::button_secondary,
             Some(Message::PickLibrary)
         ),
+        sidecars(app, p),
     ]
     .spacing(theme::S6)
     .into()
+}
+
+/// Per library: write `.printdex.toml` sidecars next to models.
+fn sidecars(app: &App, p: Palette) -> Element<'_, Message> {
+    let mut col = column![
+        column![
+            text(t("settings-sidecars"))
+                .size(theme::SIZE_SECTION)
+                .font(theme::FONT_BOLD)
+                .color(p.n.ink),
+            text(t("settings-sidecars-body"))
+                .size(theme::SIZE_CAPTION)
+                .color(p.n.ink_2),
+        ]
+        .spacing(theme::S2),
+        widgets::hairline(p),
+    ]
+    .spacing(theme::S5);
+    for lib in &app.libraries {
+        let id = lib.id;
+        let control = toggler(lib.sidecar_enabled)
+            .size(20)
+            .style(move |_, status| p.toggler(status))
+            .on_toggle(move |on| Message::Org(Org::SetSidecars(id, on)));
+        col = col.push(setting(
+            p,
+            lib.display_name.clone(),
+            if lib.sidecar_enabled {
+                t("settings-sidecars-on")
+            } else {
+                t("settings-sidecars-off")
+            },
+            control.into(),
+        ));
+    }
+    col.into()
 }
 
 const ACTIONS_WIDTH: f32 = 150.0;

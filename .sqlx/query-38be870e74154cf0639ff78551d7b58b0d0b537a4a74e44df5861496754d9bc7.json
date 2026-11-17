@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT p as \"p!: String\" FROM (\n                 SELECT json_extract(settings, '$.printer') as p FROM attempts\n                 UNION ALL SELECT json_extract(settings, '$.printer') FROM recipes)\n               WHERE p IS NOT NULL AND trim(p) != ''\n               GROUP BY lower(p) ORDER BY count(*) DESC, p COLLATE NOCASE LIMIT 50",
+  "describe": {
+    "columns": [
+      {
+        "name": "p!: String",
+        "ordinal": 0,
+        "type_info": "Null",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "38be870e74154cf0639ff78551d7b58b0d0b537a4a74e44df5861496754d9bc7"
+}

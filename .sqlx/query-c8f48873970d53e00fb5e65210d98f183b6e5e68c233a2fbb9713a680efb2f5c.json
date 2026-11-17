@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!: ModelId\", rel_path, kind, sidecar_mtime_ns FROM models\n               WHERE library_id = ? AND missing_since IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: ModelId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "rel_path",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "rel_path"
+          }
+        }
+      },
+      {
+        "name": "kind",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "name": "sidecar_mtime_ns",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "sidecar_mtime_ns"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "c8f48873970d53e00fb5e65210d98f183b6e5e68c233a2fbb9713a680efb2f5c"
+}

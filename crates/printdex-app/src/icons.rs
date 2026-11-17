@@ -43,6 +43,14 @@ icon_files! {
     Check => "check.svg",
     Remove => "trash-2.svg",
     Rename => "pencil.svg",
+    Tag => "tag.svg",
+    Collection => "bookmark.svg",
+    NeverPrinted => "circle-dashed.svg",
+    Failed => "circle-x.svg",
+    Recent => "history.svg",
+    Link => "link.svg",
+    Notes => "notebook-pen.svg",
+    Info => "info.svg",
 }
 
 /// `icon` at `size` px, tinted `color`.

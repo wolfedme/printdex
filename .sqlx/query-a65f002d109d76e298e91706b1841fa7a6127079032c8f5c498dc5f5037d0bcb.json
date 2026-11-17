@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM model_tags)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "a65f002d109d76e298e91706b1841fa7a6127079032c8f5c498dc5f5037d0bcb"
+}

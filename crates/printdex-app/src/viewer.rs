@@ -75,6 +75,8 @@ pub struct Viewer {
     pub software: bool,
     /// The latest CPU picture of the current view (software renderer).
     pub picture: Option<image::Handle>,
+    /// The material the model is drawn in.
+    pub material: Material,
     /// Request counter: results of older requests are ignored.
     request: u64,
     abort: Option<iced::task::Handle>,
@@ -134,6 +136,9 @@ impl Viewer {
                     Load::Loading(d) => d,
                     _ => Detail::Preview,
                 };
+                if let Ok(p) = &result {
+                    self.material = p.material;
+                }
                 self.load = match result {
                     Ok(p) => match (Sphere::of(&p.mesh), p.mesh.bounds()) {
                         (Some(sphere), Some(bounds)) => Load::Ready(Loaded {
@@ -213,6 +218,15 @@ impl Viewer {
         }
     }
 
+    /// Draws the model in `material` (its recipe changed).
+    pub fn set_material(&mut self, material: Material) -> Task<Msg> {
+        if self.material == material {
+            return Task::none();
+        }
+        self.material = material;
+        self.render_cpu()
+    }
+
     /// The starting camera for the loaded model at the current size.
     fn home(&self) -> View {
         match &self.load {
@@ -236,7 +250,7 @@ impl Viewer {
         let opts = RenderOptions {
             width: (self.size.width * scale) as u32,
             height: (self.size.height * scale) as u32,
-            material: Material::Unknown,
+            material: self.material,
             camera: self.view.camera,
             framing: self.view.framing(),
         };
@@ -267,6 +281,7 @@ mod tests {
             dims: [10.0, 10.0, 5.0],
             triangles: 1,
             decimated: false,
+            material: Material::Unknown,
         }
     }
 

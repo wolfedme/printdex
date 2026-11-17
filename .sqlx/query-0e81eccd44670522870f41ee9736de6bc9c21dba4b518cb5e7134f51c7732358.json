@@ -1,0 +1,33 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT t.name, count(*) as \"n!: i64\" FROM tags t\n               JOIN model_tags mt ON mt.tag_id = t.id\n               JOIN models m ON m.id = mt.model_id AND m.missing_since IS NULL\n               GROUP BY t.id ORDER BY 2 DESC, t.name COLLATE NOCASE",
+  "describe": {
+    "columns": [
+      {
+        "name": "name",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "tags",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "n!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "0e81eccd44670522870f41ee9736de6bc9c21dba4b518cb5e7134f51c7732358"
+}

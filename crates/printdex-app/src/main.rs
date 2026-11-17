@@ -9,6 +9,7 @@ mod icons;
 mod list;
 mod motion;
 mod nav;
+mod org;
 mod search;
 mod settings;
 mod theme;

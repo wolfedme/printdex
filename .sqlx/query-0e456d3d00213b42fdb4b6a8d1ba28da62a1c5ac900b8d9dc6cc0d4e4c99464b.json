@@ -1,0 +1,45 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT c.id as \"id!: CollectionId\", c.name,\n                      (SELECT count(*) FROM collection_models cm JOIN models m ON m.id = cm.model_id\n                        WHERE cm.collection_id = c.id AND m.missing_since IS NULL) as \"n!: i64\"\n               FROM collections c ORDER BY c.name COLLATE NOCASE",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: CollectionId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "collections",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "collections",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "n!: i64",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "0e456d3d00213b42fdb4b6a8d1ba28da62a1c5ac900b8d9dc6cc0d4e4c99464b"
+}
