@@ -10,7 +10,7 @@
 //! status colours never change with the colour theme.
 
 use iced::overlay::menu;
-use iced::widget::{button, container, pick_list, scrollable, text_input};
+use iced::widget::{button, container, pick_list, scrollable, text_input, toggler};
 use iced::{Background, Border, Color, Font, Shadow, font};
 
 mod presets;
@@ -192,6 +192,14 @@ fn blur_supported_on(os: &str, desktop: Option<&str>) -> bool {
         "linux" => desktop.is_some_and(|d| d.split(':').any(|p| p.eq_ignore_ascii_case("kde"))),
         _ => false,
     }
+}
+
+/// Kinds of status badge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Badge {
+    Ok,
+    Busy,
+    Offline,
 }
 
 /// One colour theme in one mode: the glass set and its solid twin.
@@ -452,6 +460,57 @@ impl Palette {
         }
     }
 
+    /// Status badge in the libraries table.
+    pub fn badge(&self, kind: Badge) -> container::Style {
+        let (bg, fg) = match kind {
+            Badge::Ok => (self.status.ok_soft, self.status.ok),
+            Badge::Busy => (self.t.accent_soft, self.t.accent_ink),
+            Badge::Offline => (self.n.rule_soft, self.status.offline),
+        };
+        container::Style {
+            background: Some(bg.into()),
+            text_color: Some(fg),
+            border: Border {
+                radius: 6.0.into(),
+                ..Border::default()
+            },
+            ..container::Style::default()
+        }
+    }
+
+    /// Tooltip bubble: opaque surface with an edge.
+    pub fn tooltip(&self) -> container::Style {
+        container::Style {
+            background: Some(
+                Color {
+                    a: 1.0,
+                    ..self.t.surface
+                }
+                .into(),
+            ),
+            text_color: Some(self.n.ink),
+            border: Border {
+                color: self.n.edge,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..container::Style::default()
+        }
+    }
+
+    /// A small filled square, for colour swatches.
+    pub fn swatch(&self, color: Color) -> container::Style {
+        container::Style {
+            background: Some(color.into()),
+            border: Border {
+                color: self.n.rule,
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..container::Style::default()
+        }
+    }
+
     /// Preview well inside a pane.
     pub fn well(&self) -> container::Style {
         container::Style {
@@ -609,6 +668,46 @@ impl Palette {
             selected_text_color: self.t.accent_ink,
             selected_background: Background::Color(self.t.accent_soft),
             shadow: Shadow::default(),
+        }
+    }
+
+    /// Destructive confirmation button.
+    pub fn button_danger(&self, status: button::Status) -> button::Style {
+        let bg = match status {
+            button::Status::Hovered | button::Status::Pressed => {
+                mix(self.status.fail, self.n.ink, 0.15)
+            }
+            _ => self.status.fail,
+        };
+        button::Style {
+            background: Some(bg.into()),
+            text_color: Color::WHITE,
+            border: Border {
+                radius: RADIUS_CONTROL.into(),
+                ..Border::default()
+            },
+            shadow: Shadow::default(),
+            snap: true,
+        }
+    }
+
+    pub fn toggler(&self, status: toggler::Status) -> toggler::Style {
+        let (toggler::Status::Active { is_toggled: on }
+        | toggler::Status::Hovered { is_toggled: on }
+        | toggler::Status::Disabled { is_toggled: on }) = status;
+        toggler::Style {
+            background: Background::Color(if on { self.t.primary } else { self.n.rule }),
+            background_border_width: 0.0,
+            background_border_color: Color::TRANSPARENT,
+            foreground: Background::Color(Color {
+                a: 1.0,
+                ..self.t.surface
+            }),
+            foreground_border_width: 0.0,
+            foreground_border_color: Color::TRANSPARENT,
+            text_color: Some(self.n.ink),
+            border_radius: None,
+            padding_ratio: 0.1,
         }
     }
 

@@ -4,6 +4,7 @@ mod empty;
 mod grid;
 mod list;
 mod model;
+mod settings;
 mod sidebar;
 mod statusbar;
 mod toolbar;
@@ -43,7 +44,8 @@ pub fn view(app: &App) -> Element<'_, Message> {
 fn shell(app: &App, p: Palette) -> Element<'_, Message> {
     let main = match app.screen {
         Screen::Model(_) => model::view(app, p),
-        Screen::Library | Screen::Settings => library(app, p),
+        Screen::Settings => settings::view(app, p),
+        Screen::Library => library(app, p),
     };
     row![
         sidebar::view(app, p),

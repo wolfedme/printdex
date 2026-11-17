@@ -29,6 +29,10 @@ pub fn search_id() -> Id {
     Id::new("search")
 }
 
+pub fn rename_id() -> Id {
+    Id::new("rename")
+}
+
 pub fn grid_id() -> Id {
     Id::new("grid")
 }
@@ -92,6 +96,15 @@ impl ModelView {
     }
 }
 
+/// The section shown on the Settings screen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SettingsSection {
+    #[default]
+    Libraries,
+    Appearance,
+    About,
+}
+
 /// Which screen fills the main area.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Screen {
@@ -140,6 +153,11 @@ pub struct App {
     /// Active filter chips, in the order they were added.
     pub chips: Vec<Chip>,
     pub filter_menu: bool,
+    pub settings_section: SettingsSection,
+    /// The library whose "Remove" asks for confirmation.
+    pub confirm_remove: Option<LibraryId>,
+    /// The library being renamed, with the edited name.
+    pub renaming: Option<(LibraryId, String)>,
     pub settings: Settings,
     /// The OS's light/dark preference, used when the mode is System.
     pub system_mode: Mode,
@@ -179,6 +197,17 @@ pub enum Message {
     OpenModel(ModelId),
     OpenSettings,
     Back,
+    ShowSection(SettingsSection),
+    AskRemove(LibraryId),
+    CancelRemove,
+    ConfirmRemove(LibraryId),
+    StartRename(LibraryId),
+    RenameInput(String),
+    CommitRename,
+    CancelRename,
+    /// Result of a remove or rename.
+    LibraryChanged(Result<(), Arc<CoreError>>),
+    RescanLibrary(LibraryId),
     ToggleFilterMenu,
     ToggleChip(Chip),
     ModelLoaded(ModelId, Result<Option<ModelDetail>, Arc<CoreError>>),
@@ -215,6 +244,9 @@ impl App {
             model: None,
             chips: Vec::new(),
             filter_menu: false,
+            settings_section: SettingsSection::default(),
+            confirm_remove: None,
+            renaming: None,
             settings,
             system_mode: Mode::default(),
             window: INITIAL_WINDOW,
@@ -344,7 +376,11 @@ impl App {
                 }
                 Task::none()
             }
-            Message::SelectScope(scope) => self.set_scope(scope),
+            Message::SelectScope(scope) => {
+                self.screen = Screen::Library;
+                self.model = None;
+                self.set_scope(scope)
+            }
             Message::PickLibrary => Task::perform(
                 async {
                     rfd::AsyncFileDialog::new()
@@ -432,6 +468,8 @@ impl App {
                 operation::focus(search_id()),
                 operation::select_all(search_id()),
             ]),
+            Message::Escape if self.renaming.is_some() => self.update(Message::CancelRename),
+            Message::Escape if self.confirm_remove.is_some() => self.update(Message::CancelRemove),
             Message::Escape if self.screen != Screen::Library => self.update(Message::Back),
             Message::Escape if self.filter_menu => {
                 self.filter_menu = false;
@@ -454,6 +492,87 @@ impl App {
             }
             Message::DismissError => {
                 self.error = None;
+                Task::none()
+            }
+            Message::ShowSection(section) => {
+                self.settings_section = section;
+                Task::none()
+            }
+            Message::AskRemove(id) => {
+                self.confirm_remove = Some(id);
+                Task::none()
+            }
+            Message::CancelRemove => {
+                self.confirm_remove = None;
+                Task::none()
+            }
+            Message::ConfirmRemove(id) => {
+                // Only the library whose confirmation is showing.
+                if self.confirm_remove.take() != Some(id) {
+                    return Task::none();
+                }
+                let Some(engine) = self.engine.clone() else {
+                    return Task::none();
+                };
+                Task::perform(
+                    async move { engine.remove_library(id).await.map_err(Arc::new) },
+                    Message::LibraryChanged,
+                )
+            }
+            Message::StartRename(id) => {
+                let name = self
+                    .library(id)
+                    .map(|l| l.display_name.clone())
+                    .unwrap_or_default();
+                self.renaming = Some((id, name));
+                Task::batch([
+                    operation::focus(rename_id()),
+                    operation::select_all(rename_id()),
+                ])
+            }
+            Message::RenameInput(name) => {
+                if let Some((_, current)) = &mut self.renaming {
+                    *current = name;
+                }
+                Task::none()
+            }
+            Message::CancelRename => {
+                self.renaming = None;
+                Task::none()
+            }
+            Message::CommitRename => {
+                let Some((id, name)) = self.renaming.take() else {
+                    return Task::none();
+                };
+                if name.trim().is_empty()
+                    || self.library(id).map(|l| l.display_name.as_str()) == Some(name.trim())
+                {
+                    return Task::none();
+                }
+                let Some(engine) = self.engine.clone() else {
+                    return Task::none();
+                };
+                Task::perform(
+                    async move {
+                        engine
+                            .rename_library(id, &name)
+                            .await
+                            .map(|_| ())
+                            .map_err(Arc::new)
+                    },
+                    Message::LibraryChanged,
+                )
+            }
+            Message::LibraryChanged(Ok(())) => Task::none(),
+            Message::LibraryChanged(Err(e)) => {
+                self.show_error(&e);
+                Task::none()
+            }
+            Message::RescanLibrary(id) => {
+                if let std::collections::hash_map::Entry::Vacant(e) = self.scans.entry(id) {
+                    e.insert(scan_starting());
+                    return self.start_scan(id);
+                }
                 Task::none()
             }
             Message::ToggleFilterMenu => {
@@ -622,7 +741,16 @@ impl App {
     fn on_engine_event(&mut self, event: EngineEvent) -> Task<Message> {
         match event {
             EngineEvent::LibraryAdded(_) => Task::none(),
-            EngineEvent::LibraryRemoved(_) | EngineEvent::LibraryRenamed(_) => {
+            EngineEvent::LibraryRenamed(lib) => {
+                if let Some(l) = self.libraries.iter_mut().find(|l| l.id == lib.id) {
+                    *l = lib;
+                }
+                let ticket = self.search.refresh();
+                Task::batch([self.load_libraries(), self.run_search(ticket)])
+            }
+            EngineEvent::LibraryRemoved(id) => {
+                self.libraries.retain(|l| l.id != id);
+                self.counts.remove(&id);
                 let ticket = self.search.refresh();
                 Task::batch([self.load_libraries(), self.run_search(ticket)])
             }
@@ -1106,6 +1234,99 @@ mod tests {
                 .collect(),
             assets: vec![],
         }
+    }
+
+    fn library(name: &str) -> Library {
+        Library {
+            id: LibraryId::new(),
+            path: PathBuf::from("/srv").join(name),
+            display_name: name.into(),
+            kind: printdex_core::LibraryKind::Local,
+            sidecar_enabled: false,
+            last_full_scan_at: None,
+        }
+    }
+
+    #[test]
+    fn remove_requires_confirmation() {
+        let mut a = app();
+        let lib = library("NAS");
+        a.libraries.push(lib.clone());
+        // Without the confirmation showing, nothing is removed.
+        let task = a.update(Message::ConfirmRemove(lib.id));
+        assert_eq!(task.units(), 0);
+        let _ = a.update(Message::AskRemove(lib.id));
+        assert_eq!(a.confirm_remove, Some(lib.id));
+        let _ = a.update(Message::Escape);
+        assert_eq!(a.confirm_remove, None);
+        assert_eq!(a.screen, Screen::Library);
+        let _ = a.update(Message::AskRemove(lib.id));
+        let _ = a.update(Message::ConfirmRemove(LibraryId::new()));
+        assert_eq!(a.confirm_remove, None);
+        // The engine's event drops it from the sidebar.
+        let _ = a.update(Message::Engine(EngineEvent::LibraryRemoved(lib.id)));
+        assert!(a.libraries.is_empty());
+    }
+
+    #[test]
+    fn rename_library_updates_sidebar() {
+        let mut a = app();
+        let lib = library("NAS");
+        a.libraries.push(lib.clone());
+        let _ = a.update(Message::StartRename(lib.id));
+        assert_eq!(a.renaming, Some((lib.id, "NAS".into())));
+        let _ = a.update(Message::RenameInput("NAS prints".into()));
+        let _ = a.update(Message::CommitRename);
+        assert_eq!(a.renaming, None);
+        let renamed = Library {
+            display_name: "NAS prints".into(),
+            ..lib.clone()
+        };
+        let _ = a.update(Message::Engine(EngineEvent::LibraryRenamed(renamed)));
+        assert_eq!(a.library(lib.id).unwrap().display_name, "NAS prints");
+    }
+
+    #[test]
+    fn changing_colour_theme_saves_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut a = App::new(Options {
+            config_dir: Some(dir.path().to_path_buf()),
+            ..Options::in_memory(PathBuf::from("/nonexistent"))
+        });
+        let s = Settings {
+            color_theme: ColorTheme::Glacier,
+            ..a.settings
+        };
+        let task = a.update(Message::SettingsChanged(s));
+        assert_eq!(a.color_theme(), ColorTheme::Glacier);
+        assert_eq!(
+            a.palette(),
+            Palette::new(ColorTheme::Glacier, a.mode(), Surface::Solid)
+        );
+        assert!(task.units() > 0, "a save was started");
+        // Without a config folder nothing is written.
+        let mut b = app();
+        assert_eq!(b.update(Message::SettingsChanged(s)).units(), 0);
+    }
+
+    #[test]
+    fn system_mode_follows_os() {
+        let mut a = app();
+        let s = Settings {
+            mode: ThemeMode::Dark,
+            ..a.settings
+        };
+        let _ = a.update(Message::SettingsChanged(s));
+        let _ = a.update(Message::SystemMode(iced::theme::Mode::Light));
+        assert_eq!(a.mode(), Mode::Dark);
+        let s = Settings {
+            mode: ThemeMode::System,
+            ..a.settings
+        };
+        let _ = a.update(Message::SettingsChanged(s));
+        assert_eq!(a.mode(), Mode::Light);
+        let _ = a.update(Message::SystemMode(iced::theme::Mode::Dark));
+        assert_eq!(a.mode(), Mode::Dark);
     }
 
     #[test]

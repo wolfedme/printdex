@@ -4,13 +4,15 @@ use iced::widget::{Space, button, column, container, progress_bar, row, text};
 use iced::{Alignment, Element, Length};
 use printdex_core::{LibraryId, ScanPhase};
 
-use crate::app::{App, Message, ScanState};
+use crate::app::{App, Message, ScanState, Screen};
 use crate::format::group;
 use crate::i18n::{Arg, t, t_args};
 use crate::icons::{self, Icon};
 use crate::theme::{self, Palette};
 
 pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
+    // The scope is highlighted only while the library is on screen.
+    let on_library = app.screen != Screen::Settings;
     let scope = app.search.query.scope;
     let mut items = column![
         container(
@@ -25,7 +27,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
             Icon::Library,
             t("sidebar-all-models"),
             app.total_models(),
-            scope.is_none(),
+            on_library && scope.is_none(),
             None
         ),
     ]
@@ -38,7 +40,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
             Icon::Folder,
             lib.display_name.clone(),
             count,
-            scope == Some(lib.id),
+            on_library && scope == Some(lib.id),
             Some(lib.id),
         ));
     }
@@ -62,10 +64,49 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
         foot = foot.push(scan_block(app, p, *id, scan));
     }
 
+    let on_settings = app.screen == Screen::Settings;
+    let settings = button(
+        row![
+            icons::icon(
+                Icon::Settings,
+                theme::ICON,
+                if on_settings {
+                    p.t.accent_ink
+                } else {
+                    p.n.on_rail_2
+                }
+            ),
+            text(t("sidebar-settings"))
+                .size(theme::SIZE_BODY)
+                .width(Length::Fill),
+            text("Ctrl ,")
+                .size(theme::SIZE_DATA)
+                .font(theme::FONT_DATA)
+                .color(p.n.on_rail_2),
+        ]
+        .spacing(7)
+        .align_y(Alignment::Center),
+    )
+    .width(Length::Fill)
+    .height(theme::RAIL_ITEM_HEIGHT)
+    .padding([5, 8])
+    .style(move |_, status| p.rail_item(on_settings, status))
+    .on_press(if on_settings {
+        Message::Back
+    } else {
+        Message::OpenSettings
+    });
+
     container(
-        column![items, add, Space::new().height(Length::Fill), foot]
-            .spacing(theme::S4)
-            .height(Length::Fill),
+        column![
+            items,
+            add,
+            Space::new().height(Length::Fill),
+            foot,
+            settings
+        ]
+        .spacing(theme::S4)
+        .height(Length::Fill),
     )
     .width(theme::SIDEBAR_WIDTH)
     .height(Length::Fill)

@@ -107,3 +107,53 @@ header-models = { $count ->
    *[other] { $n } models
 }
 header-match = { $shown } of { $total } models match
+
+sidebar-settings = Settings
+
+settings-title = Settings
+settings-libraries = Libraries
+settings-libraries-body = Folders Printdex catalogues. Model files are only read, never changed.
+settings-col-library = Library
+settings-col-location = Location
+settings-col-status = Status
+settings-col-models = Models
+settings-status-ok = Up to date
+settings-status-scanning = Scanning { $done } / { $total }
+settings-status-listing = Scanning
+settings-rescan = Rescan
+settings-rename = Rename
+settings-remove = Remove
+settings-remove-confirm = Remove { $name } from Printdex? Your files stay where they are.
+settings-remove-yes = Remove
+settings-cancel = Cancel
+settings-save = Save
+settings-appearance = Appearance
+settings-color-theme = Colour theme
+settings-color-theme-body = Glass tint and accent. Status colours stay the same in every theme.
+settings-mode = Theme
+settings-mode-body = System follows your desktop’s light or dark setting.
+settings-mode-system = System
+settings-mode-light = Light
+settings-mode-dark = Dark
+settings-translucency = Translucency
+settings-translucency-body = Frosted glass panes over a blurred desktop.
+settings-translucency-unsupported = Your desktop can’t blur windows, so Printdex stays solid.
+settings-translucency-restart = Takes effect the next time Printdex starts.
+settings-translucency-auto = Automatic
+settings-translucency-off = Off
+settings-reduce-motion = Reduce motion
+settings-reduce-motion-body = No lifting or scaling. Colour fades stay.
+settings-about = About
+settings-version = Version
+settings-data-folder = Data folder
+settings-config-folder = Settings file
+settings-licence = Licence
+settings-licence-value = GPL-3.0. Printdex is free software.
+
+theme-graphite = Graphite signal
+theme-frost = Violet frost
+theme-quartz = Smoked quartz
+theme-seaglass = Sea glass
+theme-resin = Amber resin
+theme-rose = Rose PETG
+theme-glacier = Glacier
