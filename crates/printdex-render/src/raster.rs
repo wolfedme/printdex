@@ -8,7 +8,7 @@
 use glam::{Vec2, Vec3};
 use printdex_mesh::Mesh;
 
-use crate::camera::{Camera, Fit};
+use crate::camera::{Camera, Fit, Margins};
 use crate::material::{Material, Rgb, shade};
 
 /// Supersampling factor per axis.
@@ -52,8 +52,9 @@ pub struct RenderOptions {
     pub height: u32,
     pub material: Material,
     pub camera: Camera,
-    /// Empty space on every side, as a fraction of the smaller side.
-    pub margin: f32,
+    /// Empty space around the model; its lowest point sits on the bottom
+    /// margin line.
+    pub margins: Margins,
 }
 
 impl Default for RenderOptions {
@@ -63,7 +64,7 @@ impl Default for RenderOptions {
             height: 288,
             material: Material::Unknown,
             camera: Camera::default(),
-            margin: 0.06,
+            margins: Margins::THUMBNAIL,
         }
     }
 }
@@ -213,7 +214,7 @@ pub fn render(mesh: &Mesh, opts: &RenderOptions) -> Image {
         dmin = dmin.min(*d);
         dmax = dmax.max(*d);
     }
-    let fit = Fit::new(min, max, w, h, opts.margin);
+    let fit = Fit::on_bed(min, max, w, h, opts.margins);
     let ramp = opts.material.ramp();
     let mut target = Target::new(w, h);
     for (tri, proj) in mesh
@@ -300,23 +301,20 @@ mod tests {
 
     #[test]
     fn camera_frames_bounds() {
-        let opts = RenderOptions {
-            margin: 0.1,
-            ..RenderOptions::default()
-        };
+        let opts = RenderOptions::default();
+        let m = Margins::THUMBNAIL;
         // Far from the origin and tiny: framing must still fill the image.
         let img = render(&cuboid([500.0, 500.0, 0.0], [501.0, 502.0, 3.0]), &opts);
         let px = opaque(&img);
         assert!(px.len() > 5000, "model should fill the frame");
-        let pad = 0.1 * 288.0 - 1.0;
+        let (left, right) = (m.side * 384.0 - 1.0, 384.0 * (1.0 - m.side) + 1.0);
+        let (top, bed) = (m.top * 288.0 - 1.0, 288.0 * (1.0 - m.bottom) + 1.0);
         for (x, y, _) in &px {
-            assert!(*x as f32 >= pad && (*x as f32) < 384.0 - pad, "x {x}");
-            assert!(*y as f32 >= pad && (*y as f32) < 288.0 - pad, "y {y}");
+            assert!(*x as f32 >= left && (*x as f32) < right, "x {x}");
+            assert!(*y as f32 >= top && (*y as f32) < bed, "y {y}");
         }
-        let (ys, xs): (Vec<u32>, Vec<u32>) = px.iter().map(|(x, y, _)| (*y, *x)).unzip();
-        let touches_top = *ys.iter().min().unwrap() as f32 <= pad + 2.0;
-        let touches_left = *xs.iter().min().unwrap() as f32 <= pad + 2.0;
-        assert!(touches_top || touches_left, "fills one dimension");
+        let lowest = px.iter().map(|(_, y, _)| *y).max().unwrap() as f32;
+        assert!(bed - lowest <= 3.0, "stands on the bed line ({lowest})");
     }
 
     #[test]

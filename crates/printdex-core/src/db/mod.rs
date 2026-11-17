@@ -4,6 +4,7 @@ mod files;
 mod libraries;
 mod models;
 mod search;
+mod thumbs;
 
 use std::path::Path;
 use std::str::FromStr;
@@ -18,6 +19,7 @@ pub use files::KnownFile;
 pub use libraries::{Library, LibraryKind};
 pub use models::{AssetInfo, ModelDetail, PartInfo};
 pub use search::{ModelHit, SearchFilter, SortOrder, Stats, to_fts_query};
+pub use thumbs::{IMAGE_EXTENSIONS, ImageSource, ModelSources, PartSource};
 
 /// Handle to the Printdex database. Cheap to clone.
 #[derive(Clone, Debug)]

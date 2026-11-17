@@ -103,10 +103,50 @@ impl Fit {
         }
     }
 
+    /// Fits `min..max` so the model stands on an imaginary bed: centred
+    /// horizontally, its lowest point `margins.bottom` of the height above
+    /// the image's bottom edge, scaled as large as the margins allow. The
+    /// app draws its contact shadow at that line.
+    pub fn on_bed(min: Vec2, max: Vec2, width: u32, height: u32, margins: Margins) -> Fit {
+        let (w, h) = (width as f32, height as f32);
+        let size = (max - min).max(Vec2::splat(1e-6));
+        let scale = ((w * (1.0 - 2.0 * margins.side)) / size.x)
+            .min((h * (1.0 - margins.top - margins.bottom)) / size.y)
+            .max(0.0);
+        let cx = (min.x + max.x) / 2.0;
+        Fit {
+            scale,
+            offset: Vec2::new(
+                w / 2.0 - cx * scale,
+                h * (1.0 - margins.bottom) + min.y * scale,
+            ),
+            height: h,
+        }
+    }
+
     /// Pixel position of screen point `s`.
     pub fn to_pixel(&self, s: Vec2) -> Vec2 {
         Vec2::new(s.x * self.scale, -s.y * self.scale) + self.offset
     }
+}
+
+/// Empty space around a model, as fractions of the image width (sides)
+/// and height (top, bottom).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Margins {
+    pub side: f32,
+    pub top: f32,
+    pub bottom: f32,
+}
+
+impl Margins {
+    /// Thumbnails: the model's lowest point sits on the line where the
+    /// app's contact shadow is drawn (80% down, like the placeholder).
+    pub const THUMBNAIL: Margins = Margins {
+        side: 0.06,
+        top: 0.06,
+        bottom: 0.2,
+    };
 }
 
 #[cfg(test)]
@@ -138,6 +178,21 @@ mod tests {
         assert_eq!(c.elevation, -MAX_ELEVATION);
         c.orbit(std::f32::consts::TAU, 0.0);
         assert!((c.azimuth - DEFAULT_AZIMUTH).abs() < 1e-5);
+    }
+
+    #[test]
+    fn on_bed_puts_lowest_point_on_the_bed_line() {
+        let m = Margins::THUMBNAIL;
+        // Wide and flat: width-limited, so it sits low with room above.
+        let f = Fit::on_bed(Vec2::new(0.0, 0.0), Vec2::new(100.0, 10.0), 400, 300, m);
+        assert!((f.to_pixel(Vec2::new(50.0, 0.0)).y - 240.0).abs() < 1e-3);
+        assert!((f.to_pixel(Vec2::new(0.0, 0.0)).x - 24.0).abs() < 1e-3);
+        assert!(f.to_pixel(Vec2::new(0.0, 10.0)).y > 100.0);
+        // Tall: height-limited, top at the top margin, centred.
+        let f = Fit::on_bed(Vec2::new(-5.0, 2.0), Vec2::new(5.0, 102.0), 400, 300, m);
+        assert!((f.to_pixel(Vec2::new(0.0, 102.0)).y - 18.0).abs() < 1e-3);
+        assert!((f.to_pixel(Vec2::new(0.0, 2.0)).y - 240.0).abs() < 1e-3);
+        assert!((f.to_pixel(Vec2::new(0.0, 50.0)).x - 200.0).abs() < 1e-3);
     }
 
     #[test]

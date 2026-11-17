@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id as \"id!: PartId\", rel_path, format, size FROM parts\n               WHERE model_id = ? AND missing_since IS NULL ORDER BY rel_path",
+  "query": "SELECT id as \"id!: PartId\", rel_path, format, size, mtime_ns, fp_hash FROM parts\n               WHERE model_id = ? AND missing_since IS NULL ORDER BY rel_path",
   "describe": {
     "columns": [
       {
@@ -46,6 +46,28 @@
             "name": "size"
           }
         }
+      },
+      {
+        "name": "mtime_ns",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "mtime_ns"
+          }
+        }
+      },
+      {
+        "name": "fp_hash",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "fp_hash"
+          }
+        }
       }
     ],
     "parameters": {
@@ -55,8 +77,10 @@
       true,
       false,
       false,
-      false
+      false,
+      false,
+      true
     ]
   },
-  "hash": "63085c969a6c68a7126e701b237c4fc87285aa36443e3d432843226a18e5472d"
+  "hash": "b53a91c3ed4fa65d28219f171cd2f6b1bca8a960bf3338251a93d64b4fff92b7"
 }

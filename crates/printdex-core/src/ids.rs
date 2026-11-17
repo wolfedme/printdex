@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use uuid::Uuid;
+pub use uuid::Uuid;
 
 macro_rules! id_type {
     ($(#[$doc:meta])* $name:ident) => {

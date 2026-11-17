@@ -1,0 +1,90 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!: PartId\", rel_path, format, size,\n                      CASE WHEN measured_fp IS fp_hash THEN dim_x END as \"dim_x?: f64\",\n                      CASE WHEN measured_fp IS fp_hash THEN dim_y END as \"dim_y?: f64\",\n                      CASE WHEN measured_fp IS fp_hash THEN dim_z END as \"dim_z?: f64\",\n                      CASE WHEN measured_fp IS fp_hash THEN triangles END as \"triangles?: i64\"\n               FROM parts\n               WHERE model_id = ? AND missing_since IS NULL ORDER BY rel_path",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: PartId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "rel_path",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "rel_path"
+          }
+        }
+      },
+      {
+        "name": "format",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "format"
+          }
+        }
+      },
+      {
+        "name": "size",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "size"
+          }
+        }
+      },
+      {
+        "name": "dim_x?: f64",
+        "ordinal": 4,
+        "type_info": "Float",
+        "origin": "Expression"
+      },
+      {
+        "name": "dim_y?: f64",
+        "ordinal": 5,
+        "type_info": "Float",
+        "origin": "Expression"
+      },
+      {
+        "name": "dim_z?: f64",
+        "ordinal": 6,
+        "type_info": "Float",
+        "origin": "Expression"
+      },
+      {
+        "name": "triangles?: i64",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "d100d931c145356d2cdcc60970317861b16db483182e336aaaf57573e90cda07"
+}
