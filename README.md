@@ -1,3 +1,6 @@
+> [!NOTE]
+> **AI-engineered.** Printdex is built largely by AI (Claude), directed and reviewed by [@wolfedme](https://github.com/wolfedme).
+
 # printdex
 Your STL library, organized. Local-first, blazing fast, built in Rust.
 
