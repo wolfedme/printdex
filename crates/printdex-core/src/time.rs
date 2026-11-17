@@ -33,7 +33,11 @@ mod tests {
             system_time_to_ns(UNIX_EPOCH - Duration::from_secs(1)),
             -1_000_000_000
         );
-        assert_eq!(system_time_to_ns(UNIX_EPOCH + Duration::from_nanos(5)), 5);
+        // Windows file times have 100 ns resolution, so use a multiple of it.
+        assert_eq!(
+            system_time_to_ns(UNIX_EPOCH + Duration::from_nanos(1_500)),
+            1_500
+        );
         assert!(now_ms() > 0);
     }
 }
