@@ -4,6 +4,7 @@
 //! both drive it through the [`Engine`] handle.
 
 pub mod cpu;
+pub mod db;
 pub mod error;
 pub mod fingerprint;
 pub mod grouping;
