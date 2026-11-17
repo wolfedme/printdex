@@ -191,7 +191,15 @@ fn library_row<'a>(app: &'a App, p: Palette, lib: &'a Library) -> Element<'a, Me
             .into(),
     };
 
+    let offline = app.offline.get(&lib.id);
     let (badge, label) = match app.scans.get(&lib.id) {
+        _ if offline.is_some() => (
+            Badge::Offline,
+            t_args(
+                "settings-status-offline",
+                &[("time", Arg::str(offline.cloned().unwrap_or_default()))],
+            ),
+        ),
         Some(scan) if scan.phase == ScanPhase::Walking || scan.total == 0 => {
             (Badge::Busy, t("settings-status-listing"))
         }
@@ -244,7 +252,11 @@ fn library_row<'a>(app: &'a App, p: Palette, lib: &'a Library) -> Element<'a, Me
             icon_action(
                 p,
                 Icon::Refresh,
-                t("settings-rescan"),
+                if offline.is_some() {
+                    t("settings-retry")
+                } else {
+                    t("settings-rescan")
+                },
                 (!scanning).then_some(Message::RescanLibrary(lib.id))
             ),
             icon_only(
@@ -267,7 +279,15 @@ fn library_row<'a>(app: &'a App, p: Palette, lib: &'a Library) -> Element<'a, Me
     container(
         row![
             row![
-                icons::icon(Icon::Folder, theme::ICON, p.n.ink_2),
+                icons::icon(
+                    if offline.is_some() {
+                        Icon::Offline
+                    } else {
+                        Icon::Folder
+                    },
+                    theme::ICON,
+                    p.n.ink_2
+                ),
                 container(name).width(Length::Fill),
             ]
             .spacing(theme::S4)

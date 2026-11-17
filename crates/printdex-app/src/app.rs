@@ -11,8 +11,8 @@ use iced::widget::scrollable::{AbsoluteOffset, RelativeOffset};
 use iced::widget::{Id, operation};
 use iced::{Event, Size, Subscription, Task, event, window};
 use printdex_core::{
-    CoreError, Engine, EngineEvent, Library, LibraryId, ModelDetail, ModelHit, ModelId, PartInfo,
-    ScanPhase, ScanSummary,
+    CoreError, Engine, EngineEvent, Library, LibraryId, LibraryStatus, ModelDetail, ModelHit,
+    ModelId, PartInfo, ScanPhase, ScanSummary,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -156,6 +156,9 @@ pub struct App {
     pub settings_section: SettingsSection,
     /// The library whose "Remove" asks for confirmation.
     pub confirm_remove: Option<LibraryId>,
+    /// Libraries whose folder can't be reached, with the time it was
+    /// noticed ("14:02"). Their models stay browsable.
+    pub offline: HashMap<LibraryId, String>,
     /// The library being renamed, with the edited name.
     pub renaming: Option<(LibraryId, String)>,
     pub settings: Settings,
@@ -208,6 +211,8 @@ pub enum Message {
     /// Result of a remove or rename.
     LibraryChanged(Result<(), Arc<CoreError>>),
     RescanLibrary(LibraryId),
+    /// A reachability check finished; `scan` starts a scan when online.
+    Status(LibraryId, Result<LibraryStatus, Arc<CoreError>>, bool),
     ToggleFilterMenu,
     ToggleChip(Chip),
     ModelLoaded(ModelId, Result<Option<ModelDetail>, Arc<CoreError>>),
@@ -246,6 +251,7 @@ impl App {
             filter_menu: false,
             settings_section: SettingsSection::default(),
             confirm_remove: None,
+            offline: HashMap::new(),
             renaming: None,
             settings,
             system_mode: Mode::default(),
@@ -344,14 +350,22 @@ impl App {
                 Task::none()
             }
             Message::Libraries(Ok((libraries, counts))) => {
+                // Check reachability once for libraries seen for the first time.
+                let checks: Vec<_> = libraries
+                    .iter()
+                    .filter(|l| self.library(l.id).is_none())
+                    .map(|l| self.check_status(l.id, false))
+                    .collect();
                 self.libraries = libraries;
                 self.counts = counts;
+                self.offline
+                    .retain(|id, _| self.libraries.iter().any(|l| l.id == *id));
                 if let Some(scope) = self.search.query.scope
                     && self.library(scope).is_none()
                 {
-                    return self.set_scope(None);
+                    return Task::batch([self.set_scope(None), Task::batch(checks)]);
                 }
-                Task::none()
+                Task::batch(checks)
             }
             Message::Libraries(Err(e)) | Message::Results(_, Err(e)) => {
                 self.show_error(&e);
@@ -422,6 +436,10 @@ impl App {
                         Task::none()
                     }
                     Err(e) if matches!(*e, CoreError::Cancelled) => Task::none(),
+                    Err(e) if matches!(*e, CoreError::LibraryOffline(_)) => {
+                        self.mark_offline(id);
+                        Task::none()
+                    }
                     Err(e) => {
                         self.show_error(&e);
                         Task::none()
@@ -433,13 +451,11 @@ impl App {
                     Some(id) => vec![id],
                     None => self.libraries.iter().map(|l| l.id).collect(),
                 };
-                let mut tasks = Vec::new();
-                for id in ids {
-                    if let std::collections::hash_map::Entry::Vacant(e) = self.scans.entry(id) {
-                        e.insert(scan_starting());
-                        tasks.push(self.start_scan(id));
-                    }
-                }
+                let tasks: Vec<_> = ids
+                    .into_iter()
+                    .filter(|id| !self.scans.contains_key(id))
+                    .map(|id| self.check_status(id, true))
+                    .collect();
                 Task::batch(tasks)
             }
             Message::Scrolled(viewport) => {
@@ -569,10 +585,25 @@ impl App {
                 Task::none()
             }
             Message::RescanLibrary(id) => {
-                if let std::collections::hash_map::Entry::Vacant(e) = self.scans.entry(id) {
+                if self.scans.contains_key(&id) {
+                    return Task::none();
+                }
+                self.check_status(id, true)
+            }
+            Message::Status(id, Ok(LibraryStatus::Offline), _) => {
+                self.mark_offline(id);
+                Task::none()
+            }
+            Message::Status(id, Ok(LibraryStatus::Online), scan) => {
+                self.offline.remove(&id);
+                if scan && let std::collections::hash_map::Entry::Vacant(e) = self.scans.entry(id) {
                     e.insert(scan_starting());
                     return self.start_scan(id);
                 }
+                Task::none()
+            }
+            Message::Status(_, Err(e), _) => {
+                self.show_error(&e);
                 Task::none()
             }
             Message::ToggleFilterMenu => {
@@ -678,6 +709,22 @@ impl App {
         }
     }
 
+    fn mark_offline(&mut self, id: LibraryId) {
+        self.offline
+            .entry(id)
+            .or_insert_with(|| jiff::ZonedDateTime::now().strftime("%H:%M").to_string());
+    }
+
+    fn check_status(&self, id: LibraryId, scan: bool) -> Task<Message> {
+        let Some(engine) = self.engine.clone() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move { engine.library_status(id).await.map_err(Arc::new) },
+            move |r| Message::Status(id, r, scan),
+        )
+    }
+
     /// The part selected in the model view.
     pub fn current_part(&self) -> Option<&PartInfo> {
         match &self.model {
@@ -778,8 +825,10 @@ impl App {
             }
             EngineEvent::ScanFailed { library, error } => {
                 self.scans.remove(&library);
-                if !matches!(*error, CoreError::Cancelled) {
-                    self.show_error(&error);
+                match *error {
+                    CoreError::Cancelled => {}
+                    CoreError::LibraryOffline(_) => self.mark_offline(library),
+                    _ => self.show_error(&error),
                 }
                 Task::none()
             }
@@ -1245,6 +1294,60 @@ mod tests {
             sidecar_enabled: false,
             last_full_scan_at: None,
         }
+    }
+
+    #[test]
+    fn offline_library_is_marked_and_kept() {
+        let mut a = app();
+        let lib = library("NAS");
+        let h = ModelHit {
+            library_id: lib.id,
+            ..hit("orc")
+        };
+        a.libraries.push(lib.clone());
+        deliver(&mut a, vec![h.clone()]);
+        let _ = a.update(Message::Status(lib.id, Ok(LibraryStatus::Offline), true));
+        assert!(a.offline.contains_key(&lib.id));
+        assert!(a.scans.is_empty(), "no scan of an offline library");
+        assert_eq!(a.libraries.len(), 1);
+        assert_eq!(a.search.hits, vec![h]);
+        assert_eq!(a.error, None);
+    }
+
+    #[test]
+    fn rescan_of_offline_library_shows_offline_not_error() {
+        let mut a = app();
+        let lib = library("NAS");
+        a.libraries.push(lib.clone());
+        let _ = a.update(Message::ScanDone(
+            lib.id,
+            Err(Arc::new(CoreError::LibraryOffline(lib.path.clone()))),
+        ));
+        assert_eq!(a.error, None);
+        assert!(a.offline.contains_key(&lib.id));
+        let other = library("USB");
+        a.libraries.push(other.clone());
+        let _ = a.update(Message::Engine(EngineEvent::ScanFailed {
+            library: other.id,
+            error: Arc::new(CoreError::LibraryOffline(other.path.clone())),
+        }));
+        assert_eq!(a.error, None);
+        assert!(a.offline.contains_key(&other.id));
+    }
+
+    #[test]
+    fn retry_brings_library_back() {
+        let mut a = app();
+        let lib = library("NAS");
+        a.libraries.push(lib.clone());
+        let _ = a.update(Message::Status(lib.id, Ok(LibraryStatus::Offline), false));
+        let since = a.offline[&lib.id].clone();
+        // A second offline report keeps the first time.
+        let _ = a.update(Message::Status(lib.id, Ok(LibraryStatus::Offline), false));
+        assert_eq!(a.offline[&lib.id], since);
+        let _ = a.update(Message::Status(lib.id, Ok(LibraryStatus::Online), true));
+        assert!(!a.offline.contains_key(&lib.id));
+        assert!(a.scans.contains_key(&lib.id));
     }
 
     #[test]

@@ -122,10 +122,20 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     .spacing(theme::S3)
     .align_y(Alignment::Center);
 
+    let retry = app
+        .search
+        .query
+        .scope
+        .is_some_and(|id| app.offline.contains_key(&id));
     let mut rescan = button(
         row![
             icons::icon(Icon::Refresh, theme::ICON, p.n.ink_2),
-            text(t("toolbar-rescan")).size(theme::SIZE_BODY),
+            text(if retry {
+                t("toolbar-retry")
+            } else {
+                t("toolbar-rescan")
+            })
+            .size(theme::SIZE_BODY),
         ]
         .spacing(7)
         .align_y(Alignment::Center),

@@ -19,6 +19,7 @@ clap.workspace = true
 directories.workspace = true
 fluent-bundle.workspace = true
 iced.workspace = true
+jiff.workspace = true
 opener.workspace = true
 rfd.workspace = true
 tokio.workspace = true

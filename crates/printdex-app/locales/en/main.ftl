@@ -157,3 +157,8 @@ theme-seaglass = Sea glass
 theme-resin = Amber resin
 theme-rose = Rose PETG
 theme-glacier = Glacier
+
+sidebar-offline = Offline since { $time }
+toolbar-retry = Retry
+settings-status-offline = Offline since { $time }
+settings-retry = Retry
