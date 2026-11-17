@@ -43,6 +43,22 @@ id_type!(
     /// A non-printable file inside a model folder (image, readme, ...).
     AssetId
 );
+id_type!(
+    /// A tag (flat, case-insensitive).
+    TagId
+);
+id_type!(
+    /// A hand-picked list of models.
+    CollectionId
+);
+id_type!(
+    /// One print attempt of a model.
+    AttemptId
+);
+id_type!(
+    /// A photo attached to a print attempt.
+    PhotoId
+);
 
 #[cfg(test)]
 mod tests {

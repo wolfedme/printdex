@@ -7,7 +7,10 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
-use crate::db::{Db, Library, LibraryKind, ModelDetail, ModelHit, SearchFilter, SortOrder, Stats};
+use crate::db::{
+    Db, Library, LibraryKind, ModelDetail, ModelHit, Scope, SearchFilter, SmartCounts, SortOrder,
+    Stats,
+};
 use crate::error::{CoreError, Result};
 use crate::events::EngineEvent;
 use crate::ids::{LibraryId, ModelId};
@@ -174,29 +177,23 @@ impl Engine {
         self.db.search_models(query, limit).await
     }
 
-    /// Searches models within one library (or all when `library` is
-    /// `None`), narrowed by `filter`, in `sort` order.
+    /// Searches models in `scope`, narrowed by `filter`, in `sort` order.
     pub async fn search_in(
         &self,
-        library: Option<LibraryId>,
+        scope: &Scope,
         query: &str,
         filter: &SearchFilter,
         sort: SortOrder,
         limit: u32,
     ) -> Result<Vec<ModelHit>> {
         self.db
-            .search_models_in(library, query, filter, sort, limit)
+            .search_models_in(scope, query, filter, sort, limit)
             .await
     }
 
     /// Number of models a search would return without a limit.
-    pub async fn count(
-        &self,
-        library: Option<LibraryId>,
-        query: &str,
-        filter: &SearchFilter,
-    ) -> Result<u64> {
-        self.db.count_models(library, query, filter).await
+    pub async fn count(&self, scope: &Scope, query: &str, filter: &SearchFilter) -> Result<u64> {
+        self.db.count_models(scope, query, filter).await
     }
 
     /// Model `id` with its present files; `None` when it is gone.

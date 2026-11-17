@@ -11,20 +11,25 @@ pub mod events;
 pub mod fingerprint;
 pub mod grouping;
 pub mod ids;
+pub mod model_data;
 pub mod scan;
 pub mod thumbs;
 pub mod time;
 pub mod walk;
 
 pub use db::{
-    AssetInfo, Library, LibraryKind, ModelDetail, ModelHit, PartInfo, SearchFilter, SortOrder,
-    Stats,
+    AssetInfo, Library, LibraryKind, ModelDetail, ModelHit, PartInfo, RecipeFacts, Scope,
+    SearchFilter, Smart, SmartCounts, SortOrder, Stats,
 };
 pub use engine::{Engine, LibraryStatus};
 pub use error::{CoreError, Result};
 pub use events::{EngineEvent, ScanPhase};
 pub use grouping::ModelKind;
-pub use ids::{AssetId, LibraryId, ModelId, PartId};
+pub use ids::{AssetId, AttemptId, CollectionId, LibraryId, ModelId, PartId, PhotoId, TagId};
+pub use model_data::{
+    Adhesion, Attempt, AttemptResult, CollectionInfo, LastPrint, Material, ModelData, NewAttempt,
+    PartOverride, PhotoRef, PrintSettings, Recipe, RecipeNote, Supports, TagCount,
+};
 pub use scan::ScanSummary;
 pub use thumbs::{
     DEFAULT_CACHE_LIMIT, Detail, Preview, THUMB_HEIGHT, THUMB_WIDTH, ThumbFailure, ThumbKind,

@@ -22,6 +22,30 @@ pub enum CoreError {
     LibraryOffline(PathBuf),
     #[error("library is already being scanned: {0}")]
     AlreadyScanning(LibraryId),
+    #[error("tag is empty or too long")]
+    TagInvalid,
+    #[error("collection name is empty or too long")]
+    CollectionNameInvalid,
+    #[error("a collection with this name exists")]
+    CollectionExists,
+    #[error("collection not found")]
+    CollectionNotFound,
+    #[error("model not found")]
+    ModelNotFound,
+    #[error("attempt not found")]
+    AttemptNotFound,
+    #[error("source link must start with http:// or https://")]
+    SourceInvalid,
+    #[error("text is too long")]
+    TextTooLong,
+    #[error("{field} must be between {min} and {max}")]
+    SettingOutOfRange {
+        field: &'static str,
+        min: f64,
+        max: f64,
+    },
+    #[error("photo is not a supported image, too large, or one too many")]
+    PhotoInvalid,
     #[error("cancelled")]
     Cancelled,
     #[error("i/o error at {}: {source}", path.display())]

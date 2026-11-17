@@ -2,14 +2,52 @@
 
 use std::collections::HashMap;
 
+use sqlx::{QueryBuilder, Row, Sqlite};
+
 use crate::db::Db;
 use crate::error::Result;
 use crate::grouping::ModelKind;
-use crate::ids::{LibraryId, ModelId};
+use crate::ids::{CollectionId, LibraryId, ModelId};
+use crate::model_data::{AttemptResult, LastPrint, Material, PrintSettings, Supports, name_key};
+use crate::time::now_ms;
 use crate::walk::PrintableFormat;
 
+/// What a smart filter keeps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Smart {
+    /// No print attempt logged.
+    NeverPrinted,
+    /// The latest attempt failed.
+    FailedLast,
+    /// First seen in the last seven days.
+    AddedThisWeek,
+}
+
+/// Length of "this week" for [`Smart::AddedThisWeek`].
+pub const WEEK_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+
+/// Which models a search looks at (the sidebar selection).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Scope {
+    #[default]
+    All,
+    Library(LibraryId),
+    Collection(CollectionId),
+    /// Models with this tag (matched ignoring case).
+    Tag(String),
+    Smart(Smart),
+}
+
+/// The recipe facts cards show.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecipeFacts {
+    pub material: Option<Material>,
+    pub supports: Option<Supports>,
+    pub layer_mm: Option<f32>,
+}
+
 /// One search result.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ModelHit {
     pub id: ModelId,
     pub library_id: LibraryId,
@@ -21,6 +59,11 @@ pub struct ModelHit {
     pub missing: bool,
     /// When Printdex first saw the model, unix milliseconds.
     pub created_at: i64,
+    /// The material previews are drawn in: the recipe's, else the latest
+    /// attempt's.
+    pub material: Option<Material>,
+    pub recipe: Option<RecipeFacts>,
+    pub last_print: Option<LastPrint>,
 }
 
 /// Row counts across all libraries. `models`, `parts` and `assets` count
@@ -34,6 +77,14 @@ pub struct Stats {
     pub missing_models: u64,
 }
 
+/// Model counts for the sidebar's smart filters.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SmartCounts {
+    pub never_printed: u64,
+    pub failed_last: u64,
+    pub added_this_week: u64,
+}
+
 /// Structured narrowing of a search. The default narrows nothing.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SearchFilter {
@@ -42,21 +93,14 @@ pub struct SearchFilter {
     pub formats: Vec<PrintableFormat>,
     /// `Some(true)`: two or more present parts; `Some(false)`: at most one.
     pub multi_part: Option<bool>,
+    /// Keep models whose material (recipe, else latest attempt) is one of
+    /// these. Empty keeps every model.
+    pub materials: Vec<Material>,
 }
 
 impl SearchFilter {
     pub fn is_empty(&self) -> bool {
-        self.formats.is_empty() && self.multi_part.is_none()
-    }
-
-    fn format_mask(&self) -> i64 {
-        self.formats.iter().fold(0, |m, f| {
-            m | match f {
-                PrintableFormat::Stl => 1,
-                PrintableFormat::ThreeMf => 2,
-                PrintableFormat::Obj => 4,
-            }
-        })
+        self.formats.is_empty() && self.multi_part.is_none() && self.materials.is_empty()
     }
 }
 
@@ -67,6 +111,8 @@ pub enum SortOrder {
     #[default]
     Name,
     RecentlyAdded,
+    /// Order of adding, inside a collection; name elsewhere.
+    Collection,
 }
 
 /// Turns what the user typed into a safe FTS5 query: every whitespace-separated
@@ -82,30 +128,132 @@ pub fn to_fts_query(input: &str) -> Option<String> {
     (!terms.is_empty()).then(|| terms.join(" "))
 }
 
-struct HitRow {
-    id: ModelId,
-    library_id: LibraryId,
-    name: String,
-    rel_path: String,
-    kind: String,
-    part_count: i64,
-    missing: bool,
-    created_at: i64,
+/// SQL for a model's latest attempt column `col` (correlated on `m`).
+fn latest(col: &str) -> String {
+    format!(
+        "(SELECT a.{col} FROM attempts a WHERE a.model_id = m.id ORDER BY a.printed_at DESC, a.id DESC LIMIT 1)"
+    )
 }
 
-impl From<HitRow> for ModelHit {
-    fn from(r: HitRow) -> Self {
-        ModelHit {
-            id: r.id,
-            library_id: r.library_id,
-            name: r.name,
-            rel_path: r.rel_path,
-            kind: ModelKind::from_db(&r.kind).unwrap_or(ModelKind::Folder),
-            part_count: u32::try_from(r.part_count).unwrap_or(u32::MAX),
-            missing: r.missing,
-            created_at: r.created_at,
+/// SQL for a model's preview material key.
+fn material_sql() -> String {
+    format!(
+        "coalesce((SELECT r.material FROM recipes r WHERE r.model_id = m.id), \
+         (SELECT a.material FROM attempts a WHERE a.model_id = m.id AND a.material IS NOT NULL \
+          ORDER BY a.printed_at DESC, a.id DESC LIMIT 1))"
+    )
+}
+
+/// Pushes `FROM … WHERE …` for a search: present models in `scope`,
+/// matching `fts` and `filter`.
+fn push_from_where(
+    q: &mut QueryBuilder<Sqlite>,
+    scope: &Scope,
+    fts: Option<&str>,
+    filter: &SearchFilter,
+) {
+    match fts {
+        Some(_) => q.push(" FROM models_fts f JOIN models m ON m.rowid = f.rowid"),
+        None => q.push(" FROM models m"),
+    };
+    if let Scope::Collection(c) = scope {
+        q.push(" JOIN collection_models cm ON cm.model_id = m.id AND cm.collection_id = ")
+            .push_bind(*c);
+    }
+    q.push(" WHERE m.missing_since IS NULL");
+    if let Some(text) = fts {
+        q.push(" AND models_fts MATCH ").push_bind(text.to_owned());
+    }
+    match scope {
+        Scope::All | Scope::Collection(_) => {}
+        Scope::Library(id) => {
+            q.push(" AND m.library_id = ").push_bind(*id);
+        }
+        Scope::Tag(name) => {
+            q.push(
+                " AND m.id IN (SELECT mt.model_id FROM model_tags mt JOIN tags t ON t.id = mt.tag_id WHERE t.name_key = ",
+            )
+            .push_bind(name_key(name))
+            .push(")");
+        }
+        Scope::Smart(Smart::NeverPrinted) => {
+            q.push(" AND NOT EXISTS (SELECT 1 FROM attempts a WHERE a.model_id = m.id)");
+        }
+        Scope::Smart(Smart::FailedLast) => {
+            q.push(format!(" AND {} = 'failed'", latest("result")));
+        }
+        Scope::Smart(Smart::AddedThisWeek) => {
+            q.push(" AND m.created_at >= ")
+                .push_bind(now_ms() - WEEK_MS);
         }
     }
+    if !filter.formats.is_empty() {
+        q.push(" AND EXISTS (SELECT 1 FROM parts p WHERE p.model_id = m.id AND p.missing_since IS NULL AND p.format IN (");
+        let mut sep = q.separated(", ");
+        for f in &filter.formats {
+            sep.push_bind(f.as_str());
+        }
+        q.push("))");
+    }
+    if let Some(multi) = filter.multi_part {
+        q.push(" AND ((SELECT count(*) FROM parts p WHERE p.model_id = m.id AND p.missing_since IS NULL) >= 2) = ")
+            .push_bind(multi);
+    }
+    if !filter.materials.is_empty() {
+        q.push(format!(" AND {} IN (", material_sql()));
+        let mut sep = q.separated(", ");
+        for mat in &filter.materials {
+            sep.push_bind(mat.key());
+        }
+        q.push(")");
+    }
+}
+
+fn hit_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<ModelHit> {
+    let kind: String = row.try_get("kind")?;
+    let recipe: Option<String> = row.try_get("recipe")?;
+    let last_result: Option<String> = row.try_get("last_result")?;
+    let last_at: Option<i64> = row.try_get("last_at")?;
+    let successes: i64 = row.try_get("successes")?;
+    let material: Option<String> = row.try_get("material")?;
+    let part_count: i64 = row.try_get("part_count")?;
+    let recipe = recipe.map(|s| {
+        let settings: PrintSettings = serde_json::from_str(&s).unwrap_or_default();
+        RecipeFacts {
+            material: settings.material,
+            supports: settings.supports,
+            layer_mm: settings.layer_mm,
+        }
+    });
+    let last_print = match (
+        last_result.as_deref().and_then(AttemptResult::from_db),
+        last_at,
+    ) {
+        (Some(result), Some(at)) => Some(LastPrint {
+            result,
+            at,
+            successes: u32::try_from(successes).unwrap_or(0),
+        }),
+        _ => None,
+    };
+    // The recipe's own spelling wins over the stored lower-case key.
+    let material = recipe
+        .as_ref()
+        .and_then(|r| r.material.clone())
+        .or_else(|| material.as_deref().and_then(Material::parse));
+    Ok(ModelHit {
+        id: row.try_get("id")?,
+        library_id: row.try_get("library_id")?,
+        name: row.try_get("name")?,
+        rel_path: row.try_get("rel_path")?,
+        kind: ModelKind::from_db(&kind).unwrap_or(ModelKind::Folder),
+        part_count: u32::try_from(part_count).unwrap_or(u32::MAX),
+        missing: false,
+        created_at: row.try_get("created_at")?,
+        material,
+        recipe,
+        last_print,
+    })
 }
 
 impl Db {
@@ -113,7 +261,7 @@ impl Db {
     /// [`Db::search_models_in`].
     pub async fn search_models(&self, input: &str, limit: u32) -> Result<Vec<ModelHit>> {
         self.search_models_in(
-            None,
+            &Scope::All,
             input,
             &SearchFilter::default(),
             SortOrder::Name,
@@ -122,139 +270,75 @@ impl Db {
         .await
     }
 
-    /// Models matching `input` (prefix match on name and path, name ranked
-    /// higher), or all models when `input` is blank, narrowed by `library`
-    /// and `filter`. With [`SortOrder::Name`], text searches are ranked by
-    /// relevance and blank searches sorted by name; [`SortOrder::RecentlyAdded`]
-    /// puts the newest first. Missing models are left out.
+    /// Models matching `input` (prefix match on name, path, tags, notes and
+    /// recipe text, name ranked highest), or all models when `input` is
+    /// blank, in `scope` and narrowed by `filter`. With [`SortOrder::Name`],
+    /// text searches are ranked by relevance and blank searches sorted by
+    /// name; [`SortOrder::RecentlyAdded`] puts the newest first;
+    /// [`SortOrder::Collection`] keeps a collection's order. Missing models
+    /// are left out.
     pub async fn search_models_in(
         &self,
-        library: Option<LibraryId>,
+        scope: &Scope,
         input: &str,
         filter: &SearchFilter,
         sort: SortOrder,
         limit: u32,
     ) -> Result<Vec<ModelHit>> {
-        let formats = filter.format_mask();
-        let multi = filter.multi_part;
-        let recent = sort == SortOrder::RecentlyAdded;
-        let rows = match to_fts_query(input) {
-            None => {
-                sqlx::query_as!(
-                    HitRow,
-                    r#"SELECT m.id as "id!: ModelId", m.library_id as "library_id: LibraryId",
-                              m.name, m.rel_path, m.kind,
-                              (SELECT count(*) FROM parts p
-                                WHERE p.model_id = m.id AND p.missing_since IS NULL) as "part_count!: i64",
-                              m.missing_since IS NOT NULL as "missing!: bool", m.created_at
-                       FROM models m
-                       WHERE m.missing_since IS NULL AND ?1 = ?1 AND (?2 IS NULL OR m.library_id = ?2)
-                         AND (?3 = 0 OR EXISTS (SELECT 1 FROM parts p
-                               WHERE p.model_id = m.id AND p.missing_since IS NULL
-                                 AND (((?3 & 1) != 0 AND p.format = 'stl')
-                                   OR ((?3 & 2) != 0 AND p.format = '3mf')
-                                   OR ((?3 & 4) != 0 AND p.format = 'obj'))))
-                         AND (?4 IS NULL OR ((SELECT count(*) FROM parts p
-                               WHERE p.model_id = m.id AND p.missing_since IS NULL) >= 2) = ?4)
-                       ORDER BY CASE WHEN ?5 THEN m.created_at END DESC,
-                                m.name COLLATE NOCASE, m.rel_path
-                       LIMIT ?6"#,
-                    "",
-                    library,
-                    formats,
-                    multi,
-                    recent,
-                    limit
-                )
-                .fetch_all(self.reader())
-                .await?
-            }
-            Some(q) => {
-                sqlx::query_as!(
-                    HitRow,
-                    r#"SELECT m.id as "id!: ModelId", m.library_id as "library_id: LibraryId",
-                              m.name, m.rel_path, m.kind,
-                              (SELECT count(*) FROM parts p
-                                WHERE p.model_id = m.id AND p.missing_since IS NULL) as "part_count!: i64",
-                              m.missing_since IS NOT NULL as "missing!: bool", m.created_at
-                       FROM models_fts f JOIN models m ON m.rowid = f.rowid
-                       WHERE models_fts MATCH ?1 AND m.missing_since IS NULL AND (?2 IS NULL OR m.library_id = ?2)
-                         AND (?3 = 0 OR EXISTS (SELECT 1 FROM parts p
-                               WHERE p.model_id = m.id AND p.missing_since IS NULL
-                                 AND (((?3 & 1) != 0 AND p.format = 'stl')
-                                   OR ((?3 & 2) != 0 AND p.format = '3mf')
-                                   OR ((?3 & 4) != 0 AND p.format = 'obj'))))
-                         AND (?4 IS NULL OR ((SELECT count(*) FROM parts p
-                               WHERE p.model_id = m.id AND p.missing_since IS NULL) >= 2) = ?4)
-                       ORDER BY CASE WHEN ?5 THEN m.created_at END DESC,
-                                bm25(models_fts, 10.0, 1.0), m.name COLLATE NOCASE
-                       LIMIT ?6"#,
-                    q,
-                    library,
-                    formats,
-                    multi,
-                    recent,
-                    limit
-                )
-                .fetch_all(self.reader())
-                .await?
-            }
+        let fts = to_fts_query(input);
+        let mut q = QueryBuilder::<Sqlite>::new(format!(
+            "SELECT m.id, m.library_id, m.name, m.rel_path, m.kind, m.created_at,
+                    (SELECT count(*) FROM parts p WHERE p.model_id = m.id AND p.missing_since IS NULL) as part_count,
+                    (SELECT r.settings FROM recipes r WHERE r.model_id = m.id) as recipe,
+                    {} as last_result, {} as last_at,
+                    (SELECT count(*) FROM attempts a WHERE a.model_id = m.id AND a.result = 'success') as successes,
+                    {} as material",
+            latest("result"),
+            latest("printed_at"),
+            material_sql()
+        ));
+        push_from_where(&mut q, scope, fts.as_deref(), filter);
+        q.push(" ORDER BY ");
+        match (sort, scope, fts.is_some()) {
+            (SortOrder::Collection, Scope::Collection(_), _) => q.push("cm.position, "),
+            (SortOrder::RecentlyAdded, _, _) => q.push("m.created_at DESC, "),
+            (_, _, true) => q.push("bm25(models_fts, 10.0, 1.0, 4.0, 1.0, 1.0), "),
+            _ => q.push(""),
         };
-        Ok(rows.into_iter().map(ModelHit::from).collect())
+        q.push("m.name COLLATE NOCASE, m.rel_path LIMIT ")
+            .push_bind(i64::from(limit));
+        let rows = q.build().fetch_all(self.reader()).await?;
+        rows.iter().map(hit_from_row).collect()
     }
 
     /// How many present models match (all of them when `input` is blank),
     /// with the same narrowing as search and no limit.
     pub async fn count_models(
         &self,
-        library: Option<LibraryId>,
+        scope: &Scope,
         input: &str,
         filter: &SearchFilter,
     ) -> Result<u64> {
-        let formats = filter.format_mask();
-        let multi = filter.multi_part;
-        let n = match to_fts_query(input) {
-            None => {
-                sqlx::query_scalar!(
-                    r#"SELECT count(*) as "n!: i64" FROM models m
-                       WHERE m.missing_since IS NULL AND ?1 = ?1 AND (?2 IS NULL OR m.library_id = ?2)
-                         AND (?3 = 0 OR EXISTS (SELECT 1 FROM parts p
-                               WHERE p.model_id = m.id AND p.missing_since IS NULL
-                                 AND (((?3 & 1) != 0 AND p.format = 'stl')
-                                   OR ((?3 & 2) != 0 AND p.format = '3mf')
-                                   OR ((?3 & 4) != 0 AND p.format = 'obj'))))
-                         AND (?4 IS NULL OR ((SELECT count(*) FROM parts p
-                               WHERE p.model_id = m.id AND p.missing_since IS NULL) >= 2) = ?4)"#,
-                    "",
-                    library,
-                    formats,
-                    multi
-                )
-                .fetch_one(self.reader())
-                .await?
-            }
-            Some(q) => {
-                sqlx::query_scalar!(
-                    r#"SELECT count(*) as "n!: i64"
-                       FROM models_fts f JOIN models m ON m.rowid = f.rowid
-                       WHERE models_fts MATCH ?1 AND m.missing_since IS NULL AND (?2 IS NULL OR m.library_id = ?2)
-                         AND (?3 = 0 OR EXISTS (SELECT 1 FROM parts p
-                               WHERE p.model_id = m.id AND p.missing_since IS NULL
-                                 AND (((?3 & 1) != 0 AND p.format = 'stl')
-                                   OR ((?3 & 2) != 0 AND p.format = '3mf')
-                                   OR ((?3 & 4) != 0 AND p.format = 'obj'))))
-                         AND (?4 IS NULL OR ((SELECT count(*) FROM parts p
-                               WHERE p.model_id = m.id AND p.missing_since IS NULL) >= 2) = ?4)"#,
-                    q,
-                    library,
-                    formats,
-                    multi
-                )
-                .fetch_one(self.reader())
-                .await?
-            }
-        };
+        let fts = to_fts_query(input);
+        let mut q = QueryBuilder::<Sqlite>::new("SELECT count(*)");
+        push_from_where(&mut q, scope, fts.as_deref(), filter);
+        let n: i64 = q.build_query_scalar().fetch_one(self.reader()).await?;
         Ok(u64::try_from(n).unwrap_or(0))
+    }
+
+    /// Present-model counts for the smart filters.
+    pub async fn smart_counts(&self) -> Result<SmartCounts> {
+        let mut out = SmartCounts::default();
+        for (smart, slot) in [
+            (Smart::NeverPrinted, &mut out.never_printed),
+            (Smart::FailedLast, &mut out.failed_last),
+            (Smart::AddedThisWeek, &mut out.added_this_week),
+        ] {
+            *slot = self
+                .count_models(&Scope::Smart(smart), "", &SearchFilter::default())
+                .await?;
+        }
+        Ok(out)
     }
 
     /// Present-model counts per library. Libraries without models are absent.
@@ -514,7 +598,7 @@ mod tests {
         f.model_in(other, "Dragon").await;
         let hits =
             f.db.search_models_in(
-                Some(f.lib),
+                &Scope::Library(f.lib),
                 "dragon",
                 &SearchFilter::default(),
                 SortOrder::Name,
@@ -526,7 +610,7 @@ mod tests {
         assert_eq!(hits[0].id, a);
         let all =
             f.db.search_models_in(
-                Some(other),
+                &Scope::Library(other),
                 "",
                 &SearchFilter::default(),
                 SortOrder::Name,
@@ -537,7 +621,7 @@ mod tests {
         assert_eq!(all.len(), 1);
         assert_eq!(
             f.db.search_models_in(
-                None,
+                &Scope::All,
                 "dragon",
                 &SearchFilter::default(),
                 SortOrder::Name,
@@ -560,25 +644,25 @@ mod tests {
         f.model("Gone Dragon", "Gone Dragon", true).await;
         f.model_in(other, "Green Dragon").await;
         assert_eq!(
-            f.db.count_models(None, "drag", &SearchFilter::default())
+            f.db.count_models(&Scope::All, "drag", &SearchFilter::default())
                 .await
                 .unwrap(),
             3
         );
         assert_eq!(
-            f.db.count_models(Some(f.lib), "drag", &SearchFilter::default())
+            f.db.count_models(&Scope::Library(f.lib), "drag", &SearchFilter::default())
                 .await
                 .unwrap(),
             2
         );
         assert_eq!(
-            f.db.count_models(None, "  ", &SearchFilter::default())
+            f.db.count_models(&Scope::All, "  ", &SearchFilter::default())
                 .await
                 .unwrap(),
             4
         );
         assert_eq!(
-            f.db.count_models(Some(other), "", &SearchFilter::default())
+            f.db.count_models(&Scope::Library(other), "", &SearchFilter::default())
                 .await
                 .unwrap(),
             1
@@ -633,7 +717,7 @@ mod tests {
 
         async fn hits(&self, q: &str, filter: &SearchFilter, sort: SortOrder) -> Vec<String> {
             self.db
-                .search_models_in(None, q, filter, sort, 50)
+                .search_models_in(&Scope::All, q, filter, sort, 50)
                 .await
                 .unwrap()
                 .into_iter()
@@ -656,11 +740,13 @@ mod tests {
         let three_mf = SearchFilter {
             formats: vec![PrintableFormat::ThreeMf],
             multi_part: None,
+            ..SearchFilter::default()
         };
         assert_eq!(f.hits("", &three_mf, SortOrder::Name).await, ["Bin"]);
         let stl_or_obj = SearchFilter {
             formats: vec![PrintableFormat::Stl, PrintableFormat::Obj],
             multi_part: None,
+            ..SearchFilter::default()
         };
         assert_eq!(
             f.hits("", &stl_or_obj, SortOrder::Name).await,
@@ -669,16 +755,21 @@ mod tests {
         let multi = SearchFilter {
             formats: vec![],
             multi_part: Some(true),
+            ..SearchFilter::default()
         };
         assert_eq!(f.hits("", &multi, SortOrder::Name).await, ["Bin"]);
         let single = SearchFilter {
             formats: vec![PrintableFormat::Stl],
             multi_part: Some(false),
+            ..SearchFilter::default()
         };
         assert_eq!(f.hits("", &single, SortOrder::Name).await, ["Hook"]);
         assert_eq!(f.hits("ho", &single, SortOrder::Name).await, ["Hook"]);
-        assert_eq!(f.db.count_models(None, "", &single).await.unwrap(), 1);
-        assert_eq!(f.db.count_models(None, "", &multi).await.unwrap(), 1);
+        assert_eq!(
+            f.db.count_models(&Scope::All, "", &single).await.unwrap(),
+            1
+        );
+        assert_eq!(f.db.count_models(&Scope::All, "", &multi).await.unwrap(), 1);
     }
 
     #[tokio::test]
@@ -708,5 +799,203 @@ mod tests {
             f.hits("", &none, SortOrder::Name).await,
             ["Mid", "New", "Old"]
         );
+    }
+
+    fn log(
+        at: i64,
+        result: crate::model_data::AttemptResult,
+        mat: Material,
+    ) -> crate::model_data::NewAttempt {
+        crate::model_data::NewAttempt {
+            printed_at: at,
+            result,
+            settings: PrintSettings {
+                material: Some(mat),
+                ..PrintSettings::default()
+            },
+            duration_min: None,
+            notes: String::new(),
+            parts: vec![],
+        }
+    }
+
+    async fn scoped(f: &Fx, scope: Scope, sort: SortOrder) -> Vec<String> {
+        let names: Vec<String> =
+            f.db.search_models_in(&scope, "", &SearchFilter::default(), sort, 50)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|h| h.name)
+                .collect();
+        let n =
+            f.db.count_models(&scope, "", &SearchFilter::default())
+                .await
+                .unwrap();
+        assert_eq!(
+            n as usize,
+            names.len(),
+            "count matches search for {scope:?}"
+        );
+        names
+    }
+
+    #[tokio::test]
+    async fn scope_collection_in_collection_order() {
+        let f = fx().await;
+        let c = f.db.create_collection("Gifts").await.unwrap();
+        let z = f.model("Zebra", "Zebra", false).await;
+        let a = f.model("Ant", "Ant", false).await;
+        f.model("Other", "Other", false).await;
+        f.db.add_to_collection(c.id, z).await.unwrap();
+        f.db.add_to_collection(c.id, a).await.unwrap();
+        assert_eq!(
+            scoped(&f, Scope::Collection(c.id), SortOrder::Collection).await,
+            ["Zebra", "Ant"]
+        );
+        assert_eq!(
+            scoped(&f, Scope::Collection(c.id), SortOrder::Name).await,
+            ["Ant", "Zebra"]
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_tag() {
+        let f = fx().await;
+        let a = f.model("A", "A", false).await;
+        f.model("B", "B", false).await;
+        f.db.add_tag(a, "Gridfinity").await.unwrap();
+        assert_eq!(
+            scoped(&f, Scope::Tag("gridfinity".into()), SortOrder::Name).await,
+            ["A"]
+        );
+        assert!(
+            scoped(&f, Scope::Tag("nope".into()), SortOrder::Name)
+                .await
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn smart_filters() {
+        use crate::model_data::AttemptResult::*;
+        let f = fx().await;
+        let printed = f.model("Printed", "Printed", false).await;
+        let failed = f.model("Failed", "Failed", false).await;
+        f.model("Never", "Never", false).await;
+        f.db.log_attempt(printed, &log(1, Failed, Material::Pla))
+            .await
+            .unwrap();
+        f.db.log_attempt(printed, &log(2, Success, Material::Pla))
+            .await
+            .unwrap();
+        f.db.log_attempt(failed, &log(5, Failed, Material::Petg))
+            .await
+            .unwrap();
+        assert_eq!(
+            scoped(&f, Scope::Smart(Smart::NeverPrinted), SortOrder::Name).await,
+            ["Never"]
+        );
+        assert_eq!(
+            scoped(&f, Scope::Smart(Smart::FailedLast), SortOrder::Name).await,
+            ["Failed"]
+        );
+        // Fixture models were created at t=1: long ago.
+        assert!(
+            scoped(&f, Scope::Smart(Smart::AddedThisWeek), SortOrder::Name)
+                .await
+                .is_empty()
+        );
+        sqlx::query("UPDATE models SET created_at = ? WHERE id = ?")
+            .bind(now_ms() - 1000)
+            .bind(failed)
+            .execute(f.db.writer())
+            .await
+            .unwrap();
+        assert_eq!(
+            scoped(&f, Scope::Smart(Smart::AddedThisWeek), SortOrder::Name).await,
+            ["Failed"]
+        );
+        assert_eq!(
+            f.db.smart_counts().await.unwrap(),
+            SmartCounts {
+                never_printed: 1,
+                failed_last: 1,
+                added_this_week: 1
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn hits_carry_recipe_and_last_print() {
+        use crate::model_data::AttemptResult::*;
+        let f = fx().await;
+        let a = f.model("A", "A", false).await;
+        let b = f.model("B", "B", false).await;
+        f.db.log_attempt(a, &log(10, Success, Material::Tpu))
+            .await
+            .unwrap();
+        f.db.log_attempt(a, &log(20, Success, Material::Tpu))
+            .await
+            .unwrap();
+        f.db.log_attempt(a, &log(30, Partial, Material::Tpu))
+            .await
+            .unwrap();
+        let recipe = crate::model_data::Recipe {
+            settings: PrintSettings {
+                material: Some(Material::Petg),
+                supports: Some(Supports::Tree),
+                layer_mm: Some(0.2),
+                ..PrintSettings::default()
+            },
+            ..crate::model_data::Recipe::default()
+        };
+        f.db.set_recipe(b, Some(&recipe)).await.unwrap();
+        let hits = f.db.search_models("", 10).await.unwrap();
+        assert_eq!(hits[0].material, Some(Material::Tpu));
+        assert_eq!(
+            hits[0].last_print,
+            Some(LastPrint {
+                result: Partial,
+                at: 30,
+                successes: 2
+            })
+        );
+        assert_eq!(hits[0].recipe, None);
+        assert_eq!(hits[1].material, Some(Material::Petg));
+        assert_eq!(
+            hits[1].recipe,
+            Some(RecipeFacts {
+                material: Some(Material::Petg),
+                supports: Some(Supports::Tree),
+                layer_mm: Some(0.2)
+            })
+        );
+        assert_eq!(hits[1].last_print, None);
+    }
+
+    #[tokio::test]
+    async fn material_filter() {
+        use crate::model_data::AttemptResult::*;
+        let f = fx().await;
+        let a = f.model("A", "A", false).await;
+        let b = f.model("B", "B", false).await;
+        f.model("C", "C", false).await;
+        f.db.log_attempt(a, &log(1, Success, Material::Petg))
+            .await
+            .unwrap();
+        f.db.log_attempt(b, &log(1, Success, Material::Other("Wood fill".into())))
+            .await
+            .unwrap();
+        let petg = SearchFilter {
+            materials: vec![Material::Petg],
+            ..SearchFilter::default()
+        };
+        assert_eq!(f.hits("", &petg, SortOrder::Name).await, ["A"]);
+        let wood = SearchFilter {
+            materials: vec![Material::Other("wood FILL".into())],
+            ..SearchFilter::default()
+        };
+        assert_eq!(f.hits("", &wood, SortOrder::Name).await, ["B"]);
+        assert_eq!(f.db.count_models(&Scope::All, "", &petg).await.unwrap(), 1);
     }
 }
