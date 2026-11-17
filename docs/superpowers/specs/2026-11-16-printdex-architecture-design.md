@@ -90,7 +90,7 @@ Dependency direction is strictly downward; `core` never depends on `render` or `
 | Directory walk | jwalk | Parallel; collects path/size/mtime only. Wrapped so a slow share can't block the runtime. |
 | Fingerprint hash | xxhash-rust (xxh3) | Head + tail 64 KiB + size, per v1 §7. Full hash on demand. |
 | File watching | notify + notify-debouncer-full | Local disks only; NAS uses periodic rescans. |
-| STL | hand-written parser over memmap2 | Binary + ASCII; hot path, format is trivial. Fuzzed. |
+| STL | hand-written parser over plain buffered reads (`BufReader`) | Binary + ASCII; hot path, format is trivial. Fuzzed. No memory mapping: `memmap2` needs `unsafe`, which the workspace forbids *(decided by Max, 2026-11-17)*. |
 | 3MF | zip + quick-xml | Objects, plates (read-only info), embedded thumbnails. |
 | OBJ | tobj | |
 | Decimation | meshopt (meshoptimizer bindings) | Threshold left to the builder. |
