@@ -6,7 +6,7 @@ members = ["crates/printdex-core", "crates/printdex-cli"]
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-only"
-rust-version = "1.88"
+rust-version = "1.94"
 repository = "https://github.com/wolfedme/printdex"
 
 [workspace.dependencies]
