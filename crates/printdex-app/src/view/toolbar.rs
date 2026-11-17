@@ -292,6 +292,7 @@ pub fn header(app: &App, p: Palette) -> Element<'_, Message> {
         Scope::Smart(Smart::NeverPrinted) => (t("smart-never-printed"), lists.smart.never_printed),
         Scope::Smart(Smart::FailedLast) => (t("smart-failed-last"), lists.smart.failed_last),
         Scope::Smart(Smart::AddedThisWeek) => (t("smart-added-week"), lists.smart.added_this_week),
+        Scope::Smart(Smart::Missing) => (t("smart-missing"), lists.smart.missing),
     };
     let filtered = !app.search.query.text.trim().is_empty() || !app.chips.is_empty();
     let caption = if filtered {

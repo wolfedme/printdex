@@ -55,12 +55,18 @@ pub enum EngineEvent {
     ModelDataChanged(ModelId),
     /// The list of tags or collections changed (names or counts).
     OrganizeChanged,
+    /// A missing model was forgotten.
+    ModelForgotten(ModelId),
     /// A scan found sidecars written by another Printdex install.
     SidecarForeign {
         library: LibraryId,
     },
-    /// A library's settings changed (sidecars on or off).
+    /// A library's settings changed (sidecars, change detection).
     LibraryChanged(Library),
+    /// The monitor reached a library's folder (first check, or it came back).
+    LibraryOnline(LibraryId),
+    /// The monitor could not reach a library's folder.
+    LibraryOffline(LibraryId),
     /// No thumbnail for `target`.
     ThumbnailFailed {
         target: ThumbTarget,

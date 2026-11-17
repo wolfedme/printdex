@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE models SET rel_path = ?, name = ?, kind = ?, missing_since = NULL,\n                                               updated_at = ?\n                             WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "8e62ed3127e928a0bead415143ae7ba4ba59c6d62cc727795061909d9297f5f6"
+}

@@ -5,8 +5,9 @@ use std::collections::{HashMap, HashSet};
 use crate::db::Db;
 use crate::error::Result;
 use crate::grouping::ModelKind;
+use crate::identity::{Arrival, Candidate, Key, match_moves};
 use crate::ids::{AssetId, LibraryId, ModelId, PartId};
-use crate::scan::{ApplyStats, ScanWrite};
+use crate::scan::{ApplyStats, Moved, ScanWrite};
 use crate::time::now_ms;
 use crate::walk::FileKind;
 
@@ -21,6 +22,8 @@ pub struct KnownFile {
     pub mtime_ns: i64,
     pub fp_hash: Option<u64>,
     pub is_part: bool,
+    /// Seen by the last scan that reached it (`missing_since IS NULL`).
+    pub present: bool,
 }
 
 struct ModelRow {
@@ -61,6 +64,7 @@ enum Op<'a> {
     },
     UpdateModel {
         id: ModelId,
+        rel_path: &'a str,
         name: &'a str,
         kind: &'static str,
     },
@@ -76,6 +80,7 @@ enum Op<'a> {
     UpdatePart {
         id: PartId,
         model: ModelId,
+        rel_path: &'a str,
         format: &'static str,
         size: i64,
         mtime_ns: i64,
@@ -113,13 +118,13 @@ impl Db {
     /// Every part and asset of `lib` recorded so far, missing or not.
     pub async fn known_files(&self, lib: LibraryId) -> Result<Vec<KnownFile>> {
         let parts = sqlx::query!(
-            r#"SELECT rel_path, size, mtime_ns, fp_hash FROM parts WHERE library_id = ?"#,
+            r#"SELECT rel_path, size, mtime_ns, fp_hash, missing_since FROM parts WHERE library_id = ?"#,
             lib
         )
         .fetch_all(self.writer())
         .await?;
         let assets = sqlx::query!(
-            r#"SELECT rel_path, size, mtime_ns FROM assets WHERE library_id = ?"#,
+            r#"SELECT rel_path, size, mtime_ns, missing_since FROM assets WHERE library_id = ?"#,
             lib
         )
         .fetch_all(self.writer())
@@ -131,6 +136,7 @@ impl Db {
             mtime_ns: r.mtime_ns,
             fp_hash: r.fp_hash.map(|h| h as u64),
             is_part: true,
+            present: r.missing_since.is_none(),
         }));
         out.extend(assets.into_iter().map(|r| KnownFile {
             rel_path: r.rel_path,
@@ -138,6 +144,7 @@ impl Db {
             mtime_ns: r.mtime_ns,
             fp_hash: None,
             is_part: false,
+            present: r.missing_since.is_none(),
         }));
         Ok(out)
     }
@@ -186,9 +193,106 @@ impl Db {
         let mut seen_parts = HashSet::new();
         let mut seen_assets = HashSet::new();
 
-        for group in &write.groups {
+        // Models that moved: groups at a path with no model row, matched by
+        // part fingerprints to models not found at their old path.
+        let path_matched: HashSet<ModelId> = write
+            .groups
+            .iter()
+            .filter_map(|g| models_by_path.get(g.rel_path.as_str()).map(|m| m.id))
+            .collect();
+        let mut parts_of: HashMap<ModelId, Vec<&PartRow>> = HashMap::new();
+        for p in &parts {
+            parts_of.entry(p.model_id).or_default().push(p);
+        }
+        let key_of = |p: &PartRow| p.fp_hash.map(|h| (p.size as u64, h as u64));
+        let cand_rows: Vec<&ModelRow> = models
+            .iter()
+            .filter(|m| !path_matched.contains(&m.id))
+            .filter(|m| {
+                parts_of
+                    .get(&m.id)
+                    .is_some_and(|ps| ps.iter().any(|p| key_of(p).is_some()))
+            })
+            .collect();
+        let candidates: Vec<Candidate> = cand_rows
+            .iter()
+            .filter_map(|m| {
+                Some(Candidate {
+                    kind: ModelKind::from_db(&m.kind)?,
+                    keys: parts_of[&m.id].iter().filter_map(|p| key_of(p)).collect(),
+                })
+            })
+            .collect();
+        // `from_db` never fails for rows we wrote; keep indices aligned anyway.
+        let cand_rows: Vec<&ModelRow> = cand_rows
+            .into_iter()
+            .filter(|m| ModelKind::from_db(&m.kind).is_some())
+            .collect();
+        let file_key = |i: usize| -> Option<Key> {
+            let f = &write.files[i];
+            write
+                .fingerprints
+                .get(&i)
+                .map(|fp| (fp.size, fp.hash))
+                .or_else(|| {
+                    parts_by_path
+                        .get(f.rel_path.as_str())
+                        .and_then(|p| key_of(p))
+                })
+        };
+        let arriving: Vec<usize> = (0..write.groups.len())
+            .filter(|&g| !models_by_path.contains_key(write.groups[g].rel_path.as_str()))
+            .collect();
+        let arrivals: Vec<Arrival> = arriving
+            .iter()
+            .map(|&g| {
+                let group = &write.groups[g];
+                Arrival {
+                    kind: group.kind,
+                    keys: group
+                        .parts
+                        .iter()
+                        .filter(|&&i| matches!(write.files[i].kind, FileKind::Printable(_)))
+                        .map(|&i| file_key(i))
+                        .collect(),
+                }
+            })
+            .collect();
+        let moved_to: HashMap<usize, &ModelRow> = match_moves(&arrivals, &candidates)
+            .into_iter()
+            .map(|(a, c)| (arriving[a], cand_rows[c]))
+            .collect();
+        // Old parts of moved models, by key, to carry their ids over.
+        let mut reusable: HashMap<(ModelId, Key), Vec<&PartRow>> = HashMap::new();
+        for row in moved_to.values() {
+            for p in parts_of.get(&row.id).into_iter().flatten() {
+                if let Some(k) = key_of(p) {
+                    reusable.entry((row.id, k)).or_default().push(p);
+                }
+            }
+        }
+
+        for (g, group) in write.groups.iter().enumerate() {
             let kind = group.kind.as_str();
-            let model_id = match models_by_path.get(group.rel_path.as_str()) {
+            let moved = moved_to.get(&g);
+            let model_id = match models_by_path.get(group.rel_path.as_str()).or(moved) {
+                Some(row) if row.rel_path != group.rel_path => {
+                    // Moved or renamed: same model, new place.
+                    stats.moved.push(Moved {
+                        model: row.id,
+                        kind: group.kind,
+                        from: row.rel_path.clone(),
+                        to: group.rel_path.clone(),
+                    });
+                    ops.push(Op::UpdateModel {
+                        id: row.id,
+                        rel_path: &group.rel_path,
+                        name: &group.name,
+                        kind,
+                    });
+                    seen_models.insert(row.id);
+                    row.id
+                }
                 Some(row) => {
                     if row.missing_since.is_some() {
                         stats.models_returned += 1;
@@ -199,6 +303,7 @@ impl Db {
                     if changed {
                         ops.push(Op::UpdateModel {
                             id: row.id,
+                            rel_path: &group.rel_path,
                             name: &group.name,
                             kind,
                         });
@@ -241,6 +346,7 @@ impl Db {
                             ops.push(Op::UpdatePart {
                                 id: row.id,
                                 model: model_id,
+                                rel_path: &file.rel_path,
                                 format,
                                 size,
                                 mtime_ns: file.mtime_ns,
@@ -248,15 +354,34 @@ impl Db {
                             });
                         }
                     }
-                    None => ops.push(Op::InsertPart {
-                        id: PartId::new(),
-                        model: model_id,
-                        rel_path: &file.rel_path,
-                        format,
-                        size,
-                        mtime_ns: file.mtime_ns,
-                        fp_hash,
-                    }),
+                    None => {
+                        // A moved model's part keeps its id (and thumbnail).
+                        let old = file_key(i)
+                            .and_then(|k| reusable.get_mut(&(model_id, k)).and_then(|v| v.pop()));
+                        match old {
+                            Some(row) => {
+                                seen_parts.insert(row.id);
+                                ops.push(Op::UpdatePart {
+                                    id: row.id,
+                                    model: model_id,
+                                    rel_path: &file.rel_path,
+                                    format,
+                                    size,
+                                    mtime_ns: file.mtime_ns,
+                                    fp_hash: fp_hash.or(row.fp_hash),
+                                });
+                            }
+                            None => ops.push(Op::InsertPart {
+                                id: PartId::new(),
+                                model: model_id,
+                                rel_path: &file.rel_path,
+                                format,
+                                size,
+                                mtime_ns: file.mtime_ns,
+                                fp_hash,
+                            }),
+                        }
+                    }
                 }
             }
 
@@ -327,11 +452,17 @@ impl Db {
                         .execute(&mut *tx)
                         .await?;
                     }
-                    Op::UpdateModel { id, name, kind } => {
+                    Op::UpdateModel {
+                        id,
+                        rel_path,
+                        name,
+                        kind,
+                    } => {
                         sqlx::query!(
-                            "UPDATE models SET name = ?, kind = ?, missing_since = NULL, updated_at = ?
+                            "UPDATE models SET rel_path = ?, name = ?, kind = ?, missing_since = NULL,
+                                               updated_at = ?
                              WHERE id = ?",
-                            name, kind, now, id
+                            rel_path, name, kind, now, id
                         )
                         .execute(&mut *tx)
                         .await?;
@@ -357,16 +488,17 @@ impl Db {
                     Op::UpdatePart {
                         id,
                         model,
+                        rel_path,
                         format,
                         size,
                         mtime_ns,
                         fp_hash,
                     } => {
                         sqlx::query!(
-                            "UPDATE parts SET model_id = ?, format = ?, size = ?, mtime_ns = ?, fp_hash = ?,
-                                              missing_since = NULL, updated_at = ?
+                            "UPDATE parts SET model_id = ?, rel_path = ?, format = ?, size = ?, mtime_ns = ?,
+                                              fp_hash = ?, missing_since = NULL, updated_at = ?
                              WHERE id = ?",
-                            model, format, size, mtime_ns, fp_hash, now, id
+                            model, rel_path, format, size, mtime_ns, fp_hash, now, id
                         )
                         .execute(&mut *tx)
                         .await?;

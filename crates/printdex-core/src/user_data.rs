@@ -26,6 +26,15 @@ impl Engine {
         let _ = self.events.send(EngineEvent::OrganizeChanged);
     }
 
+    /// Forgets a missing model and everything recorded about it (the
+    /// Missing filter's Forget). Fails for a model that is present.
+    pub async fn forget_model(&self, id: ModelId) -> Result<()> {
+        self.db.forget_model(id).await?;
+        let _ = self.events.send(EngineEvent::ModelForgotten(id));
+        self.lists_changed();
+        Ok(())
+    }
+
     /// Everything the user wrote about model `id`.
     pub async fn model_data(&self, id: ModelId) -> Result<Option<ModelData>> {
         self.db.model_data(id).await

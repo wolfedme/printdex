@@ -149,6 +149,8 @@ pub struct GridViewport {
 pub struct App {
     pub options: Options,
     pub engine: Option<Engine>,
+    /// Watches libraries for changes and offline shares while the app runs.
+    pub monitor: Option<Arc<printdex_core::Monitor>>,
     pub boot: Boot,
     pub libraries: Vec<Library>,
     pub counts: HashMap<LibraryId, u64>,
@@ -196,6 +198,7 @@ pub type LibrarySnapshot = (Vec<Library>, HashMap<LibraryId, u64>);
 #[derive(Clone, Debug)]
 pub enum Message {
     Booted(Result<Engine, Arc<CoreError>>),
+    MonitorStarted(Arc<printdex_core::Monitor>),
     Libraries(Result<LibrarySnapshot, Arc<CoreError>>),
     Engine(EngineEvent),
     SearchChanged(String),
@@ -270,6 +273,7 @@ impl App {
         App {
             options,
             engine: None,
+            monitor: None,
             boot: Boot::Opening,
             libraries: Vec::new(),
             counts: HashMap::new(),
@@ -488,15 +492,28 @@ impl App {
     fn handle(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Booted(Ok(engine)) => {
+                // The monitor spawns tasks, so it starts on the runtime.
+                let monitor = {
+                    let engine = engine.clone();
+                    Task::perform(
+                        async move { Arc::new(engine.start_monitor()) },
+                        Message::MonitorStarted,
+                    )
+                };
                 self.engine = Some(engine);
                 self.boot = Boot::Ready;
                 let ticket = self.search.refresh();
                 Task::batch([
+                    monitor,
                     self.load_libraries(),
                     self.run_search(ticket),
                     self.apply_cache_limit(),
                     self.load_lists(),
                 ])
+            }
+            Message::MonitorStarted(monitor) => {
+                self.monitor = Some(monitor);
+                Task::none()
             }
             Message::Booted(Err(e)) => {
                 tracing::error!(error = %e, "could not open engine");
@@ -1128,6 +1145,30 @@ impl App {
                 };
                 // Smart filter counts follow the print log.
                 Task::batch([self.run_search(ticket), data, self.load_lists()])
+            }
+            EngineEvent::LibraryOffline(id) => {
+                self.mark_offline(id);
+                Task::none()
+            }
+            EngineEvent::LibraryOnline(id) => {
+                self.offline.remove(&id);
+                Task::none()
+            }
+            EngineEvent::ModelForgotten(id) => {
+                if self.model.as_ref().map(ModelView::id) == Some(id) {
+                    self.model = None;
+                    self.org.cancel_edits();
+                    self.prints.reset();
+                }
+                if self.selected == Some(id) {
+                    self.selected = None;
+                }
+                let ticket = self.search.refresh();
+                Task::batch([
+                    self.load_libraries(),
+                    self.run_search(ticket),
+                    self.load_lists(),
+                ])
             }
             EngineEvent::OrganizeChanged => {
                 let ticket = self.search.refresh();
@@ -1854,9 +1895,21 @@ mod tests {
             path: PathBuf::from("/srv").join(name),
             display_name: name.into(),
             kind: printdex_core::LibraryKind::Local,
+            change_mode: printdex_core::ChangeMode::Auto,
             sidecar_enabled: false,
             last_full_scan_at: None,
         }
+    }
+
+    #[test]
+    fn monitor_events_mark_libraries_offline_and_back() {
+        let mut a = app();
+        let lib = library("NAS");
+        a.libraries.push(lib.clone());
+        let _ = a.update(Message::Engine(EngineEvent::LibraryOffline(lib.id)));
+        assert!(a.offline.contains_key(&lib.id));
+        let _ = a.update(Message::Engine(EngineEvent::LibraryOnline(lib.id)));
+        assert!(!a.offline.contains_key(&lib.id));
     }
 
     #[test]

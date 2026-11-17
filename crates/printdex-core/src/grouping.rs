@@ -90,7 +90,42 @@ pub const PART_FOLDER_NAMES: &[&str] = &[
 
 /// Groups `files` into models, sorted by `rel_path`. Pure, no I/O.
 pub fn group_models(files: &[FileEntry]) -> Vec<ModelGroup> {
+    group_models_with(files, &[])
+}
+
+/// A path the walk could not read this time. Grouping treats it as it was
+/// (holding printables or not), so a flaky folder on a share never turns a
+/// container into a folder model or the other way round.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Opaque {
+    pub rel_path: String,
+    /// A single file (stat failed) rather than a folder.
+    pub is_file: bool,
+    /// The last scan saw printable files there.
+    pub had_printables: bool,
+}
+
+/// [`group_models`] with paths that could not be read this time.
+pub fn group_models_with<'a>(files: &'a [FileEntry], opaque: &'a [Opaque]) -> Vec<ModelGroup> {
     let mut root = DirNode::default();
+    for o in opaque.iter().filter(|o| o.had_printables) {
+        let dirs = if o.is_file {
+            o.rel_path.rsplit_once('/').map(|(d, _)| d)
+        } else {
+            Some(o.rel_path.as_str())
+        };
+        let mut node = &mut root;
+        node.has_printables = true;
+        for seg in dirs.into_iter().flat_map(|d| d.split('/')) {
+            node = node.children.entry(seg).or_default();
+            node.has_printables = true;
+        }
+        if o.is_file {
+            node.phantom_printable = true;
+        } else {
+            node.opaque = true;
+        }
+    }
     for (i, f) in files.iter().enumerate() {
         if f.kind == FileKind::Sidecar {
             continue;
@@ -128,6 +163,10 @@ struct DirNode<'a> {
     others: Vec<usize>,
     /// Whether the subtree holds at least one printable file.
     has_printables: bool,
+    /// Unreadable this scan; its files are kept as they were.
+    opaque: bool,
+    /// Holds a printable file that could not be read this scan.
+    phantom_printable: bool,
 }
 
 fn is_part_folder(name: &str) -> bool {
@@ -164,7 +203,7 @@ fn visit(
         .all(|(name, _)| is_part_folder(name));
 
     let folder_model = !is_root
-        && if node.printables.is_empty() {
+        && if node.printables.is_empty() && !node.phantom_printable {
             has_children && all_part_folders
         } else {
             all_part_folders
@@ -201,7 +240,9 @@ fn visit(
         });
     }
     for (name, child) in children {
-        visit(child, &join(path, name), false, files, out);
+        if !child.opaque {
+            visit(child, &join(path, name), false, files, out);
+        }
     }
 }
 
@@ -217,6 +258,48 @@ fn collect(node: &DirNode<'_>, parts: &mut Vec<usize>, assets: &mut Vec<usize>) 
 mod tests {
     use super::*;
     use crate::walk::classify;
+
+    #[test]
+    fn unreadable_subfolder_does_not_reroot_container() {
+        let all = entries(&["Box/a.stl", "Box/Sub/b.stl"]);
+        let before = group_models(&all);
+        assert_eq!(
+            summary(&before)
+                .iter()
+                .map(|s| (s.0, s.2))
+                .collect::<Vec<_>>(),
+            [
+                ("Box/Sub", ModelKind::Folder),
+                ("Box/a.stl", ModelKind::SingleFile)
+            ]
+        );
+        // Box/Sub cannot be read this time.
+        let some = entries(&["Box/a.stl"]);
+        let opaque = [Opaque {
+            rel_path: "Box/Sub".into(),
+            is_file: false,
+            had_printables: true,
+        }];
+        let g = group_models_with(&some, &opaque);
+        assert_eq!(
+            summary(&g).iter().map(|s| (s.0, s.2)).collect::<Vec<_>>(),
+            [("Box/a.stl", ModelKind::SingleFile)]
+        );
+    }
+
+    #[test]
+    fn unreadable_part_keeps_folder_model() {
+        // Dragon/body.stl cannot be stat'ed; Dragon/parts/wing.stl can.
+        let some = entries(&["Dragon/parts/wing.stl"]);
+        let opaque = [Opaque {
+            rel_path: "Dragon/body.stl".into(),
+            is_file: true,
+            had_printables: true,
+        }];
+        let g = group_models_with(&some, &opaque);
+        assert_eq!(summary(&g)[0].0, "Dragon");
+        assert_eq!(summary(&g)[0].2, ModelKind::Folder);
+    }
 
     fn entries(paths: &[&str]) -> Vec<FileEntry> {
         let mut v: Vec<FileEntry> = paths

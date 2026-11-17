@@ -133,7 +133,17 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
             t("smart-added-week"),
             smart.added_this_week,
         ),
+        (
+            Smart::Missing,
+            Icon::Offline,
+            t("smart-missing"),
+            smart.missing,
+        ),
     ] {
+        // Missing shows only while something is missing.
+        if kind == Smart::Missing && count == 0 {
+            continue;
+        }
         let s = Scope::Smart(kind);
         smart_items = smart_items.push(item(p, icon, label, None, Some(count), active(&s), s));
     }

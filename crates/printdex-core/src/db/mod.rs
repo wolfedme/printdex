@@ -2,9 +2,10 @@
 
 mod files;
 mod libraries;
+mod missing;
 mod models;
 pub(crate) mod numbers;
-mod organize;
+pub(crate) mod organize;
 mod prints;
 mod search;
 mod sidecars;
@@ -20,7 +21,8 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, S
 use crate::error::Result;
 
 pub use files::KnownFile;
-pub use libraries::{Library, LibraryKind};
+pub use libraries::{ChangeMode, Library, LibraryKind};
+pub use missing::{MISSING_GRACE_MS, Purged};
 pub use models::{AssetInfo, ModelDetail, PartInfo};
 pub use numbers::{NumberQuery, format_number, parse_number_query};
 pub use organize::Organize;

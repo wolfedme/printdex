@@ -3,11 +3,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use ignore::{WalkBuilder, WalkState};
+use rayon::prelude::*;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::{CoreError, Result};
-use crate::time::system_time_to_ns;
+use crate::fs::{EntryKind, Fs};
 
 /// A printable mesh format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -77,9 +77,11 @@ pub struct WalkOutput {
 }
 
 /// Folders that NAS systems, operating systems and archivers create and that
-/// never hold a user's models.
+/// never hold a user's models. Matched ignoring ASCII case.
 pub const IGNORED_DIR_NAMES: &[&str] = &[
     "@eaDir",
+    "@Recycle",
+    "@Recently-Snapshot",
     "#recycle",
     "#snapshot",
     "$RECYCLE.BIN",
@@ -88,6 +90,24 @@ pub const IGNORED_DIR_NAMES: &[&str] = &[
     "__MACOSX",
     "lost+found",
 ];
+
+/// Which entries a walk looks at. Shared by full and subtree walks.
+pub struct Rules;
+
+impl Rules {
+    /// Hidden folders and NAS/OS junk folders are skipped.
+    pub fn keep_dir(name: &str) -> bool {
+        !name.starts_with('.')
+            && !IGNORED_DIR_NAMES
+                .iter()
+                .any(|j| j.eq_ignore_ascii_case(name))
+    }
+
+    /// Hidden files are skipped, except Printdex sidecars.
+    pub fn keep_file(name: &str) -> bool {
+        !name.starts_with('.') || is_sidecar_name(name)
+    }
+}
 
 /// Classifies a file by its extension, ignoring ASCII case.
 pub fn classify(file_name: &str) -> FileKind {
@@ -111,92 +131,71 @@ pub fn classify(file_name: &str) -> FileKind {
     }
 }
 
+/// Whether the library root can be listed. An unmounted share or unplugged
+/// drive must not look like an empty library, or every model would be
+/// marked missing.
+pub fn root_readable(fs: &dyn Fs, root: &Path) -> bool {
+    fs.metadata(root).is_ok_and(|m| m.is_dir) && fs.read_dir(root).is_ok()
+}
+
 /// Walks `root` in parallel. Blocking; run it with `spawn_blocking`.
-pub fn walk_library(root: &Path, cancel: &CancellationToken) -> Result<WalkOutput> {
+pub fn walk_library(fs: &dyn Fs, root: &Path, cancel: &CancellationToken) -> Result<WalkOutput> {
+    walk_from(fs, root, &[String::new()], cancel)
+}
+
+/// Walks only `subtrees` (folders or files, relative to `root`, `""` for
+/// all of it). A subtree that no longer exists yields no files, and one a
+/// full walk would skip (hidden, NAS junk) yields none either.
+pub fn walk_from(
+    fs: &dyn Fs,
+    root: &Path,
+    subtrees: &[String],
+    cancel: &CancellationToken,
+) -> Result<WalkOutput> {
     if cancel.is_cancelled() {
         return Err(CoreError::Cancelled);
     }
-    // An unmounted share or unplugged drive must not look like an empty
-    // library, or every model would be marked missing.
-    let root_ok =
-        std::fs::metadata(root).is_ok_and(|m| m.is_dir()) && std::fs::read_dir(root).is_ok();
-    if !root_ok {
+    if !root_readable(fs, root) {
         return Err(CoreError::LibraryOffline(root.to_path_buf()));
     }
-
     let output = Mutex::new(WalkOutput::default());
-    WalkBuilder::new(root)
-        .standard_filters(false)
-        // Hidden entries are skipped by hand below, so sidecars get through.
-        .hidden(false)
-        .follow_links(false)
-        .filter_entry(|e| {
-            let is_dir = e.file_type().is_some_and(|t| t.is_dir());
-            let name = e.file_name().to_str();
-            if e.depth() > 0 && name.is_some_and(|n| n.starts_with('.')) {
-                return !is_dir && name.is_some_and(is_sidecar_name);
+    subtrees.par_iter().for_each(|rel| {
+        let dir = if rel.is_empty() {
+            root.to_path_buf()
+        } else {
+            root.join(rel)
+        };
+        if rel.is_empty() {
+            visit(fs, &dir, rel, &output, cancel);
+            return;
+        }
+        // Every folder on the way must be one a full walk would enter.
+        let mut names = rel.split('/');
+        let name = names.next_back().unwrap_or_default();
+        if !names.all(Rules::keep_dir) {
+            return;
+        }
+        match fs.metadata(&dir) {
+            // Gone (deleted or moved away): nothing to list.
+            Err(_) => {}
+            Ok(meta) if meta.is_dir => {
+                if Rules::keep_dir(name) {
+                    visit(fs, &dir, rel, &output, cancel);
+                }
             }
-            !(is_dir && name.is_some_and(|n| IGNORED_DIR_NAMES.contains(&n)))
-        })
-        .build_parallel()
-        .run(|| {
-            let output = &output;
-            Box::new(move |entry| {
-                if cancel.is_cancelled() {
-                    return WalkState::Quit;
-                }
-                let entry = match entry {
-                    Ok(e) => e,
-                    Err(err) => {
-                        let path = error_path(&err).unwrap_or_else(|| root.to_path_buf());
-                        tracing::warn!(path = %path.display(), error = %err, "skipping unreadable path");
-                        lock(output).skipped.push(SkippedPath {
-                            path,
-                            reason: SkipReason::Unreadable,
-                        });
-                        return WalkState::Continue;
-                    }
-                };
-                if entry.depth() == 0 {
-                    return WalkState::Continue;
-                }
-                let Some(file_type) = entry.file_type() else {
-                    return WalkState::Continue;
-                };
-                let Some(rel_path) = rel_path(root, entry.path()) else {
-                    lock(output).skipped.push(SkippedPath {
-                        path: entry.path().to_path_buf(),
-                        reason: SkipReason::NonUtf8,
+            // A single file (a watcher reports files too).
+            Ok(meta) => {
+                if Rules::keep_file(name) {
+                    lock(&output).files.push(FileEntry {
+                        rel_path: rel.clone(),
+                        size: meta.len,
+                        mtime_ns: meta.mtime_ns,
+                        kind: classify(name),
                     });
-                    // A directory with a non-UTF-8 name is skipped as a whole.
-                    return WalkState::Skip;
-                };
-                if !file_type.is_file() {
-                    return WalkState::Continue;
                 }
-                let meta = match entry.metadata() {
-                    Ok(m) => m,
-                    Err(err) => {
-                        tracing::warn!(path = %entry.path().display(), error = %err, "cannot stat file");
-                        lock(output).skipped.push(SkippedPath {
-                            path: entry.path().to_path_buf(),
-                            reason: SkipReason::Unreadable,
-                        });
-                        return WalkState::Continue;
-                    }
-                };
-                let kind = classify(entry.file_name().to_str().unwrap_or_default());
-                let mtime_ns = meta.modified().map(system_time_to_ns).unwrap_or(0);
-                lock(output).files.push(FileEntry {
-                    rel_path,
-                    size: meta.len(),
-                    mtime_ns,
-                    kind,
-                });
-                WalkState::Continue
-            })
-        });
-
+            }
+        }
+    });
     if cancel.is_cancelled() {
         return Err(CoreError::Cancelled);
     }
@@ -204,44 +203,85 @@ pub fn walk_library(root: &Path, cancel: &CancellationToken) -> Result<WalkOutpu
     output
         .files
         .sort_unstable_by(|a, b| a.rel_path.cmp(&b.rel_path));
+    output.files.dedup_by(|a, b| a.rel_path == b.rel_path);
     output.skipped.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     Ok(output)
+}
+
+/// Lists `dir` (at `rel` inside the library), then its subfolders in
+/// parallel. Symlinks are never followed, so loops cannot happen.
+fn visit(fs: &dyn Fs, dir: &Path, rel: &str, out: &Mutex<WalkOutput>, cancel: &CancellationToken) {
+    if cancel.is_cancelled() {
+        return;
+    }
+    let entries = match fs.read_dir(dir) {
+        Ok(e) => e,
+        Err(err) => {
+            tracing::warn!(path = %dir.display(), error = %err, "skipping unreadable path");
+            lock(out).skipped.push(SkippedPath {
+                path: dir.to_path_buf(),
+                reason: SkipReason::Unreadable,
+            });
+            return;
+        }
+    };
+    let join = |name: &str| {
+        if rel.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{rel}/{name}")
+        }
+    };
+    let mut dirs = Vec::new();
+    let mut files = Vec::new();
+    for e in &entries {
+        let Some(name) = e.name.to_str() else {
+            lock(out).skipped.push(SkippedPath {
+                path: dir.join(&e.name),
+                reason: SkipReason::NonUtf8,
+            });
+            continue;
+        };
+        match e.kind {
+            EntryKind::Dir if Rules::keep_dir(name) => dirs.push((dir.join(name), join(name))),
+            EntryKind::File if Rules::keep_file(name) => {
+                files.push((dir.join(name), join(name), classify(name)));
+            }
+            _ => {}
+        }
+    }
+    files.par_iter().for_each(|(path, rel_path, kind)| {
+        if cancel.is_cancelled() {
+            return;
+        }
+        match fs.metadata(path) {
+            Ok(meta) => lock(out).files.push(FileEntry {
+                rel_path: rel_path.clone(),
+                size: meta.len,
+                mtime_ns: meta.mtime_ns,
+                kind: *kind,
+            }),
+            Err(err) => {
+                tracing::warn!(path = %path.display(), error = %err, "cannot stat file");
+                lock(out).skipped.push(SkippedPath {
+                    path: path.clone(),
+                    reason: SkipReason::Unreadable,
+                });
+            }
+        }
+    });
+    dirs.par_iter()
+        .for_each(|(path, rel)| visit(fs, path, rel, out, cancel));
 }
 
 fn lock(m: &Mutex<WalkOutput>) -> std::sync::MutexGuard<'_, WalkOutput> {
     m.lock().unwrap_or_else(|p| p.into_inner())
 }
 
-/// `path` relative to `root` with `/` separators, or `None` when any
-/// component is not valid UTF-8.
-fn rel_path(root: &Path, path: &Path) -> Option<String> {
-    let rel = path.strip_prefix(root).ok()?;
-    let mut out = String::new();
-    for comp in rel.components() {
-        if !out.is_empty() {
-            out.push('/');
-        }
-        out.push_str(comp.as_os_str().to_str()?);
-    }
-    Some(out)
-}
-
-/// The path an `ignore` error refers to, if it names one.
-fn error_path(err: &ignore::Error) -> Option<PathBuf> {
-    match err {
-        ignore::Error::WithPath { path, .. } => Some(path.clone()),
-        ignore::Error::WithDepth { err, .. } | ignore::Error::WithLineNumber { err, .. } => {
-            error_path(err)
-        }
-        ignore::Error::Loop { child, .. } => Some(child.clone()),
-        ignore::Error::Partial(errs) => errs.iter().find_map(error_path),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs::RealFs;
     use std::fs;
 
     fn touch(root: &Path, rel: &str, bytes: &[u8]) {
@@ -251,7 +291,7 @@ mod tests {
     }
 
     fn walk(root: &Path) -> WalkOutput {
-        walk_library(root, &CancellationToken::new()).unwrap()
+        walk_library(&RealFs, root, &CancellationToken::new()).unwrap()
     }
 
     fn paths(out: &WalkOutput) -> Vec<&str> {
@@ -299,6 +339,68 @@ mod tests {
             ["m/.hook.stl.printdex.toml", "m/.printdex.toml"]
         );
         assert!(out.files.iter().all(|f| f.kind == FileKind::Sidecar));
+    }
+
+    #[test]
+    fn junk_folders_match_case_insensitively() {
+        let d = tempfile::tempdir().unwrap();
+        touch(d.path(), "$recycle.bin/x.stl", b"x");
+        touch(d.path(), "@Recycle/x.stl", b"x");
+        touch(d.path(), "@recently-snapshot/x.stl", b"x");
+        touch(d.path(), "EADIR/keep.stl", b"x");
+        assert_eq!(paths(&walk(d.path())), ["EADIR/keep.stl"]);
+    }
+
+    #[test]
+    fn subtree_walk_lists_only_those_folders() {
+        let d = tempfile::tempdir().unwrap();
+        touch(d.path(), "a/x.stl", b"x");
+        touch(d.path(), "b/y.stl", b"x");
+        touch(d.path(), "b/c/z.stl", b"x");
+        let out = walk_from(
+            &RealFs,
+            d.path(),
+            &["b".into(), "gone".into()],
+            &CancellationToken::new(),
+        )
+        .unwrap();
+        assert_eq!(paths(&out), ["b/c/z.stl", "b/y.stl"]);
+    }
+
+    #[test]
+    fn subtree_walk_takes_single_files_and_skips_hidden() {
+        let d = tempfile::tempdir().unwrap();
+        touch(d.path(), "a/x.stl", b"x");
+        touch(d.path(), "loose.stl", b"x");
+        touch(d.path(), ".hidden/y.stl", b"x");
+        touch(d.path(), "a/@eaDir/t.stl", b"x");
+        let out = walk_from(
+            &RealFs,
+            d.path(),
+            &[
+                "a/x.stl".into(),
+                "loose.stl".into(),
+                ".hidden/y.stl".into(),
+                "a/@eaDir".into(),
+            ],
+            &CancellationToken::new(),
+        )
+        .unwrap();
+        assert_eq!(paths(&out), ["a/x.stl", "loose.stl"]);
+    }
+
+    #[test]
+    fn chaos_failures_skip_folders_not_the_walk() {
+        let d = tempfile::tempdir().unwrap();
+        for i in 0..20 {
+            touch(d.path(), &format!("m{i}/a.stl"), b"x");
+        }
+        let fs = crate::fs::ChaosFs::new().failing_every(7);
+        let out = walk_library(&fs, d.path(), &CancellationToken::new());
+        // Either the root failed (offline) or some entries were skipped.
+        if let Ok(out) = out {
+            assert!(out.files.len() + out.skipped.len() >= 20);
+        }
     }
 
     #[test]
@@ -362,7 +464,7 @@ mod tests {
     #[test]
     fn missing_root_is_library_offline() {
         let d = tempfile::tempdir().unwrap();
-        let r = walk_library(&d.path().join("gone"), &CancellationToken::new());
+        let r = walk_library(&RealFs, &d.path().join("gone"), &CancellationToken::new());
         assert!(matches!(r, Err(CoreError::LibraryOffline(_))));
     }
 
@@ -373,7 +475,7 @@ mod tests {
         let c = CancellationToken::new();
         c.cancel();
         assert!(matches!(
-            walk_library(d.path(), &c),
+            walk_library(&RealFs, d.path(), &c),
             Err(CoreError::Cancelled)
         ));
     }

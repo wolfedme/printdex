@@ -68,7 +68,7 @@ pub(crate) async fn refresh_fts(conn: &mut SqliteConnection, id: ModelId) -> Res
 }
 
 /// Removes tags no model uses any more.
-async fn drop_unused_tags(conn: &mut SqliteConnection) -> Result<()> {
+pub(crate) async fn drop_unused_tags(conn: &mut SqliteConnection) -> Result<()> {
     sqlx::query!("DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM model_tags)")
         .execute(&mut *conn)
         .await?;
@@ -579,6 +579,7 @@ mod tests {
             path: PathBuf::from("/lib"),
             display_name: "lib".into(),
             kind: LibraryKind::Local,
+            change_mode: crate::db::ChangeMode::Auto,
             sidecar_enabled: true,
             last_full_scan_at: None,
         };

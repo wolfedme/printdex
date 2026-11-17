@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM models WHERE id = ? AND missing_since IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "8ba9be4a653d45ff0d0fefae2bbce91cda486652c75067bb5dcbba34425120d5"
+}

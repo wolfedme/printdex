@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 
 use rayon::prelude::*;
@@ -13,10 +14,11 @@ use crate::cpu::run_cpu;
 use crate::db::{Db, KnownFile, Library};
 use crate::error::{CoreError, Result};
 use crate::events::{EngineEvent, ScanPhase};
-use crate::fingerprint::{Fingerprint, fingerprint_file};
-use crate::grouping::{ModelGroup, group_models};
+use crate::fingerprint::{Fingerprint, fingerprint_with};
+use crate::fs::Fs;
+use crate::grouping::{ModelGroup, Opaque, group_models_with};
 use crate::time::now_ms;
-use crate::walk::{FileEntry, FileKind, SkipReason, walk_library};
+use crate::walk::{FileEntry, FileKind, SkipReason, classify, root_readable, walk_from};
 
 /// Files fingerprinted per CPU-pool job (one progress event each).
 const FINGERPRINT_CHUNK: usize = 256;
@@ -38,6 +40,17 @@ pub struct ApplyStats {
     pub models_added: u64,
     pub models_missing: u64,
     pub models_returned: u64,
+    /// Models found at a new path, keeping their identity.
+    pub moved: Vec<Moved>,
+}
+
+/// A model that moved or was renamed since the last scan.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Moved {
+    pub model: crate::ids::ModelId,
+    pub kind: crate::grouping::ModelKind,
+    pub from: String,
+    pub to: String,
 }
 
 /// Result of a finished scan.
@@ -49,9 +62,13 @@ pub struct ScanSummary {
     pub models_added: u64,
     pub models_missing: u64,
     pub models_returned: u64,
+    /// Models that moved or were renamed and kept their identity.
+    pub models_moved: u64,
     /// Sidecars read back into the database.
     pub sidecars_imported: u64,
     pub duration_ms: u64,
+    /// Only some folders were walked (a watcher-triggered rescan).
+    pub partial: bool,
 }
 
 /// What a scan needs to read sidecars back: the writer (to rewrite merged
@@ -78,18 +95,28 @@ pub fn needs_fingerprint(known: &HashMap<&str, &KnownFile>, entry: &FileEntry) -
 /// Returns the successes and the indices that failed (vanished, truncated,
 /// unreadable).
 pub(crate) async fn fingerprint_entries(
+    fs: Arc<dyn Fs>,
     root: &Path,
     files: &[FileEntry],
     which: &[usize],
 ) -> (HashMap<usize, Fingerprint>, Vec<usize>) {
-    let jobs: Vec<(usize, PathBuf)> = which
+    let jobs: Vec<(usize, PathBuf, u64)> = which
         .iter()
-        .map(|&i| (i, root.join(&files[i].rel_path)))
+        .map(|&i| (i, root.join(&files[i].rel_path), files[i].size))
         .collect();
     let results = run_cpu(move || {
         jobs.into_par_iter()
-            .map(|(i, path)| {
-                let r = fingerprint_file(&path);
+            .map(|(i, path, walked_size)| {
+                // A file rewritten between the walk and now would store the
+                // walk's size next to the new content's hash: count it as
+                // failed, the next scan picks it up.
+                let r = fingerprint_with(&*fs, &path).and_then(|fp| {
+                    if fp.size == walked_size {
+                        Ok(fp)
+                    } else {
+                        Err(std::io::Error::other("file changed during the scan"))
+                    }
+                });
                 if let Err(e) = &r {
                     tracing::warn!(path = %path.display(), error = %e, "cannot fingerprint file, skipping");
                 }
@@ -116,14 +143,42 @@ pub(crate) async fn fingerprint_entries(
 /// and `ScanFinished`, or `ScanFailed` on error. Nothing is written when the
 /// scan is cancelled or the library is offline.
 pub async fn scan_library(
+    fs: Arc<dyn Fs>,
     db: &Db,
     lib: &Library,
     events: &broadcast::Sender<EngineEvent>,
     cancel: CancellationToken,
     sidecars: Option<SidecarCtx<'_>>,
 ) -> Result<ScanSummary> {
+    scan_with_events(fs, db, lib, events, cancel, sidecars, None).await
+}
+
+/// Like [`scan_library`], walking only `subtrees` (folders or files,
+/// relative to the library root). Everything else keeps what the database
+/// knows, so nothing outside them is marked missing or re-read.
+pub async fn scan_subtrees(
+    fs: Arc<dyn Fs>,
+    db: &Db,
+    lib: &Library,
+    events: &broadcast::Sender<EngineEvent>,
+    cancel: CancellationToken,
+    sidecars: Option<SidecarCtx<'_>>,
+    subtrees: &[String],
+) -> Result<ScanSummary> {
+    scan_with_events(fs, db, lib, events, cancel, sidecars, Some(subtrees)).await
+}
+
+async fn scan_with_events(
+    fs: Arc<dyn Fs>,
+    db: &Db,
+    lib: &Library,
+    events: &broadcast::Sender<EngineEvent>,
+    cancel: CancellationToken,
+    sidecars: Option<SidecarCtx<'_>>,
+    subtrees: Option<&[String]>,
+) -> Result<ScanSummary> {
     let _ = events.send(EngineEvent::ScanStarted { library: lib.id });
-    match run_scan_with(db, lib, events, cancel, sidecars, |_| {}).await {
+    match run_scan_with(fs, db, lib, events, cancel, sidecars, subtrees, |_| {}).await {
         Ok(summary) => {
             let _ = events.send(EngineEvent::ScanFinished {
                 library: lib.id,
@@ -178,14 +233,17 @@ fn clone_error(e: &CoreError) -> CoreError {
     }
 }
 
-/// The scan, with `after_walk` called between the walk and fingerprinting so
+/// The scan (of `subtrees` only when given), with `after_walk` called between the walk and fingerprinting so
 /// tests can change the tree mid-scan.
+#[allow(clippy::too_many_arguments)] // private; the test hook is the eighth
 async fn run_scan_with(
+    fs: Arc<dyn Fs>,
     db: &Db,
     lib: &Library,
     events: &broadcast::Sender<EngineEvent>,
     cancel: CancellationToken,
     sidecar_ctx: Option<SidecarCtx<'_>>,
+    subtrees: Option<&[String]>,
     after_walk: impl FnOnce(&[FileEntry]),
 ) -> Result<ScanSummary> {
     let started = Instant::now();
@@ -200,19 +258,54 @@ async fn run_scan_with(
 
     progress(ScanPhase::Walking, 0, 0);
     let root = lib.path.clone();
-    let walk_cancel = cancel.clone();
-    let walked = tokio::task::spawn_blocking(move || walk_library(&root, &walk_cancel))
-        .await
-        .map_err(|e| CoreError::Io {
-            path: lib.path.clone(),
-            source: std::io::Error::other(e.to_string()),
-        })??;
+    // Dropping this scan (instead of cancelling it) must stop the walk too.
+    let walk_cancel = cancel.child_token();
+    let _stop_walk = walk_cancel.clone().drop_guard();
+    let walk_fs = fs.clone();
+    let walk_subtrees: Vec<String> =
+        subtrees.map_or_else(|| vec![String::new()], <[String]>::to_vec);
+    let walked = tokio::task::spawn_blocking(move || {
+        walk_from(&*walk_fs, &root, &walk_subtrees, &walk_cancel)
+    })
+    .await
+    .map_err(|e| CoreError::Io {
+        path: lib.path.clone(),
+        source: std::io::Error::other(e.to_string()),
+    })??;
     let mut files = walked.files;
     let files_seen = files.len();
     after_walk(&files);
     progress(ScanPhase::Walking, files_seen, files_seen);
 
     let known = db.known_files(lib.id).await?;
+    // Outside the walked subtrees, the library is what the database says:
+    // the present files go in unchanged, so the diff leaves them alone.
+    let walked_sidecars: Vec<(String, i64)> = files
+        .iter()
+        .filter(|f| f.kind == FileKind::Sidecar)
+        .map(|f| (f.rel_path.clone(), f.mtime_ns))
+        .collect();
+    if let Some(subtrees) = subtrees {
+        let inside = |p: &str| {
+            subtrees.iter().any(|s| {
+                s.is_empty()
+                    || p == s
+                    || (p.starts_with(s.as_str()) && p[s.len()..].starts_with('/'))
+            })
+        };
+        files.extend(
+            known
+                .iter()
+                .filter(|k| k.present && !inside(&k.rel_path))
+                .map(|k| FileEntry {
+                    rel_path: k.rel_path.clone(),
+                    size: k.size,
+                    mtime_ns: k.mtime_ns,
+                    kind: classify(k.rel_path.rsplit('/').next().unwrap_or_default()),
+                }),
+        );
+        files.sort_unstable_by(|a, b| a.rel_path.cmp(&b.rel_path));
+    }
     // A library that had files and now yields none is far more likely an
     // unmounted share (empty mount point) or a share failing mid-walk than a
     // deliberately emptied folder. Refuse instead of marking it all missing.
@@ -247,7 +340,7 @@ async fn run_scan_with(
         if cancel.is_cancelled() {
             return Err(CoreError::Cancelled);
         }
-        let (ok, bad) = fingerprint_entries(&lib.path, &files, chunk).await;
+        let (ok, bad) = fingerprint_entries(fs.clone(), &lib.path, &files, chunk).await;
         fingerprints.extend(ok);
         failed.extend(bad);
         let done = (n * FINGERPRINT_CHUNK + chunk.len()).min(which.len());
@@ -280,15 +373,26 @@ async fn run_scan_with(
     }
     // The share may have dropped while we were reading; check again right
     // before writing so a vanished library is never marked missing.
-    if !root_readable(&lib.path) {
+    if !root_readable(&*fs, &lib.path) {
         return Err(CoreError::LibraryOffline(lib.path.clone()));
     }
-    let groups = group_models(&files);
-    let sidecar_files: Vec<(String, i64)> = files
+    // Paths that could not be read this time keep their old shape in the
+    // grouping, so a flaky share never re-roots a model.
+    let opaque: Vec<Opaque> = keep
         .iter()
-        .filter(|f| f.kind == FileKind::Sidecar)
-        .map(|f| (f.rel_path.clone(), f.mtime_ns))
+        .map(|rel| {
+            let prefix = format!("{rel}/");
+            Opaque {
+                rel_path: rel.clone(),
+                is_file: known.get(rel.as_str()).is_some_and(|k| k.is_part),
+                had_printables: known
+                    .iter()
+                    .any(|(p, k)| k.is_part && (*p == rel.as_str() || p.starts_with(&prefix))),
+            }
+        })
         .collect();
+    let groups = group_models_with(&files, &opaque);
+    let sidecar_files = walked_sidecars;
     progress(ScanPhase::Writing, 0, groups.len());
     let stats = db
         .apply_scan(
@@ -301,7 +405,34 @@ async fn run_scan_with(
             },
         )
         .await?;
-    db.set_last_full_scan(lib.id, now_ms()).await?;
+    if subtrees.is_none() {
+        db.set_last_full_scan(lib.id, now_ms()).await?;
+        // The scan reached the folder: rows missing longer than the grace
+        // period can go. (An offline library never gets here, so its rows
+        // never age out.)
+        let purged = db.purge_missing(lib.id, now_ms()).await?;
+        if purged != crate::db::Purged::default() {
+            tracing::info!(?purged, "forgot rows missing for over 30 days");
+        }
+    }
+    for m in &stats.moved {
+        tracing::info!(from = %m.from, to = %m.to, "model moved; keeping its data");
+    }
+    // A moved single-file model's sidecar is named after its file: write
+    // it again under the new name.
+    if let Some(ctx) = sidecar_ctx
+        && lib.sidecar_enabled
+    {
+        for m in &stats.moved {
+            ctx.writer.queue(m.model);
+            if m.kind == crate::grouping::ModelKind::SingleFile {
+                // Printdex's own file under the old name; the writer makes
+                // the new one.
+                let old = crate::sidecar::path_for(&lib.path, &m.from, m.kind);
+                let _ = std::fs::remove_file(old);
+            }
+        }
+    }
 
     let mut sidecars_imported = 0;
     if let Some(ctx) = sidecar_ctx
@@ -330,8 +461,10 @@ async fn run_scan_with(
         models_added: stats.models_added,
         models_missing: stats.models_missing,
         models_returned: stats.models_returned,
+        models_moved: stats.moved.len() as u64,
         sidecars_imported,
         duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        partial: subtrees.is_some(),
     })
 }
 
@@ -341,13 +474,14 @@ fn rel_string(rel: &Path) -> Option<String> {
     parts.map(|p| p.join("/"))
 }
 
-fn root_readable(root: &Path) -> bool {
-    std::fs::metadata(root).is_ok_and(|m| m.is_dir()) && std::fs::read_dir(root).is_ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::walk::walk_library;
+
+    fn real() -> Arc<dyn Fs> {
+        Arc::new(crate::fs::RealFs)
+    }
     use crate::db::LibraryKind;
     use crate::ids::LibraryId;
     use std::fs;
@@ -374,6 +508,7 @@ mod tests {
                 path: root.clone(),
                 display_name: "lib".into(),
                 kind: LibraryKind::Local,
+                change_mode: crate::db::ChangeMode::Auto,
                 sidecar_enabled: true,
                 last_full_scan_at: None,
             };
@@ -390,6 +525,7 @@ mod tests {
 
         async fn scan(&self) -> ScanSummary {
             scan_library(
+                real(),
                 &self.db,
                 &self.lib,
                 &self.tx,
@@ -527,7 +663,7 @@ mod tests {
     #[tokio::test]
     async fn scan_survives_file_deleted_before_fingerprint() {
         let f = Fixture::new(TREE).await;
-        let walked = walk_library(&f.root, &CancellationToken::new()).unwrap();
+        let walked = walk_library(&crate::fs::RealFs, &f.root, &CancellationToken::new()).unwrap();
         let gone = walked
             .files
             .iter()
@@ -535,11 +671,32 @@ mod tests {
             .unwrap();
         fs::remove_file(f.root.join("Orc/orc.3mf")).unwrap();
         let all: Vec<usize> = (0..walked.files.len()).collect();
-        let (ok, failed) = fingerprint_entries(&f.root, &walked.files, &all).await;
+        let (ok, failed) = fingerprint_entries(real(), &f.root, &walked.files, &all).await;
         assert_eq!(failed, [gone]);
         assert_eq!(ok.len(), 2);
         let s = f.scan().await;
         assert_eq!(s.models_added, 1);
+    }
+
+    #[tokio::test]
+    async fn fingerprint_size_mismatch_is_failure() {
+        let f = Fixture::new(TREE).await;
+        let walked = walk_library(&crate::fs::RealFs, &f.root, &CancellationToken::new()).unwrap();
+        let grown = walked
+            .files
+            .iter()
+            .position(|e| e.rel_path == "Orc/orc.3mf")
+            .unwrap();
+        // The file grows after the walk listed it.
+        fs::write(
+            f.root.join("Orc/orc.3mf"),
+            b"a much longer body than before",
+        )
+        .unwrap();
+        let all: Vec<usize> = (0..walked.files.len()).collect();
+        let (ok, failed) = fingerprint_entries(real(), &f.root, &walked.files, &all).await;
+        assert_eq!(failed, [grown]);
+        assert!(!ok.contains_key(&grown));
     }
 
     #[tokio::test]
@@ -571,7 +728,7 @@ mod tests {
         let f = Fixture::new(TREE).await;
         let c = CancellationToken::new();
         c.cancel();
-        let r = scan_library(&f.db, &f.lib, &f.tx, c, None).await;
+        let r = scan_library(real(), &f.db, &f.lib, &f.tx, c, None).await;
         assert!(matches!(r, Err(CoreError::Cancelled)));
         assert_eq!(f.count("SELECT count(*) FROM models").await, 0);
     }
@@ -584,7 +741,7 @@ mod tests {
         for e in fs::read_dir(&f.root).unwrap() {
             fs::remove_dir_all(e.unwrap().path()).unwrap();
         }
-        let r = scan_library(&f.db, &f.lib, &f.tx, CancellationToken::new(), None).await;
+        let r = scan_library(real(), &f.db, &f.lib, &f.tx, CancellationToken::new(), None).await;
         assert!(matches!(r, Err(CoreError::LibraryOffline(_))), "{r:?}");
         assert_eq!(
             f.count("SELECT count(*) FROM models WHERE missing_since IS NOT NULL")
@@ -599,10 +756,12 @@ mod tests {
         after_walk: impl FnOnce(&[FileEntry]),
     ) -> Result<ScanSummary> {
         run_scan_with(
+            real(),
             &f.db,
             &f.lib,
             &f.tx,
             CancellationToken::new(),
+            None,
             None,
             after_walk,
         )
@@ -624,7 +783,7 @@ mod tests {
                 .fetch_one(f.db.reader())
                 .await
                 .unwrap();
-        let real = fingerprint_file(&f.root.join("Dragon/STLs/a.stl"))
+        let real = crate::fingerprint::fingerprint_file(&f.root.join("Dragon/STLs/a.stl"))
             .unwrap()
             .hash;
         assert_eq!(stored as u64, real);
@@ -696,7 +855,7 @@ mod tests {
         for d in ["Dragon", "Orc"] {
             fs::set_permissions(f.root.join(d), fs::Permissions::from_mode(0o000)).unwrap();
         }
-        let r = scan_library(&f.db, &f.lib, &f.tx, CancellationToken::new(), None).await;
+        let r = scan_library(real(), &f.db, &f.lib, &f.tx, CancellationToken::new(), None).await;
         for d in ["Dragon", "Orc"] {
             fs::set_permissions(f.root.join(d), fs::Permissions::from_mode(0o755)).unwrap();
         }
@@ -718,7 +877,7 @@ mod tests {
         }
         f.scan().await;
         fs::set_permissions(f.root.join("Orc"), fs::Permissions::from_mode(0o000)).unwrap();
-        let r = scan_library(&f.db, &f.lib, &f.tx, CancellationToken::new(), None).await;
+        let r = scan_library(real(), &f.db, &f.lib, &f.tx, CancellationToken::new(), None).await;
         fs::set_permissions(f.root.join("Orc"), fs::Permissions::from_mode(0o755)).unwrap();
         let s = r.unwrap();
         assert_eq!((s.skipped, s.models_missing), (1, 0));
@@ -743,6 +902,7 @@ mod tests {
             mtime_ns: 1,
             fp_hash: Some(7),
             is_part: true,
+            present: true,
         };
         let mut known = HashMap::new();
         assert!(needs_fingerprint(&known, &e));
