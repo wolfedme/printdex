@@ -193,9 +193,32 @@ impl Target {
     }
 }
 
-/// Renders `mesh` framed to fill the image. An empty mesh gives a
-/// transparent image.
-pub fn render(mesh: &Mesh, opts: &RenderOptions) -> Image {
+/// Framing and colours for one render, shared by the CPU and GPU paths.
+pub(crate) struct Frame {
+    /// Supersampled size.
+    pub w: u32,
+    pub h: u32,
+    pub dmin: f32,
+    pub dmax: f32,
+    fit: Fit,
+    edge: Rgb,
+}
+
+/// One triangle ready to rasterize: corners in supersampled pixels,
+/// depths (larger is nearer) and its flat colour.
+pub(crate) struct Tri {
+    pub px: [Vec2; 3],
+    pub depth: [f32; 3],
+    pub color: Rgb,
+}
+
+/// Projects and shades `mesh`, calling `each` per visible-able triangle.
+/// `None` for an empty mesh.
+pub(crate) fn prepare(
+    mesh: &Mesh,
+    opts: &RenderOptions,
+    mut each: impl FnMut(Tri),
+) -> Option<Frame> {
     let (w, h) = (opts.width * SS, opts.height * SS);
     let basis = opts.camera.basis();
     let projected: Vec<(Vec2, f32)> = mesh
@@ -203,9 +226,7 @@ pub fn render(mesh: &Mesh, opts: &RenderOptions) -> Image {
         .iter()
         .map(|p| basis.project(Vec3::from_array(*p)))
         .collect();
-    let Some(first) = projected.first() else {
-        return Image::transparent(opts.width, opts.height);
-    };
+    let first = projected.first()?;
     let (mut min, mut max) = (first.0, first.0);
     let (mut dmin, mut dmax) = (first.1, first.1);
     for (s, d) in &projected {
@@ -216,7 +237,6 @@ pub fn render(mesh: &Mesh, opts: &RenderOptions) -> Image {
     }
     let fit = Fit::on_bed(min, max, w, h, opts.margins);
     let ramp = opts.material.ramp();
-    let mut target = Target::new(w, h);
     for (tri, proj) in mesh
         .positions
         .as_chunks::<3>()
@@ -235,25 +255,70 @@ pub fn render(mesh: &Mesh, opts: &RenderOptions) -> Image {
         if n.dot(basis.toward_eye) < 0.0 {
             n = -n;
         }
-        target.triangle(
-            [proj[0].0, proj[1].0, proj[2].0].map(|s| fit.to_pixel(s)),
-            [proj[0].1, proj[1].1, proj[2].1],
-            shade(&ramp, n),
-        );
+        each(Tri {
+            px: [proj[0].0, proj[1].0, proj[2].0].map(|s| fit.to_pixel(s)),
+            depth: [proj[0].1, proj[1].1, proj[2].1],
+            color: shade(&ramp, n),
+        });
     }
+    Some(Frame {
+        w,
+        h,
+        dmin,
+        dmax,
+        fit,
+        edge: ramp.edge,
+    })
+}
+
+/// Edge lines and downsampling: the same for both paths.
+pub(crate) fn finish(mut target: Target, frame: &Frame, opts: &RenderOptions) -> Image {
     // A depth jump of more than a few pixels' worth (or 1.5% of the
     // model's depth) between neighbours marks an edge.
-    let px_mm = if fit.scale > 0.0 {
-        1.0 / fit.scale
+    let px_mm = if frame.fit.scale > 0.0 {
+        1.0 / frame.fit.scale
     } else {
         0.0
     };
-    target.edges(ramp.edge, (4.0 * px_mm).max(0.015 * (dmax - dmin)));
+    target.edges(
+        frame.edge,
+        (4.0 * px_mm).max(0.015 * (frame.dmax - frame.dmin)),
+    );
     target.resolve(opts.width, opts.height)
 }
 
+/// Supersampled size of a render.
+pub(crate) fn target_size(opts: &RenderOptions) -> (u32, u32) {
+    (opts.width * SS, opts.height * SS)
+}
+
+/// Renders `mesh` on the CPU, framed to fill the image. An empty mesh
+/// gives a transparent image.
+pub fn render(mesh: &Mesh, opts: &RenderOptions) -> Image {
+    let (w, h) = target_size(opts);
+    let mut target = Target::new(w, h);
+    match prepare(mesh, opts, |t| target.triangle(t.px, t.depth, t.color)) {
+        Some(frame) => finish(target, &frame, opts),
+        None => Image::transparent(opts.width, opts.height),
+    }
+}
+
 #[cfg(test)]
-mod tests {
+impl Frame {
+    pub fn for_test(w: u32, h: u32, dmin: f32, dmax: f32) -> Frame {
+        Frame {
+            w,
+            h,
+            dmin,
+            dmax,
+            fit: Fit::new(Vec2::ZERO, Vec2::ONE, w, h, 0.0),
+            edge: [0; 3],
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
     use super::*;
 
     /// Axis-aligned box from `min` to `max`, 12 triangles.

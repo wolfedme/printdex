@@ -3383,7 +3383,9 @@ version = "0.1.0"
 dependencies = [
  "glam",
  "image",
+ "pollster",
  "printdex-mesh",
+ "wgpu",
 ]
 
 [[package]]

@@ -17,7 +17,8 @@
 use std::collections::{HashSet, VecDeque};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use tokio::sync::{Notify, Semaphore, broadcast};
 use xxhash_rust::xxh3::xxh3_64;
@@ -171,6 +172,59 @@ struct Inner {
     queue: Mutex<Queue>,
     wake: Notify,
     budget: Semaphore,
+    gpu: Arc<Gpu>,
+}
+
+/// The thumbnail GPU, opened on first use. A render that fails on the GPU
+/// is redone on the CPU, and the GPU is not used again this session.
+#[derive(Debug, Default)]
+pub(crate) struct Gpu {
+    renderer: OnceLock<Option<printdex_render::GpuRenderer>>,
+    broken: AtomicBool,
+}
+
+impl Gpu {
+    /// The GPU renderer, or `None` to render on the CPU. Blocking on first
+    /// call (opens the device); call it on a worker.
+    fn get(&self) -> Option<&printdex_render::GpuRenderer> {
+        if self.broken.load(Ordering::Relaxed) {
+            return None;
+        }
+        self.renderer
+            .get_or_init(|| {
+                let gpu = printdex_render::GpuRenderer::new();
+                match &gpu {
+                    Some(g) => {
+                        tracing::info!(adapter = %g.description, "thumbnails render on the GPU")
+                    }
+                    None => tracing::info!("no suitable GPU; thumbnails render on the CPU"),
+                }
+                gpu
+            })
+            .as_ref()
+    }
+
+    /// Renders on the GPU when there is one, else (or on any GPU failure)
+    /// on the CPU.
+    fn render(
+        &self,
+        mesh: &printdex_mesh::Mesh,
+        opts: &printdex_render::RenderOptions,
+    ) -> printdex_render::Image {
+        if let Some(gpu) = self.get() {
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gpu.render(mesh, opts)));
+            match result {
+                Ok(Ok(img)) => return img,
+                Ok(Err(e)) => {
+                    tracing::warn!(error = %e, "GPU thumbnail failed; using the CPU from now on")
+                }
+                Err(_) => tracing::warn!("GPU thumbnail panicked; using the CPU from now on"),
+            }
+            self.broken.store(true, Ordering::Relaxed);
+        }
+        printdex_render::render(mesh, opts)
+    }
 }
 
 /// What a job produced.
@@ -195,6 +249,7 @@ impl ThumbnailService {
             queue: Mutex::new(Queue::default()),
             wake: Notify::new(),
             budget: Semaphore::new(BUDGET_MIB as usize),
+            gpu: Arc::new(Gpu::default()),
         });
         let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
         for _ in 0..(cores / 2).clamp(1, 4) {
@@ -316,7 +371,7 @@ struct Rendered {
     triangles: u64,
 }
 
-fn render_part(path: &Path, format: PrintableFormat) -> Result<Rendered, ThumbFailure> {
+fn render_part(path: &Path, format: PrintableFormat, gpu: &Gpu) -> Result<Rendered, ThumbFailure> {
     use printdex_mesh::MeshError;
     let mesh = printdex_mesh::load(path, mesh_format(format), printdex_mesh::Limits::default())
         .map_err(|e| match e {
@@ -327,7 +382,7 @@ fn render_part(path: &Path, format: PrintableFormat) -> Result<Rendered, ThumbFa
     let Some(bounds) = mesh.bounds() else {
         return Err(ThumbFailure::Invalid);
     };
-    let img = printdex_render::render(
+    let img = gpu.render(
         &mesh,
         &printdex_render::RenderOptions {
             width: THUMB_WIDTH,
@@ -450,8 +505,8 @@ impl Inner {
         let Ok(_permit) = self.budget.acquire_many(weight(src.format, src.size)).await else {
             return Outcome::Failed(ThumbFailure::Unreadable);
         };
-        let (path, format) = (src.path.clone(), src.format);
-        match run_cpu(move || render_part(&path, format)).await {
+        let (path, format, gpu) = (src.path.clone(), src.format, self.gpu.clone());
+        match run_cpu(move || render_part(&path, format, &gpu)).await {
             Ok(r) => {
                 if let Err(e) = self
                     .db

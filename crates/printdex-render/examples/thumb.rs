@@ -26,18 +26,27 @@ fn main() {
     let t = std::time::Instant::now();
     let mesh = load(input.as_ref(), format, Limits::default()).expect("load");
     let loaded = t.elapsed();
-    let img = render(
-        &mesh,
-        &RenderOptions {
-            material,
-            ..RenderOptions::default()
-        },
-    );
+    let opts = RenderOptions {
+        material,
+        ..RenderOptions::default()
+    };
+    let t2 = std::time::Instant::now();
+    let cpu = render(&mesh, &opts);
+    let cpu_time = t2.elapsed();
     println!(
-        "{} triangles, load {loaded:?}, render {:?}",
-        mesh.triangles(),
-        t.elapsed() - loaded
+        "{} triangles, load {loaded:?}, CPU render {cpu_time:?}",
+        mesh.triangles()
     );
+    let img = match printdex_render::GpuRenderer::new() {
+        Some(gpu) => {
+            let _ = gpu.render(&mesh, &opts); // warm up
+            let t3 = std::time::Instant::now();
+            let img = gpu.render(&mesh, &opts).expect("gpu render");
+            println!("GPU render on {}: {:?}", gpu.description, t3.elapsed());
+            img
+        }
+        None => cpu,
+    };
     image::RgbaImage::from_raw(img.width, img.height, img.rgba)
         .expect("size")
         .save(output)
