@@ -19,7 +19,7 @@ use crate::grid::GridMetrics;
 use crate::i18n::{Arg, t, t_args};
 use crate::nav::{self, Move};
 use crate::search::{SEARCH_LIMIT, SearchState, Ticket};
-use crate::theme::{self, ColorTheme, Mode, Palette};
+use crate::theme::{self, ColorTheme, Mode, Palette, Surface};
 
 /// Widget ids the update logic talks to.
 pub fn search_id() -> Id {
@@ -82,6 +82,7 @@ pub struct App {
     pub hovered: Option<ModelId>,
     pub error: Option<String>,
     pub color_theme: ColorTheme,
+    pub surface: Surface,
     pub mode: Mode,
     pub window: Size,
     pub viewport: Option<GridViewport>,
@@ -132,6 +133,7 @@ impl App {
             hovered: None,
             error: None,
             color_theme: ColorTheme::default(),
+            surface: Surface::Solid,
             mode,
             window: INITIAL_WINDOW,
             viewport: None,
@@ -152,7 +154,7 @@ impl App {
     }
 
     pub fn palette(&self) -> Palette {
-        Palette::new(self.color_theme, self.mode)
+        Palette::new(self.color_theme, self.mode, self.surface)
     }
 
     pub fn title(&self) -> String {

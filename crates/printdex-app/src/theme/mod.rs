@@ -12,6 +12,8 @@
 use iced::widget::{button, container, scrollable, text_input};
 use iced::{Background, Border, Color, Font, Shadow, font};
 
+mod presets;
+
 // ---------- spacing, radii, sizes ----------
 
 pub const S1: f32 = 2.0;
@@ -70,12 +72,12 @@ pub const FONT_DATA: Font = Font::with_name(MONO);
 
 /// Font files bundled with the app (SIL OFL 1.1, Latin subset).
 pub const FONT_FILES: [&[u8]; 6] = [
-    include_bytes!("../assets/fonts/Figtree-400.ttf"),
-    include_bytes!("../assets/fonts/Figtree-500.ttf"),
-    include_bytes!("../assets/fonts/Figtree-600.ttf"),
-    include_bytes!("../assets/fonts/Figtree-700.ttf"),
-    include_bytes!("../assets/fonts/JetBrainsMono-400.ttf"),
-    include_bytes!("../assets/fonts/JetBrainsMono-500.ttf"),
+    include_bytes!("../../assets/fonts/Figtree-400.ttf"),
+    include_bytes!("../../assets/fonts/Figtree-500.ttf"),
+    include_bytes!("../../assets/fonts/Figtree-600.ttf"),
+    include_bytes!("../../assets/fonts/Figtree-700.ttf"),
+    include_bytes!("../../assets/fonts/JetBrainsMono-400.ttf"),
+    include_bytes!("../../assets/fonts/JetBrainsMono-500.ttf"),
 ];
 
 // ---------- colours ----------
@@ -121,13 +123,81 @@ pub enum Mode {
     Dark,
 }
 
-/// The user's colour theme (Settings > Appearance > Colour theme).
-/// Graphite signal is the default; the other DESIGN.md presets are added
-/// as entries here.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// The user's colour theme (Settings > Appearance > Colour theme). The
+/// tokens come from `presets.rs`, generated from `.impeccable/design.json`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum ColorTheme {
     #[default]
     GraphiteSignal,
+    VioletFrost,
+    SmokedQuartz,
+    SeaGlass,
+    AmberResin,
+    RosePetg,
+    Glacier,
+}
+
+impl ColorTheme {
+    /// Every preset, in the order Settings shows them.
+    pub const ALL: [ColorTheme; 7] = [
+        ColorTheme::GraphiteSignal,
+        ColorTheme::VioletFrost,
+        ColorTheme::SmokedQuartz,
+        ColorTheme::SeaGlass,
+        ColorTheme::AmberResin,
+        ColorTheme::RosePetg,
+        ColorTheme::Glacier,
+    ];
+
+    /// Stable name used in the settings file.
+    pub fn key(self) -> &'static str {
+        match self {
+            ColorTheme::GraphiteSignal => "graphite",
+            ColorTheme::VioletFrost => "frost",
+            ColorTheme::SmokedQuartz => "quartz",
+            ColorTheme::SeaGlass => "seaglass",
+            ColorTheme::AmberResin => "resin",
+            ColorTheme::RosePetg => "rose",
+            ColorTheme::Glacier => "glacier",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<ColorTheme> {
+        ColorTheme::ALL.into_iter().find(|t| t.key() == key)
+    }
+}
+
+/// Translucent glass over an OS blur, or opaque.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Surface {
+    Glass,
+    #[default]
+    Solid,
+}
+
+/// Whether the OS can blur what is behind a transparent window. iced 0.14
+/// (winit) blurs on macOS and on KDE Plasma; elsewhere glass would show
+/// the desktop unblurred, so the app uses the solid set instead.
+pub fn blur_supported() -> bool {
+    blur_supported_on(
+        std::env::consts::OS,
+        std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
+    )
+}
+
+fn blur_supported_on(os: &str, desktop: Option<&str>) -> bool {
+    match os {
+        "macos" => true,
+        "linux" => desktop.is_some_and(|d| d.split(':').any(|p| p.eq_ignore_ascii_case("kde"))),
+        _ => false,
+    }
+}
+
+/// One colour theme in one mode: the glass set and its solid twin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThemeSet {
+    pub glass: ThemeTokens,
+    pub solid: ThemeTokens,
 }
 
 /// Tokens a colour theme may change: glass tint and the accent set.
@@ -171,34 +241,6 @@ pub struct Status {
     pub partial_soft: Color,
     pub offline: Color,
 }
-
-const GRAPHITE_LIGHT: ThemeTokens = ThemeTokens {
-    ground: hex("#f0f3fa"),
-    surface: hex("#fcfdff"),
-    tray: hex("#e9edf5"),
-    rail: hex("#e1e8f6"),
-    rail_hi: hex("#f5f8ff"),
-    accent: hex("#9f8600"),
-    accent_soft: hex("#f7edb2"),
-    accent_ink: hex("#755c00"),
-    primary: hex("#9f8600"),
-    primary_hi: hex("#907600"),
-    on_primary: hex("#191100"),
-};
-
-const GRAPHITE_DARK: ThemeTokens = ThemeTokens {
-    ground: hex("#14161a"),
-    surface: hex("#222429"),
-    tray: hex("#1c1e23"),
-    rail: hex("#0c0f17"),
-    rail_hi: hex("#1f242e"),
-    accent: hex("#fadf27"),
-    accent_soft: hex("#413801"),
-    accent_ink: hex("#f4e06a"),
-    primary: hex("#fadf27"),
-    primary_hi: hex("#fff043"),
-    on_primary: hex("#191100"),
-};
 
 const NEUTRAL_LIGHT: Neutral = Neutral {
     edge: hex("#d9dfe5"),
@@ -245,11 +287,16 @@ const STATUS_DARK: Status = Status {
 };
 
 impl ColorTheme {
-    /// The theme-dependent tokens for `mode`.
-    pub fn tokens(self, mode: Mode) -> ThemeTokens {
-        match (self, mode) {
-            (ColorTheme::GraphiteSignal, Mode::Light) => GRAPHITE_LIGHT,
-            (ColorTheme::GraphiteSignal, Mode::Dark) => GRAPHITE_DARK,
+    /// The theme-dependent tokens for `mode` and `surface`.
+    pub fn tokens(self, mode: Mode, surface: Surface) -> ThemeTokens {
+        let (light, dark) = presets::preset(self);
+        let set = match mode {
+            Mode::Light => light,
+            Mode::Dark => dark,
+        };
+        match surface {
+            Surface::Glass => set.glass,
+            Surface::Solid => set.solid,
         }
     }
 }
@@ -258,20 +305,29 @@ impl ColorTheme {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
     pub mode: Mode,
+    pub surface: Surface,
     pub t: ThemeTokens,
     pub n: Neutral,
     pub status: Status,
 }
 
 impl Palette {
-    pub fn new(theme: ColorTheme, mode: Mode) -> Palette {
-        let (n, status) = match mode {
+    pub fn new(theme: ColorTheme, mode: Mode, surface: Surface) -> Palette {
+        let (mut n, status) = match mode {
             Mode::Light => (NEUTRAL_LIGHT, STATUS_LIGHT),
             Mode::Dark => (NEUTRAL_DARK, STATUS_DARK),
         };
+        if surface == Surface::Glass {
+            // The bright 1px edge of glass panes (DESIGN.md "Elevation").
+            n.edge = match mode {
+                Mode::Light => hex("#ffffffe6"),
+                Mode::Dark => hex("#ffffff1a"),
+            };
+        }
         Palette {
             mode,
-            t: theme.tokens(mode),
+            surface,
+            t: theme.tokens(mode, surface),
             n,
             status,
         }
@@ -567,7 +623,7 @@ mod tests {
     #[test]
     fn solid_set_is_opaque() {
         for mode in [Mode::Light, Mode::Dark] {
-            let p = Palette::new(ColorTheme::GraphiteSignal, mode);
+            let p = Palette::new(ColorTheme::GraphiteSignal, mode, Surface::Solid);
             for c in [
                 p.t.ground,
                 p.t.surface,
@@ -586,8 +642,8 @@ mod tests {
 
     #[test]
     fn mode_switches_palette() {
-        let light = Palette::new(ColorTheme::GraphiteSignal, Mode::Light);
-        let dark = Palette::new(ColorTheme::GraphiteSignal, Mode::Dark);
+        let light = Palette::new(ColorTheme::GraphiteSignal, Mode::Light, Surface::Solid);
+        let dark = Palette::new(ColorTheme::GraphiteSignal, Mode::Dark, Surface::Solid);
         assert_eq!(light.n.ink, hex("#181d27"));
         assert_eq!(dark.n.ink, hex("#eceef4"));
         assert_eq!(dark.t.accent, hex("#fadf27"));
@@ -597,7 +653,7 @@ mod tests {
     #[test]
     fn status_colours_do_not_depend_on_colour_theme() {
         for mode in [Mode::Light, Mode::Dark] {
-            let p = Palette::new(ColorTheme::default(), mode);
+            let p = Palette::new(ColorTheme::default(), mode, Surface::Solid);
             let expected = if mode == Mode::Light {
                 STATUS_LIGHT
             } else {
@@ -608,10 +664,85 @@ mod tests {
     }
 
     #[test]
+    fn blur_only_where_the_os_provides_it() {
+        assert!(blur_supported_on("macos", None));
+        assert!(blur_supported_on("linux", Some("KDE")));
+        assert!(blur_supported_on("linux", Some("ubuntu:KDE")));
+        assert!(!blur_supported_on("linux", Some("GNOME")));
+        assert!(!blur_supported_on("linux", None));
+        assert!(!blur_supported_on("windows", None));
+    }
+
+    #[test]
+    fn seven_presets_with_unique_keys() {
+        assert_eq!(ColorTheme::ALL.len(), 7);
+        for t in ColorTheme::ALL {
+            assert_eq!(ColorTheme::from_key(t.key()), Some(t));
+        }
+        assert_eq!(ColorTheme::from_key("nope"), None);
+    }
+
+    #[test]
+    fn every_preset_has_opaque_solid_twins() {
+        for t in ColorTheme::ALL {
+            for mode in [Mode::Light, Mode::Dark] {
+                let s = t.tokens(mode, Surface::Solid);
+                for c in [
+                    s.ground,
+                    s.surface,
+                    s.tray,
+                    s.rail,
+                    s.rail_hi,
+                    s.accent_soft,
+                ] {
+                    assert!((c.a - 1.0).abs() < 0.01, "{t:?} {mode:?}: {c:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn glass_alphas_match_design() {
+        let near = |c: Color, a: f32| (c.a - a).abs() < 0.01;
+        for t in ColorTheme::ALL {
+            let l = t.tokens(Mode::Light, Surface::Glass);
+            let d = t.tokens(Mode::Dark, Surface::Glass);
+            assert!(near(l.rail, 0.82) && near(d.rail, 0.82), "{t:?} rail");
+            assert!(near(l.ground, 0.86) && near(d.ground, 0.84), "{t:?} ground");
+        }
+    }
+
+    #[test]
+    fn presets_never_change_status_colours() {
+        for t in ColorTheme::ALL {
+            for mode in [Mode::Light, Mode::Dark] {
+                let a = Palette::new(t, mode, Surface::Glass).status;
+                let b = Palette::new(ColorTheme::default(), mode, Surface::Solid).status;
+                assert_eq!(a, b);
+            }
+        }
+    }
+
+    #[test]
+    fn accent_text_contrast_holds_in_every_preset() {
+        for t in ColorTheme::ALL {
+            for mode in [Mode::Light, Mode::Dark] {
+                let p = Palette::new(t, mode, Surface::Solid);
+                let c = contrast(p.t.accent_ink, p.t.accent_soft);
+                assert!(c >= 4.5, "{t:?} {mode:?}: {c}");
+                assert!(
+                    contrast(p.n.on_rail, p.t.rail) >= 4.5,
+                    "{t:?} {mode:?} rail"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn text_contrast_on_panes_is_readable() {
         // WCAG AA for body text (4.5:1) on the pane and rail fills.
         for mode in [Mode::Light, Mode::Dark] {
-            let p = Palette::new(ColorTheme::default(), mode);
+            let p = Palette::new(ColorTheme::default(), mode, Surface::Solid);
             assert!(contrast(p.n.ink, p.t.surface) >= 4.5);
             assert!(contrast(p.n.ink_2, p.t.surface) >= 4.5);
             assert!(contrast(p.n.on_rail, p.t.rail) >= 4.5);
