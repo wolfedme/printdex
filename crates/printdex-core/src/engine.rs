@@ -1,6 +1,6 @@
 //! The engine handle: the one entry point for the app and the CLI.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -131,6 +131,26 @@ impl Engine {
     /// Searches models; see [`Db::search_models`].
     pub async fn search(&self, query: &str, limit: u32) -> Result<Vec<ModelHit>> {
         self.db.search_models(query, limit).await
+    }
+
+    /// Searches models within one library, or all when `library` is `None`.
+    pub async fn search_in(
+        &self,
+        library: Option<LibraryId>,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<ModelHit>> {
+        self.db.search_models_in(library, query, limit).await
+    }
+
+    /// Number of models a search would return without a limit.
+    pub async fn count(&self, library: Option<LibraryId>, query: &str) -> Result<u64> {
+        self.db.count_models(library, query).await
+    }
+
+    /// Present-model counts per library; libraries without models are absent.
+    pub async fn library_counts(&self) -> Result<HashMap<LibraryId, u64>> {
+        self.db.library_model_counts().await
     }
 
     /// Row counts.
