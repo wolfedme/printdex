@@ -1,62 +1,130 @@
 name: CI
 
+# Minutes budget (private repo: Linux 1x, Windows 2x, macOS 10x):
+# - Pull requests: one Linux job (fmt, clippy, tests).
+# - Push to main: Linux + Windows tests, MSRV, bench smoke.
+# - Weekly / manual / `ci: full` label on a PR: everything, including macOS.
+# - Docs, Markdown and design-tooling-only changes run nothing.
+# Dependency and licence checks live in deny.yml.
+
 on:
-  push:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".claude/**"
+      - ".impeccable/**"
+      - "LICENSE"
+      - ".github/pull_request_template.md"
+      - ".github/workflows/deny.yml"
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".claude/**"
+      - ".impeccable/**"
+      - "LICENSE"
+      - ".github/pull_request_template.md"
+      - ".github/workflows/deny.yml"
+  schedule:
+    - cron: "17 3 * * 1" # Mondays 03:17 UTC
+  workflow_dispatch:
+
+concurrency:
+  # A new push to a PR cancels its older run. Adding an unrelated label gets its
+  # own group, so it never cancels the real run.
+  group: ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event.action == 'labeled' && github.event.label.name || 'run' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   SQLX_OFFLINE: "true"
   CARGO_TERM_COLOR: always
 
 jobs:
-  lint:
-    name: fmt + clippy
+  check:
+    name: fmt + clippy + test (linux)
+    # Skip on label events: the run that opened/updated the PR already did this.
+    if: github.event.action != 'labeled'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
 
-  test:
-    name: test (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+  test-windows:
+    name: test (windows)
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'ci: full') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'ci: full'))
+    runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo test --workspace
+
+  test-macos:
+    name: test (macos)
+    # macOS bills 10x, so it does not run on every merge.
+    if: >-
+      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'ci: full') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'ci: full'))
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name != 'pull_request' }}
       - run: cargo test --workspace
 
   msrv:
     name: msrv
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'ci: full') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'ci: full'))
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.94
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo check --workspace --all-targets
-
-  deny:
-    name: cargo-deny
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
 
   bench-smoke:
     name: bench smoke (20k parts)
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'ci: full') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'ci: full'))
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Generate library
         run: cargo run --release -p printdex-cli -- bench gen "$RUNNER_TEMP/lib" --parts 20000
       - name: Benchmark
