@@ -72,6 +72,8 @@ pub struct Preview {
     pub triangles: u64,
     /// Whether `mesh` has fewer triangles than the file.
     pub decimated: bool,
+    /// The model's material, for the viewer's colours.
+    pub material: printdex_render::Material,
 }
 
 /// Something that has a thumbnail.
@@ -341,7 +343,7 @@ impl ThumbnailService {
             Detail::Preview => printdex_mesh::PREVIEW_TRIANGLES,
             Detail::Full => FULL_DETAIL_TRIANGLES,
         };
-        let (path, format) = (src.path.clone(), src.format);
+        let (path, format, material) = (src.path.clone(), src.format, src.material);
         run_cpu(move || {
             let mesh = load_mesh(&path, format)?;
             let bounds = mesh.bounds().ok_or(ThumbFailure::Invalid)?;
@@ -352,6 +354,7 @@ impl ThumbnailService {
                 mesh,
                 dims: bounds.size(),
                 triangles: triangles as u64,
+                material,
             })
         })
         .await
@@ -508,7 +511,14 @@ fn part_key(p: &PartSource) -> String {
     let content = p
         .fp_hash
         .unwrap_or_else(|| xxh3_64(&p.mtime_ns.to_le_bytes()));
-    format!("p{:016x}{:016x}", p.size, content)
+    // Unknown keeps the milestone 2 key, so neutral renders stay cached.
+    let material = match p.material {
+        printdex_render::Material::Unknown => "",
+        printdex_render::Material::Petg => "-petg",
+        printdex_render::Material::Pla => "-pla",
+        printdex_render::Material::Tpu => "-tpu",
+    };
+    format!("p{:016x}{:016x}{material}", p.size, content)
 }
 
 fn image_key(i: &ImageSource) -> String {
@@ -597,7 +607,12 @@ fn top_row(img: &printdex_render::Image) -> u32 {
         .map_or(img.height, |y| y as u32)
 }
 
-fn render_part(path: &Path, format: PrintableFormat, gpu: &Gpu) -> Result<Rendered, ThumbFailure> {
+fn render_part(
+    path: &Path,
+    format: PrintableFormat,
+    material: printdex_render::Material,
+    gpu: &Gpu,
+) -> Result<Rendered, ThumbFailure> {
     let mesh = load_mesh(path, format)?;
     let Some(bounds) = mesh.bounds() else {
         return Err(ThumbFailure::Invalid);
@@ -607,6 +622,7 @@ fn render_part(path: &Path, format: PrintableFormat, gpu: &Gpu) -> Result<Render
         &printdex_render::RenderOptions {
             width: THUMB_WIDTH,
             height: THUMB_HEIGHT,
+            material,
             ..printdex_render::RenderOptions::default()
         },
     );
@@ -749,8 +765,9 @@ impl Inner {
         let Ok(_permit) = self.budget.acquire_many(weight(src.format, src.size)).await else {
             return Outcome::Failed(ThumbFailure::Unreadable);
         };
-        let (path, format, gpu) = (src.path.clone(), src.format, self.gpu.clone());
-        match run_cpu(move || render_part(&path, format, &gpu)).await {
+        let (path, format, material, gpu) =
+            (src.path.clone(), src.format, src.material, self.gpu.clone());
+        match run_cpu(move || render_part(&path, format, material, &gpu)).await {
             Ok(r) => {
                 if let Err(e) = self
                     .db
@@ -900,6 +917,7 @@ mod tests {
             size: 10,
             mtime_ns: 5,
             fp_hash: Some(99),
+            material: printdex_render::Material::Unknown,
         };
         let mut b = a.clone();
         b.path = "/y/moved.stl".into();
@@ -907,5 +925,24 @@ mod tests {
         assert_eq!(part_key(&a), part_key(&b));
         b.fp_hash = Some(100);
         assert_ne!(part_key(&a), part_key(&b));
+    }
+
+    #[test]
+    fn cache_key_includes_material() {
+        let a = PartSource {
+            id: PartId::new(),
+            path: "/x/a.stl".into(),
+            format: PrintableFormat::Stl,
+            size: 10,
+            mtime_ns: 5,
+            fp_hash: Some(99),
+            material: printdex_render::Material::Unknown,
+        };
+        let petg = PartSource {
+            material: printdex_render::Material::Petg,
+            ..a.clone()
+        };
+        assert_eq!(part_key(&a), "p000000000000000a0000000000000063");
+        assert_eq!(part_key(&petg), format!("{}-petg", part_key(&a)));
     }
 }

@@ -161,9 +161,9 @@ pub struct PrintSettings {
     /// Brand and colour, free text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filament: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", serialize_with = "short_f32")]
     pub nozzle_mm: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", serialize_with = "short_f32")]
     pub layer_mm: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub infill_pct: Option<u8>,
@@ -186,6 +186,15 @@ pub struct PrintSettings {
     pub printer: Option<String>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub custom: BTreeMap<String, String>,
+}
+
+/// Writes an `f32` as the shortest decimal that reads back to it (0.2, not
+/// 0.20000000298023224), for formats that widen floats to `f64`.
+fn short_f32<S: serde::Serializer>(v: &Option<f32>, s: S) -> std::result::Result<S::Ok, S::Error> {
+    match v {
+        Some(v) => s.serialize_f64(v.to_string().parse::<f64>().unwrap_or(f64::from(*v))),
+        None => s.serialize_none(),
+    }
 }
 
 /// Allowed range of a numeric setting, inclusive.

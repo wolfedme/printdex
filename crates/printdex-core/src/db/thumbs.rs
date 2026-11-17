@@ -17,6 +17,8 @@ pub struct PartSource {
     pub size: u64,
     pub mtime_ns: i64,
     pub fp_hash: Option<u64>,
+    /// The model's material, which colours the render.
+    pub material: printdex_render::Material,
 }
 
 /// An image file in a model folder.
@@ -59,11 +61,25 @@ fn join(root: &str, rel: &str) -> PathBuf {
     p
 }
 
+/// The preview ramp for a stored material key (see `Material::key`).
+pub fn render_material(key: Option<&str>) -> printdex_render::Material {
+    match key.and_then(crate::model_data::Material::parse) {
+        Some(crate::model_data::Material::Petg) => printdex_render::Material::Petg,
+        Some(crate::model_data::Material::Pla) => printdex_render::Material::Pla,
+        Some(crate::model_data::Material::Tpu) => printdex_render::Material::Tpu,
+        _ => printdex_render::Material::Unknown,
+    }
+}
+
 impl Db {
     /// Part `id` as a preview source; `None` when unknown or missing.
     pub async fn part_source(&self, id: PartId) -> Result<Option<PartSource>> {
         let row = sqlx::query!(
-            r#"SELECT l.path as lib_path, p.rel_path, p.format, p.size, p.mtime_ns, p.fp_hash
+            r#"SELECT l.path as lib_path, p.rel_path, p.format, p.size, p.mtime_ns, p.fp_hash,
+                      coalesce((SELECT r.material FROM recipes r WHERE r.model_id = p.model_id),
+                               (SELECT a.material FROM attempts a WHERE a.model_id = p.model_id
+                                  AND a.material IS NOT NULL ORDER BY a.printed_at DESC, a.id DESC LIMIT 1))
+                        as "material?: String"
                FROM parts p JOIN libraries l ON l.id = p.library_id
                WHERE p.id = ? AND p.missing_since IS NULL"#,
             id
@@ -77,6 +93,7 @@ impl Db {
             size: u64::try_from(r.size).unwrap_or(0),
             mtime_ns: r.mtime_ns,
             fp_hash: r.fp_hash.map(|h| h as u64),
+            material: render_material(r.material.as_deref()),
         }))
     }
 
@@ -84,7 +101,12 @@ impl Db {
     /// missing.
     pub async fn model_sources(&self, id: ModelId) -> Result<Option<ModelSources>> {
         let Some(lib) = sqlx::query!(
-            r#"SELECT l.path as lib_path FROM models m JOIN libraries l ON l.id = m.library_id
+            r#"SELECT l.path as lib_path,
+                      coalesce((SELECT r.material FROM recipes r WHERE r.model_id = m.id),
+                               (SELECT a.material FROM attempts a WHERE a.model_id = m.id
+                                  AND a.material IS NOT NULL ORDER BY a.printed_at DESC, a.id DESC LIMIT 1))
+                        as "material?: String"
+               FROM models m JOIN libraries l ON l.id = m.library_id
                WHERE m.id = ? AND m.missing_since IS NULL"#,
             id
         )
@@ -108,6 +130,7 @@ impl Db {
             size: u64::try_from(r.size).unwrap_or(0),
             mtime_ns: r.mtime_ns,
             fp_hash: r.fp_hash.map(|h| h as u64),
+            material: render_material(lib.material.as_deref()),
         })
         .collect();
         let images = sqlx::query!(

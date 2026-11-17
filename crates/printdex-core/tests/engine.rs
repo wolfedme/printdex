@@ -188,6 +188,7 @@ async fn events_reach_subscribers() {
             EngineEvent::LibraryRemoved(_) => "removed",
             EngineEvent::LibraryRenamed(_) => "renamed",
             EngineEvent::ThumbnailReady { .. } | EngineEvent::ThumbnailFailed { .. } => "thumb",
+            _ => "other",
         });
     }
     assert_eq!(seen, ["added", "started", "finished"]);

@@ -14,7 +14,8 @@ use crate::db::{
 use crate::error::{CoreError, Result};
 use crate::events::EngineEvent;
 use crate::ids::{LibraryId, ModelId};
-use crate::scan::{ScanSummary, scan_library};
+use crate::scan::{ScanSummary, SidecarCtx, scan_library};
+use crate::sidecar::SidecarWriter;
 use crate::thumbs::ThumbnailService;
 
 /// Event channel capacity. Slow subscribers miss old events (`Lagged`).
@@ -43,10 +44,12 @@ async fn folder_status(path: PathBuf) -> LibraryStatus {
 /// Handle to a Printdex engine. Cheap to clone; clones share everything.
 #[derive(Clone, Debug)]
 pub struct Engine {
-    db: Db,
-    events: broadcast::Sender<EngineEvent>,
+    pub(crate) db: Db,
+    pub(crate) events: broadcast::Sender<EngineEvent>,
     scanning: Arc<Mutex<HashSet<LibraryId>>>,
     thumbs: ThumbnailService,
+    pub(crate) sidecars: SidecarWriter,
+    pub(crate) install: crate::ids::Uuid,
 }
 
 /// Removes a library from the "scanning" set on every exit path.
@@ -83,11 +86,15 @@ impl Engine {
         let db = Db::open(&data_dir.join("printdex.db")).await?;
         let (events, _) = broadcast::channel(EVENT_CAPACITY);
         let thumbs = ThumbnailService::start(db.clone(), events.clone(), cache_dir);
+        let install = db.install_id().await?;
+        let sidecars = SidecarWriter::start(db.clone(), install, crate::sidecar::DEBOUNCE);
         Ok(Engine {
             db,
             events,
             scanning: Arc::new(Mutex::new(HashSet::new())),
             thumbs,
+            sidecars,
+            install,
         })
     }
 
@@ -169,7 +176,11 @@ impl Engine {
             id,
         };
         let lib = self.db.library(id).await?;
-        scan_library(&self.db, &lib, &self.events, cancel).await
+        let ctx = SidecarCtx {
+            writer: &self.sidecars,
+            install: self.install,
+        };
+        scan_library(&self.db, &lib, &self.events, cancel, Some(ctx)).await
     }
 
     /// Searches models; see [`Db::search_models`].
@@ -236,6 +247,11 @@ impl Engine {
     /// Present-model counts per library; libraries without models are absent.
     pub async fn library_counts(&self) -> Result<HashMap<LibraryId, u64>> {
         self.db.library_model_counts().await
+    }
+
+    /// Model counts for the sidebar's smart filters.
+    pub async fn smart_counts(&self) -> Result<SmartCounts> {
+        self.db.smart_counts().await
     }
 
     /// Row counts.

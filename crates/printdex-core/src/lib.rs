@@ -12,9 +12,12 @@ pub mod fingerprint;
 pub mod grouping;
 pub mod ids;
 pub mod model_data;
+pub mod photos;
 pub mod scan;
+pub mod sidecar;
 pub mod thumbs;
 pub mod time;
+mod user_data;
 pub mod walk;
 
 pub use db::{

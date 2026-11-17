@@ -6,6 +6,7 @@ mod models;
 mod organize;
 mod prints;
 mod search;
+mod sidecars;
 mod thumbs;
 
 use std::path::{Path, PathBuf};
@@ -26,6 +27,7 @@ pub use search::{
     ModelHit, RecipeFacts, Scope, SearchFilter, Smart, SmartCounts, SortOrder, Stats, WEEK_MS,
     to_fts_query,
 };
+pub use sidecars::{SidecarState, SidecarTarget};
 pub use thumbs::{IMAGE_EXTENSIONS, ImageSource, ModelSources, PartSource};
 
 /// Handle to the Printdex database. Cheap to clone.

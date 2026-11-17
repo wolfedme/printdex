@@ -49,7 +49,17 @@ pub struct ScanSummary {
     pub models_added: u64,
     pub models_missing: u64,
     pub models_returned: u64,
+    /// Sidecars read back into the database.
+    pub sidecars_imported: u64,
     pub duration_ms: u64,
+}
+
+/// What a scan needs to read sidecars back: the writer (to rewrite merged
+/// files) and this install's id.
+#[derive(Clone, Copy, Debug)]
+pub struct SidecarCtx<'a> {
+    pub writer: &'a crate::sidecar::SidecarWriter,
+    pub install: crate::ids::Uuid,
 }
 
 /// Whether `entry` must be read: a printable file that is new, changed in
@@ -110,9 +120,10 @@ pub async fn scan_library(
     lib: &Library,
     events: &broadcast::Sender<EngineEvent>,
     cancel: CancellationToken,
+    sidecars: Option<SidecarCtx<'_>>,
 ) -> Result<ScanSummary> {
     let _ = events.send(EngineEvent::ScanStarted { library: lib.id });
-    match run_scan(db, lib, events, cancel).await {
+    match run_scan_with(db, lib, events, cancel, sidecars, |_| {}).await {
         Ok(summary) => {
             let _ = events.send(EngineEvent::ScanFinished {
                 library: lib.id,
@@ -167,15 +178,6 @@ fn clone_error(e: &CoreError) -> CoreError {
     }
 }
 
-async fn run_scan(
-    db: &Db,
-    lib: &Library,
-    events: &broadcast::Sender<EngineEvent>,
-    cancel: CancellationToken,
-) -> Result<ScanSummary> {
-    run_scan_with(db, lib, events, cancel, |_| {}).await
-}
-
 /// The scan, with `after_walk` called between the walk and fingerprinting so
 /// tests can change the tree mid-scan.
 async fn run_scan_with(
@@ -183,6 +185,7 @@ async fn run_scan_with(
     lib: &Library,
     events: &broadcast::Sender<EngineEvent>,
     cancel: CancellationToken,
+    sidecar_ctx: Option<SidecarCtx<'_>>,
     after_walk: impl FnOnce(&[FileEntry]),
 ) -> Result<ScanSummary> {
     let started = Instant::now();
@@ -281,6 +284,11 @@ async fn run_scan_with(
         return Err(CoreError::LibraryOffline(lib.path.clone()));
     }
     let groups = group_models(&files);
+    let sidecar_files: Vec<(String, i64)> = files
+        .iter()
+        .filter(|f| f.kind == FileKind::Sidecar)
+        .map(|f| (f.rel_path.clone(), f.mtime_ns))
+        .collect();
     progress(ScanPhase::Writing, 0, groups.len());
     let stats = db
         .apply_scan(
@@ -295,6 +303,22 @@ async fn run_scan_with(
         .await?;
     db.set_last_full_scan(lib.id, now_ms()).await?;
 
+    let mut sidecars_imported = 0;
+    if let Some(ctx) = sidecar_ctx
+        && lib.sidecar_enabled
+    {
+        let imported =
+            crate::sidecar::import_library(db, &lib.path, lib.id, &sidecar_files, ctx.install)
+                .await?;
+        sidecars_imported = imported.imported;
+        for id in imported.rewrite {
+            ctx.writer.queue(id);
+        }
+        if imported.foreign {
+            let _ = events.send(EngineEvent::SidecarForeign { library: lib.id });
+        }
+    }
+
     Ok(ScanSummary {
         files_seen: files_seen as u64,
         fingerprinted: fingerprinted as u64,
@@ -302,6 +326,7 @@ async fn run_scan_with(
         models_added: stats.models_added,
         models_missing: stats.models_missing,
         models_returned: stats.models_returned,
+        sidecars_imported,
         duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
     })
 }
@@ -360,9 +385,15 @@ mod tests {
         }
 
         async fn scan(&self) -> ScanSummary {
-            scan_library(&self.db, &self.lib, &self.tx, CancellationToken::new())
-                .await
-                .unwrap()
+            scan_library(
+                &self.db,
+                &self.lib,
+                &self.tx,
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap()
         }
 
         async fn count(&self, sql: &'static str) -> i64 {
@@ -536,7 +567,7 @@ mod tests {
         let f = Fixture::new(TREE).await;
         let c = CancellationToken::new();
         c.cancel();
-        let r = scan_library(&f.db, &f.lib, &f.tx, c).await;
+        let r = scan_library(&f.db, &f.lib, &f.tx, c, None).await;
         assert!(matches!(r, Err(CoreError::Cancelled)));
         assert_eq!(f.count("SELECT count(*) FROM models").await, 0);
     }
@@ -549,7 +580,7 @@ mod tests {
         for e in fs::read_dir(&f.root).unwrap() {
             fs::remove_dir_all(e.unwrap().path()).unwrap();
         }
-        let r = scan_library(&f.db, &f.lib, &f.tx, CancellationToken::new()).await;
+        let r = scan_library(&f.db, &f.lib, &f.tx, CancellationToken::new(), None).await;
         assert!(matches!(r, Err(CoreError::LibraryOffline(_))), "{r:?}");
         assert_eq!(
             f.count("SELECT count(*) FROM models WHERE missing_since IS NOT NULL")
@@ -563,7 +594,15 @@ mod tests {
         f: &Fixture,
         after_walk: impl FnOnce(&[FileEntry]),
     ) -> Result<ScanSummary> {
-        run_scan_with(&f.db, &f.lib, &f.tx, CancellationToken::new(), after_walk).await
+        run_scan_with(
+            &f.db,
+            &f.lib,
+            &f.tx,
+            CancellationToken::new(),
+            None,
+            after_walk,
+        )
+        .await
     }
 
     #[tokio::test]
@@ -653,7 +692,7 @@ mod tests {
         for d in ["Dragon", "Orc"] {
             fs::set_permissions(f.root.join(d), fs::Permissions::from_mode(0o000)).unwrap();
         }
-        let r = scan_library(&f.db, &f.lib, &f.tx, CancellationToken::new()).await;
+        let r = scan_library(&f.db, &f.lib, &f.tx, CancellationToken::new(), None).await;
         for d in ["Dragon", "Orc"] {
             fs::set_permissions(f.root.join(d), fs::Permissions::from_mode(0o755)).unwrap();
         }
@@ -675,7 +714,7 @@ mod tests {
         }
         f.scan().await;
         fs::set_permissions(f.root.join("Orc"), fs::Permissions::from_mode(0o000)).unwrap();
-        let r = scan_library(&f.db, &f.lib, &f.tx, CancellationToken::new()).await;
+        let r = scan_library(&f.db, &f.lib, &f.tx, CancellationToken::new(), None).await;
         fs::set_permissions(f.root.join("Orc"), fs::Permissions::from_mode(0o755)).unwrap();
         let s = r.unwrap();
         assert_eq!((s.skipped, s.models_missing), (1, 0));

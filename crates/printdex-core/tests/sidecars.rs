@@ -1,0 +1,373 @@
+//! `.printdex.toml` sidecars end to end: writing, reading back, restoring.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use printdex_core::sidecar::SidecarFile;
+use printdex_core::{
+    AttemptResult, Engine, EngineEvent, Library, Material, ModelId, NewAttempt, PrintSettings,
+    Recipe,
+};
+use tokio_util::sync::CancellationToken;
+
+struct Fx {
+    dir: tempfile::TempDir,
+    engine: Engine,
+    lib: Library,
+}
+
+fn touch(root: &Path, rel: &str) {
+    let p = root.join(rel);
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    fs::write(p, rel.as_bytes()).unwrap();
+}
+
+impl Fx {
+    async fn new(files: &[&str]) -> Fx {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("lib");
+        fs::create_dir_all(&root).unwrap();
+        for f in files {
+            touch(&root, f);
+        }
+        let engine = Engine::open(&dir.path().join("data")).await.unwrap();
+        let lib = engine.add_library(&root, None).await.unwrap();
+        engine
+            .rescan(lib.id, CancellationToken::new())
+            .await
+            .unwrap();
+        Fx { dir, engine, lib }
+    }
+
+    fn root(&self) -> PathBuf {
+        self.lib.path.clone()
+    }
+
+    async fn reopen(self) -> Fx {
+        let Fx { dir, engine, lib } = self;
+        drop(engine);
+        let engine = Engine::open(&dir.path().join("data")).await.unwrap();
+        Fx { dir, engine, lib }
+    }
+
+    async fn model(&self, name: &str) -> ModelId {
+        self.engine
+            .search(name, 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|h| h.name == name)
+            .unwrap_or_else(|| panic!("no model {name}"))
+            .id
+    }
+
+    async fn rescan(&self) -> printdex_core::ScanSummary {
+        self.engine
+            .rescan(self.lib.id, CancellationToken::new())
+            .await
+            .unwrap()
+    }
+
+    fn read(&self, rel: &str) -> SidecarFile {
+        SidecarFile::parse(&fs::read_to_string(self.root().join(rel)).unwrap()).unwrap()
+    }
+}
+
+fn attempt(result: AttemptResult) -> NewAttempt {
+    NewAttempt {
+        printed_at: 1_763_000_000_000,
+        result,
+        settings: PrintSettings {
+            material: Some(Material::Petg),
+            layer_mm: Some(0.2),
+            ..PrintSettings::default()
+        },
+        duration_min: Some(90),
+        notes: "Corners lifted".into(),
+        parts: vec![],
+    }
+}
+
+#[tokio::test]
+async fn writes_folder_and_file_sidecars() {
+    let f = Fx::new(&["Bin/a.stl", "Bin/b.stl", "Misc/hook.stl", "Misc/Sub/x.stl"]).await;
+    let bin = f.model("Bin").await;
+    let hook = f.model("hook").await;
+    f.engine.add_tag(bin, "Gridfinity").await.unwrap();
+    f.engine.set_notes(hook, "Print flat.").await.unwrap();
+    // Nothing is written before the debounce or a flush.
+    assert!(!f.root().join("Bin/.printdex.toml").exists());
+    f.engine.flush_sidecars().await;
+    let s = f.read("Bin/.printdex.toml");
+    assert_eq!(s.tags, ["Gridfinity"]);
+    assert_eq!(s.model_id, bin.to_string());
+    assert_eq!(f.read("Misc/.hook.stl.printdex.toml").notes, "Print flat.");
+    // Models without data get no file.
+    assert!(!f.root().join("Misc/Sub/.printdex.toml").exists());
+}
+
+#[tokio::test]
+async fn writes_after_debounce() {
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    let bin = f.model("Bin").await;
+    f.engine.add_tag(bin, "x").await.unwrap();
+    tokio::time::sleep(printdex_core::sidecar::DEBOUNCE * 2).await;
+    assert_eq!(f.read("Bin/.printdex.toml").tags, ["x"]);
+}
+
+#[tokio::test]
+async fn sidecar_is_not_an_asset_and_not_reimported() {
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    let bin = f.model("Bin").await;
+    f.engine.add_tag(bin, "x").await.unwrap();
+    f.engine.flush_sidecars().await;
+    let summary = f.rescan().await;
+    assert_eq!(summary.sidecars_imported, 0, "own write is not imported");
+    let detail = f.engine.model(bin).await.unwrap().unwrap();
+    assert!(detail.assets.is_empty());
+}
+
+#[tokio::test]
+async fn disabled_library_writes_nothing() {
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    f.engine.set_sidecars(f.lib.id, false).await.unwrap();
+    let bin = f.model("Bin").await;
+    f.engine.add_tag(bin, "x").await.unwrap();
+    f.engine.flush_sidecars().await;
+    assert!(!f.root().join("Bin/.printdex.toml").exists());
+    // Turning it on writes models with data.
+    f.engine.set_sidecars(f.lib.id, true).await.unwrap();
+    f.engine.flush_sidecars().await;
+    assert_eq!(f.read("Bin/.printdex.toml").tags, ["x"]);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn readonly_folder_falls_back_to_db() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    let bin = f.model("Bin").await;
+    let dir = f.root().join("Bin");
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+    // Root ignores permissions; only check when the folder really is read-only.
+    let readonly = fs::write(dir.join("probe"), b"x").is_err();
+    f.engine.add_tag(bin, "kept").await.unwrap();
+    f.engine.flush_sidecars().await;
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+    if readonly {
+        assert!(!dir.join(".printdex.toml").exists());
+    }
+    let data = f.engine.model_data(bin).await.unwrap().unwrap();
+    assert_eq!(data.tags, ["kept"]);
+}
+
+#[tokio::test]
+async fn restore_from_sidecars_after_db_loss() {
+    let f = Fx::new(&["Bin/a.stl", "Misc/hook.stl", "Misc/Sub/x.stl"]).await;
+    let bin = f.model("Bin").await;
+    let hook = f.model("hook").await;
+    f.engine.add_tag(bin, "gridfinity").await.unwrap();
+    f.engine.set_notes(bin, "Use the 3MF.").await.unwrap();
+    f.engine
+        .set_source(bin, Some("https://www.printables.com/model/1"))
+        .await
+        .unwrap();
+    let gifts = f.engine.create_collection("Gifts").await.unwrap();
+    f.engine.add_to_collection(gifts.id, hook).await.unwrap();
+    let recipe = Recipe {
+        settings: PrintSettings {
+            material: Some(Material::Petg),
+            bed_temp: Some(85),
+            ..PrintSettings::default()
+        },
+        ..Recipe::default()
+    };
+    f.engine.set_recipe(bin, Some(&recipe)).await.unwrap();
+    f.engine
+        .log_attempt(bin, &attempt(AttemptResult::Failed))
+        .await
+        .unwrap();
+    f.engine.flush_sidecars().await;
+    let before = f.engine.model_data(bin).await.unwrap().unwrap();
+
+    // Lose the database, keep the library.
+    let root = f.root();
+    let fresh_dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(&fresh_dir.path().join("data")).await.unwrap();
+    let lib = engine.add_library(&root, None).await.unwrap();
+    let summary = engine
+        .rescan(lib.id, CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(summary.sidecars_imported, 2);
+
+    let find = |name: &'static str| {
+        let engine = engine.clone();
+        async move {
+            engine
+                .search(name, 10)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|h| h.name == name)
+                .unwrap()
+                .id
+        }
+    };
+    let bin2 = find("Bin").await;
+    let after = engine.model_data(bin2).await.unwrap().unwrap();
+    assert_eq!(after.tags, before.tags);
+    assert_eq!(after.notes, before.notes);
+    assert_eq!(after.source, before.source);
+    assert_eq!(after.recipe.as_ref().unwrap().settings, recipe.settings);
+    assert_eq!(after.attempts.len(), 1);
+    assert_eq!(after.attempts[0].id, before.attempts[0].id);
+    assert_eq!(after.attempts[0].notes, "Corners lifted");
+    let hook2 = find("hook").await;
+    let names: Vec<_> = engine
+        .model_data(hook2)
+        .await
+        .unwrap()
+        .unwrap()
+        .collections
+        .into_iter()
+        .map(|c| c.name)
+        .collect();
+    assert_eq!(names, ["Gifts"]);
+    // Restored data is searchable.
+    assert_eq!(engine.search("gridfinity", 10).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn edited_sidecar_wins_per_record() {
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    let bin = f.model("Bin").await;
+    f.engine.add_tag(bin, "old").await.unwrap();
+    let a = f
+        .engine
+        .log_attempt(bin, &attempt(AttemptResult::Failed))
+        .await
+        .unwrap();
+    f.engine.flush_sidecars().await;
+
+    // A hand edit: new tags, and the attempt's notes changed with a newer
+    // updated_at.
+    let mut s = f.read("Bin/.printdex.toml");
+    s.tags = vec!["new".into()];
+    s.updated_at += 1000;
+    s.attempts[0].notes = "Edited by hand".into();
+    s.attempts[0].updated_at += 1000;
+    // mtime must differ from the recorded one.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    fs::write(f.root().join("Bin/.printdex.toml"), s.to_toml().unwrap()).unwrap();
+
+    let summary = f.rescan().await;
+    assert_eq!(summary.sidecars_imported, 1);
+    let data = f.engine.model_data(bin).await.unwrap().unwrap();
+    assert_eq!(data.tags, ["new"]);
+    assert_eq!(data.attempts[0].id, a);
+    assert_eq!(data.attempts[0].notes, "Edited by hand");
+}
+
+#[tokio::test]
+async fn older_sidecar_does_not_override() {
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    let bin = f.model("Bin").await;
+    f.engine.add_tag(bin, "current").await.unwrap();
+    f.engine.flush_sidecars().await;
+    let mut s = f.read("Bin/.printdex.toml");
+    s.tags = vec!["stale".into()];
+    s.updated_at -= 1000;
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    fs::write(f.root().join("Bin/.printdex.toml"), s.to_toml().unwrap()).unwrap();
+    f.rescan().await;
+    assert_eq!(
+        f.engine.model_data(bin).await.unwrap().unwrap().tags,
+        ["current"]
+    );
+    // The stale file is rewritten with the newer data.
+    f.engine.flush_sidecars().await;
+    assert_eq!(f.read("Bin/.printdex.toml").tags, ["current"]);
+}
+
+#[tokio::test]
+async fn bad_sidecar_is_skipped() {
+    let f = Fx::new(&["Bin/a.stl", "Box/b.stl", "Big/c.stl"]).await;
+    fs::write(f.root().join("Bin/.printdex.toml"), "garbage = [").unwrap();
+    fs::write(
+        f.root().join("Box/.printdex.toml"),
+        "schema = 99\ntags = [\"x\"]",
+    )
+    .unwrap();
+    let big = format!("schema = 1\nnotes = \"{}\"\n", "x".repeat(2 * 1024 * 1024));
+    fs::write(f.root().join("Big/.printdex.toml"), big).unwrap();
+    let summary = f.rescan().await;
+    assert_eq!(summary.sidecars_imported, 0);
+    let bin = f.model("Bin").await;
+    assert!(
+        f.engine
+            .model_data(bin)
+            .await
+            .unwrap()
+            .unwrap()
+            .tags
+            .is_empty()
+    );
+    // The broken file is left alone.
+    assert_eq!(
+        fs::read_to_string(f.root().join("Bin/.printdex.toml")).unwrap(),
+        "garbage = ["
+    );
+}
+
+#[tokio::test]
+async fn foreign_install_warns() {
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    let other = printdex_core::ids::Uuid::now_v7().to_string();
+    fs::write(
+        f.root().join("Bin/.printdex.toml"),
+        format!("schema = 1\nwriter = \"{other}\"\nupdated_at = 5\ntags = [\"theirs\"]\n"),
+    )
+    .unwrap();
+    let mut rx = f.engine.subscribe();
+    f.rescan().await;
+    let mut warned = 0;
+    while let Ok(e) = rx.try_recv() {
+        if matches!(e, EngineEvent::SidecarForeign { library } if library == f.lib.id) {
+            warned += 1;
+        }
+    }
+    assert_eq!(warned, 1);
+    let bin = f.model("Bin").await;
+    assert_eq!(
+        f.engine.model_data(bin).await.unwrap().unwrap().tags,
+        ["theirs"]
+    );
+}
+
+#[tokio::test]
+async fn edits_emit_model_data_changed() {
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    let bin = f.model("Bin").await;
+    let mut rx = f.engine.subscribe();
+    f.engine.add_tag(bin, "x").await.unwrap();
+    f.engine.set_notes(bin, "n").await.unwrap();
+    let mut seen = Vec::new();
+    while let Ok(e) = rx.try_recv() {
+        match e {
+            EngineEvent::ModelDataChanged(id) => seen.push(format!("data {}", id == bin)),
+            EngineEvent::OrganizeChanged => seen.push("lists".into()),
+            _ => {}
+        }
+    }
+    assert_eq!(seen, ["data true", "lists", "data true"]);
+}
+
+#[tokio::test]
+async fn data_survives_reopen() {
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    let bin = f.model("Bin").await;
+    f.engine.add_tag(bin, "x").await.unwrap();
+    let f = f.reopen().await;
+    assert_eq!(f.engine.model_data(bin).await.unwrap().unwrap().tags, ["x"]);
+}
