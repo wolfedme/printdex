@@ -130,6 +130,8 @@ crates/printdex-app/src/view/grid.rs, list.rs       chips + last print on cards 
 
 ## Part B — Recipe, print log, badges (separate PR)
 
+> Implementation note: the engine side of Tasks 6 and 7 (recipes, attempts, photos, material-coloured previews) landed with part A, because the sidecar format (Task 4) already carries recipes and attempts. Part B is the app side (Tasks 8 and 9).
+
 ### Task 6: Recipe and attempts in the engine
 
 **Interfaces — Produces:** `struct Recipe { settings: PrintSettings, required: BTreeSet<String>, notes: Vec<RecipeNote { id, material: Option<Material>, text }>, parts: Vec<PartOverride { part: String /* file name */, settings: PrintSettings }>, from_attempt: Option<AttemptId>, updated_at: i64 }`; `struct Attempt { id, printed_at: i64, result: AttemptResult, settings: PrintSettings, duration_min: Option<u32>, notes: String, parts: Vec<String>, photos: Vec<PhotoRef { id, path }>, number: u32, updated_at }`; `Engine::set_recipe(ModelId, Option<Recipe>)`, `log_attempt(ModelId, NewAttempt) -> Attempt`, `update_attempt(Attempt)`, `delete_attempt(AttemptId)`, `recipe_from_attempt(AttemptId)`, `note_from_attempt(AttemptId, &str)`, `add_photo(AttemptId, &Path) -> PhotoRef`, `remove_photo(PhotoId)`, `printers() -> Vec<String>`.
