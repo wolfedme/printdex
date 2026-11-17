@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 use crate::filters::{self, Chip};
 use crate::grid::GridMetrics;
 use crate::i18n::{Arg, t, t_args};
+use crate::motion::Motion;
 use crate::nav::{self, Move};
 use crate::search::{SEARCH_LIMIT, SearchState, Ticket};
 use crate::settings::{Settings, ThemeMode, Translucency, ViewMode};
@@ -162,6 +163,7 @@ pub struct App {
     /// The library being renamed, with the edited name.
     pub renaming: Option<(LibraryId, String)>,
     pub settings: Settings,
+    pub motion: Motion,
     /// The OS's light/dark preference, used when the mode is System.
     pub system_mode: Mode,
     pub window: Size,
@@ -225,6 +227,8 @@ pub enum Message {
     ShowInFolder(PathBuf),
     Launched(Result<(), Arc<std::io::Error>>),
     SettingsChanged(Settings),
+    /// A window frame while something animates.
+    Frame(std::time::Instant),
     SettingsSaved(Result<(), Arc<std::io::Error>>),
 }
 
@@ -247,6 +251,11 @@ impl App {
             error: None,
             screen: Screen::Library,
             model: None,
+            motion: {
+                let mut m = Motion::new(std::time::Instant::now());
+                m.reduce = settings.reduce_motion;
+                m
+            },
             chips: Vec::new(),
             filter_menu: false,
             settings_section: SettingsSection::default(),
@@ -297,8 +306,31 @@ impl App {
         self.settings.color_theme
     }
 
-    pub fn palette(&self) -> Palette {
+    /// The palette the settings ask for, without any cross-fade.
+    pub fn target_palette(&self) -> Palette {
         Palette::new(self.color_theme(), self.mode(), self.surface())
+    }
+
+    /// The palette to draw now (mid cross-fade after a theme change).
+    pub fn palette(&self) -> Palette {
+        self.motion.palette(self.target_palette())
+    }
+
+    /// Runs `f`, cross-fading the colours if it changed the palette.
+    fn fade_palette(&mut self, f: impl FnOnce(&mut App)) {
+        let before = self.target_palette();
+        let shown = self.palette();
+        f(self);
+        if self.target_palette() != before {
+            self.motion
+                .palette_changed(shown, std::time::Instant::now());
+        }
+    }
+
+    fn set_selected(&mut self, id: Option<ModelId>) {
+        self.motion
+            .selection_changed(self.selected, id, std::time::Instant::now());
+        self.selected = id;
     }
 
     pub fn title(&self) -> String {
@@ -467,10 +499,13 @@ impl App {
                 Task::none()
             }
             Message::Select(id) => {
-                self.selected = Some(id);
+                self.motion.pressed(id, std::time::Instant::now());
+                self.set_selected(Some(id));
                 Task::none()
             }
             Message::Hover(id) => {
+                self.motion
+                    .hover_changed(self.hovered, id, std::time::Instant::now());
                 self.hovered = id;
                 Task::none()
             }
@@ -493,17 +528,22 @@ impl App {
             }
             Message::Escape => {
                 if self.search.query.text.is_empty() {
-                    self.selected = None;
+                    self.set_selected(None);
                     Task::none()
                 } else {
                     self.update(Message::SearchChanged(String::new()))
                 }
             }
             Message::SystemMode(mode) => {
-                self.system_mode = match mode {
+                let mode = match mode {
                     iced::theme::Mode::Dark => Mode::Dark,
                     iced::theme::Mode::Light | iced::theme::Mode::None => Mode::Light,
                 };
+                self.fade_palette(|app| app.system_mode = mode);
+                Task::none()
+            }
+            Message::Frame(now) => {
+                self.motion.now = now;
                 Task::none()
             }
             Message::DismissError => {
@@ -612,6 +652,9 @@ impl App {
             }
             Message::ToggleChip(chip) => {
                 filters::toggle(&mut self.chips, chip);
+                if self.chips.contains(&chip) {
+                    self.motion.chip_added(chip, std::time::Instant::now());
+                }
                 let filter = filters::to_filter(&self.chips);
                 match self.search.update(|q| q.filter = filter) {
                     Some(ticket) => self.run_search(ticket),
@@ -654,6 +697,8 @@ impl App {
                 if let Some(ModelView::Loaded { detail, part }) = &mut self.model
                     && index < detail.parts.len()
                 {
+                    self.motion
+                        .part_changed(*part, index, std::time::Instant::now());
                     *part = index;
                 }
                 Task::none()
@@ -685,7 +730,9 @@ impl App {
                 Task::none()
             }
             Message::SettingsChanged(settings) => {
-                let old = std::mem::replace(&mut self.settings, settings);
+                let mut old = self.settings;
+                self.fade_palette(|app| old = std::mem::replace(&mut app.settings, settings));
+                self.motion.reduce = settings.reduce_motion;
                 if old.view != settings.view {
                     // The other layout starts at the top.
                     self.viewport = None;
@@ -748,13 +795,16 @@ impl App {
             if n == 0 {
                 return;
             }
-            *part = match mv {
+            let next = match mv {
                 Move::Left => part.saturating_sub(1),
                 Move::Right => (*part + 1).min(n - 1),
                 Move::Home => 0,
                 Move::End => n - 1,
                 Move::Up | Move::Down => *part,
             };
+            self.motion
+                .part_changed(*part, next, std::time::Instant::now());
+            *part = next;
         }
     }
 
@@ -854,7 +904,7 @@ impl App {
         let Some(index) = nav::step(self.selected_index(), mv, columns, len) else {
             return Task::none();
         };
-        self.selected = Some(self.search.hits[index].id);
+        self.set_selected(Some(self.search.hits[index].id));
         if self.settings.view == ViewMode::List {
             let vp = self.grid_viewport();
             return match crate::list::scroll_target(index, vp.offset, vp.height) {
@@ -939,6 +989,9 @@ impl App {
             event::listen_with(on_event),
             iced::system::theme_changes().map(Message::SystemMode),
         ];
+        if self.motion.animating(std::time::Instant::now()) {
+            subs.push(window::frames().map(Message::Frame));
+        }
         if let Some(engine) = &self.engine {
             subs.push(Subscription::run_with(
                 EngineSub(engine.clone()),
@@ -1403,7 +1456,7 @@ mod tests {
         let task = a.update(Message::SettingsChanged(s));
         assert_eq!(a.color_theme(), ColorTheme::Glacier);
         assert_eq!(
-            a.palette(),
+            a.target_palette(),
             Palette::new(ColorTheme::Glacier, a.mode(), Surface::Solid)
         );
         assert!(task.units() > 0, "a save was started");
@@ -1458,6 +1511,23 @@ mod tests {
         let _ = a.update(Message::SelectScope(Some(LibraryId::new())));
         assert_eq!(a.chips, vec![Chip::MultiPart(true)]);
         assert_eq!(a.search.query.filter.multi_part, Some(true));
+    }
+
+    #[test]
+    fn theme_change_cross_fades() {
+        let mut a = app();
+        let before = a.palette();
+        let s = Settings {
+            color_theme: ColorTheme::RosePetg,
+            ..a.settings
+        };
+        let _ = a.update(Message::SettingsChanged(s));
+        // Right after the change the old colours still show...
+        assert_eq!(a.palette().t.accent, before.t.accent);
+        assert!(a.motion.animating(a.motion.now));
+        // ...and the new ones once the fade is over.
+        let _ = a.update(Message::Frame(a.motion.now + crate::motion::THEME));
+        assert_eq!(a.palette(), a.target_palette());
     }
 
     #[test]

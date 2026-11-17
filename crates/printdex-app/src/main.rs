@@ -7,6 +7,7 @@ mod grid;
 mod i18n;
 mod icons;
 mod list;
+mod motion;
 mod nav;
 mod search;
 mod settings;

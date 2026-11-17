@@ -343,6 +343,48 @@ impl Palette {
     }
 
     /// The iced theme, so built-in widget defaults also fit the palette.
+    /// `a` faded `amount` of the way into `b` (theme cross-fades).
+    pub fn blend(a: &Palette, b: &Palette, amount: f32) -> Palette {
+        let c = |x: Color, y: Color| lerp(x, y, amount);
+        Palette {
+            mode: b.mode,
+            surface: b.surface,
+            t: ThemeTokens {
+                ground: c(a.t.ground, b.t.ground),
+                surface: c(a.t.surface, b.t.surface),
+                tray: c(a.t.tray, b.t.tray),
+                rail: c(a.t.rail, b.t.rail),
+                rail_hi: c(a.t.rail_hi, b.t.rail_hi),
+                accent: c(a.t.accent, b.t.accent),
+                accent_soft: c(a.t.accent_soft, b.t.accent_soft),
+                accent_ink: c(a.t.accent_ink, b.t.accent_ink),
+                primary: c(a.t.primary, b.t.primary),
+                primary_hi: c(a.t.primary_hi, b.t.primary_hi),
+                on_primary: c(a.t.on_primary, b.t.on_primary),
+            },
+            n: Neutral {
+                edge: c(a.n.edge, b.n.edge),
+                rail_rule: c(a.n.rail_rule, b.n.rail_rule),
+                ink: c(a.n.ink, b.n.ink),
+                ink_2: c(a.n.ink_2, b.n.ink_2),
+                ink_3: c(a.n.ink_3, b.n.ink_3),
+                rule: c(a.n.rule, b.n.rule),
+                rule_soft: c(a.n.rule_soft, b.n.rule_soft),
+                on_rail: c(a.n.on_rail, b.n.on_rail),
+                on_rail_2: c(a.n.on_rail_2, b.n.on_rail_2),
+            },
+            status: Status {
+                ok: c(a.status.ok, b.status.ok),
+                ok_soft: c(a.status.ok_soft, b.status.ok_soft),
+                fail: c(a.status.fail, b.status.fail),
+                fail_soft: c(a.status.fail_soft, b.status.fail_soft),
+                partial: c(a.status.partial, b.status.partial),
+                partial_soft: c(a.status.partial_soft, b.status.partial_soft),
+                offline: c(a.status.offline, b.status.offline),
+            },
+        }
+    }
+
     pub fn iced_theme(&self) -> iced::Theme {
         iced::Theme::custom(
             "Printdex",
@@ -397,6 +439,32 @@ impl Palette {
         }
     }
 
+    /// Model pane part way into its selected look (`amount` 0..=1), for
+    /// the selection cross-fade.
+    pub fn pane_fade(&self, amount: f32, hovered: bool) -> container::Style {
+        if amount <= 0.0 {
+            return self.pane(false, hovered);
+        }
+        if amount >= 1.0 {
+            return self.pane(true, hovered);
+        }
+        let off = self.pane(false, hovered);
+        let on = self.pane(true, hovered);
+        let bg = |s: &container::Style| match s.background {
+            Some(Background::Color(c)) => c,
+            _ => Color::TRANSPARENT,
+        };
+        container::Style {
+            background: Some(lerp(bg(&off), bg(&on), amount).into()),
+            border: Border {
+                color: lerp(off.border.color, on.border.color, amount),
+                width: off.border.width + (on.border.width - off.border.width) * amount,
+                radius: RADIUS_PANE.into(),
+            },
+            ..on
+        }
+    }
+
     /// Model pane; `selected` adds the Signal Wash and the 2px accent ring.
     pub fn pane(&self, selected: bool, hovered: bool) -> container::Style {
         let (bg, border) = if selected {
@@ -431,17 +499,20 @@ impl Palette {
         }
     }
 
-    /// A list-mode row; `selected` gets the Signal Wash.
-    pub fn list_row(&self, selected: bool, hovered: bool) -> container::Style {
-        let bg = if selected {
-            Some(self.t.accent_soft.into())
-        } else if hovered {
-            Some(self.n.rule_soft.into())
+    /// A list row part way into its selected look (`amount` 0..=1).
+    pub fn list_row_fade(&self, amount: f32, hovered: bool) -> container::Style {
+        let base = if hovered {
+            self.n.rule_soft
         } else {
-            None
+            Color::TRANSPARENT
+        };
+        let bg = if amount <= 0.0 {
+            base
+        } else {
+            lerp(base, self.t.accent_soft, amount)
         };
         container::Style {
-            background: bg,
+            background: (bg.a > 0.0).then(|| bg.into()),
             text_color: Some(self.n.ink),
             ..container::Style::default()
         }
@@ -809,6 +880,17 @@ impl Palette {
                 icon: self.n.ink_2,
             },
         }
+    }
+}
+
+/// Linear blend of two colours, alpha included.
+pub fn lerp(a: Color, b: Color, amount: f32) -> Color {
+    let t = amount.clamp(0.0, 1.0);
+    Color {
+        r: a.r + (b.r - a.r) * t,
+        g: a.g + (b.g - a.g) * t,
+        b: a.b + (b.b - a.b) * t,
+        a: a.a + (b.a - a.a) * t,
     }
 }
 

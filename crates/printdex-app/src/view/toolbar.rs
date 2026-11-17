@@ -82,7 +82,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
 
     let mut left = row![search].spacing(theme::S4).align_y(Alignment::Center);
     for chip in &app.chips {
-        left = left.push(active_chip(p, *chip));
+        left = left.push(active_chip(p, *chip, app.motion.chip_scale(*chip)));
     }
     let menu_open = app.filter_menu;
     left = left.push(
@@ -173,24 +173,31 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     .into()
 }
 
-fn active_chip<'a>(p: Palette, chip: Chip) -> Element<'a, Message> {
+/// An active chip; `scale` is its scale-in (sizes scale, as iced 0.14
+/// cannot transform a widget smaller).
+fn active_chip<'a>(p: Palette, chip: Chip, scale: f32) -> Element<'a, Message> {
     let (key, value) = chip_text(chip);
+    let size = theme::SIZE_CAPTION * scale;
     container(
         row![
-            text(key).size(theme::SIZE_CAPTION).color(p.n.ink_3),
+            text(key).size(size).color(p.n.ink_3),
             text(value)
-                .size(theme::SIZE_CAPTION)
+                .size(size)
                 .font(theme::FONT_STRONG)
                 .color(p.n.ink),
-            button(icons::icon(Icon::Close, theme::ICON_CHIP, p.n.ink_3))
-                .padding(2)
-                .style(move |_, status| p.button_ghost(status))
-                .on_press(Message::ToggleChip(chip)),
+            button(icons::icon(
+                Icon::Close,
+                theme::ICON_CHIP * scale,
+                p.n.ink_3
+            ))
+            .padding(2)
+            .style(move |_, status| p.button_ghost(status))
+            .on_press(Message::ToggleChip(chip)),
         ]
-        .spacing(theme::S3)
+        .spacing(theme::S3 * scale)
         .align_y(Alignment::Center),
     )
-    .padding([3.0, theme::S2 + theme::S3])
+    .padding([3.0 * scale, (theme::S2 + theme::S3) * scale])
     .style(move |_| p.chip())
     .into()
 }

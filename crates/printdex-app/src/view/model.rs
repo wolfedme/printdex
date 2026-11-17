@@ -129,7 +129,7 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
     let n = d.parts.len() as u64;
     let mut tiles = row![].spacing(theme::S4);
     for (i, pt) in d.parts.iter().enumerate() {
-        tiles = tiles.push(tile(p, pt, i == part, i));
+        tiles = tiles.push(tile(p, pt, app.motion.part(i, part), i));
     }
     let mut main = column![
         preview,
@@ -233,7 +233,7 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
     .into()
 }
 
-fn tile<'a>(p: Palette, pt: &PartInfo, selected: bool, index: usize) -> Element<'a, Message> {
+fn tile<'a>(p: Palette, pt: &PartInfo, selected: f32, index: usize) -> Element<'a, Message> {
     let body = column![
         container(icons::placeholder())
             .padding(theme::S4)
@@ -258,7 +258,7 @@ fn tile<'a>(p: Palette, pt: &PartInfo, selected: bool, index: usize) -> Element<
             .padding(theme::S3)
             .width(TILE_WIDTH)
             .clip(true)
-            .style(move |_| p.pane(selected, false)),
+            .style(move |_| p.pane_fade(selected, false)),
     )
     .padding(0)
     .style(move |_, _| p.bare())

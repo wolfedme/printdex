@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 120" width="160" height="120">
+  <!-- The placeholder model without its shadow, so it can lift on hover. -->
+  <polygon points="80,22 120,40 80,58 40,40" fill="#c0c4cb" stroke="#3c434d" stroke-width="1" stroke-linejoin="round"/>
+  <polygon points="40,40 80,58 80,96 40,78" fill="#81868f" stroke="#3c434d" stroke-width="1" stroke-linejoin="round"/>
+  <polygon points="80,58 120,40 120,78 80,96" fill="#4f5661" stroke="#3c434d" stroke-width="1" stroke-linejoin="round"/>
+</svg>

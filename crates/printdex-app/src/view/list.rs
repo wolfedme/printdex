@@ -71,7 +71,7 @@ fn heading<'a>(p: Palette, label: String) -> iced::widget::Text<'a> {
 }
 
 fn list_row<'a>(app: &App, p: Palette, hit: &ModelHit) -> Element<'a, Message> {
-    let selected = app.selected == Some(hit.id);
+    let selected = app.motion.selection(hit.id, app.selected);
     let hovered = app.hovered == Some(hit.id);
     let id = hit.id;
     let thumb = container(
@@ -112,7 +112,7 @@ fn list_row<'a>(app: &App, p: Palette, hit: &ModelHit) -> Element<'a, Message> {
         .padding([0.0, theme::S5])
         .align_y(Alignment::Center)
         .clip(true)
-        .style(move |_| p.list_row(selected, hovered));
+        .style(move |_| p.list_row_fade(selected, hovered));
 
     mouse_area(
         button(column![cell, super::widgets::hairline(p)])
