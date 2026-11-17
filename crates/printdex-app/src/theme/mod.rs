@@ -9,7 +9,8 @@
 //! ([`ThemeTokens`]). Neutral ink and rules depend only on light/dark, and
 //! status colours never change with the colour theme.
 
-use iced::widget::{button, container, scrollable, text_input};
+use iced::overlay::menu;
+use iced::widget::{button, container, pick_list, scrollable, text_input};
 use iced::{Background, Border, Color, Font, Shadow, font};
 
 mod presets;
@@ -564,6 +565,50 @@ impl Palette {
             },
             shadow: Shadow::default(),
             snap: true,
+        }
+    }
+
+    /// The sort pick list: a secondary control.
+    pub fn pick(&self, status: pick_list::Status) -> pick_list::Style {
+        let hovered = matches!(status, pick_list::Status::Hovered);
+        pick_list::Style {
+            text_color: self.n.ink,
+            placeholder_color: self.n.ink_3,
+            handle_color: self.n.ink_3,
+            background: Background::Color(if hovered {
+                mix(self.t.surface, self.n.ink, 0.06)
+            } else {
+                self.t.surface
+            }),
+            border: Border {
+                color: if matches!(status, pick_list::Status::Opened { .. }) {
+                    self.t.accent
+                } else {
+                    self.n.rule
+                },
+                width: 1.0,
+                radius: RADIUS_CONTROL.into(),
+            },
+        }
+    }
+
+    /// The sort pick list's open menu.
+    pub fn pick_menu(&self) -> menu::Style {
+        menu::Style {
+            // Menus float over content: always opaque.
+            background: Background::Color(Color {
+                a: 1.0,
+                ..self.t.surface
+            }),
+            border: Border {
+                color: self.n.edge,
+                width: 1.0,
+                radius: RADIUS_CONTROL.into(),
+            },
+            text_color: self.n.ink,
+            selected_text_color: self.t.accent_ink,
+            selected_background: Background::Color(self.t.accent_soft),
+            shadow: Shadow::default(),
         }
     }
 

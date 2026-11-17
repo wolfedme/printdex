@@ -58,12 +58,14 @@ fn library(app: &App, p: Palette) -> Element<'_, Message> {
     if let Some(error) = &app.error {
         content = content.push(container(error_line(p, error)).padding([theme::S5, theme::S7]));
     }
-    content = content.push(if app.libraries.is_empty() && app.search.loaded {
+    let no_library = app.libraries.is_empty() && app.search.loaded;
+    if !no_library {
+        content = content.push(toolbar::header(app, p));
+    }
+    let filtered = !app.search.query.text.trim().is_empty() || !app.chips.is_empty();
+    content = content.push(if no_library {
         empty::no_library(p)
-    } else if app.search.loaded
-        && app.search.hits.is_empty()
-        && !app.search.query.text.trim().is_empty()
-    {
+    } else if app.search.loaded && app.search.hits.is_empty() && filtered {
         empty::no_results(p, &app.search.query.text)
     } else if app.settings.view == ViewMode::List {
         list::view(app, p)
@@ -71,9 +73,12 @@ fn library(app: &App, p: Palette) -> Element<'_, Message> {
         grid::view(app, p)
     });
 
+    let mut top = column![toolbar::view(app, p), hairline(p)];
+    if app.filter_menu {
+        top = top.push(toolbar::filter_bar(app, p)).push(hairline(p));
+    }
     column![
-        toolbar::view(app, p),
-        hairline(p),
+        top,
         container(content)
             .height(Length::Fill)
             .style(move |_| p.ground()),

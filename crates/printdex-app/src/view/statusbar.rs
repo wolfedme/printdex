@@ -45,6 +45,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
             Space::new().width(Length::Fill),
             hint(p, "/", t("status-key-search")),
             hint(p, "↑↓←→", t("status-key-move")),
+            hint(p, "Enter", t("status-key-open-model")),
             hint(p, "Esc", t("status-key-clear")),
         ]
         .spacing(theme::S4)

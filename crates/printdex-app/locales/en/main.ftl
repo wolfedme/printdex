@@ -78,6 +78,8 @@ empty-library-title = Add a folder with your models
 empty-library-body = Printdex indexes your files where they are. Nothing is moved, renamed or uploaded.
 empty-results-title = No models match “{ $query }”
 empty-results-body = Try fewer or shorter words.
+empty-filters-title = No models match these filters
+empty-filters-body = Remove a filter to see more.
 
 error-library-overlaps = That folder overlaps the library at { $path }.
 error-library-invalid = That folder can’t be added. Pick a folder that exists and has a readable name.
@@ -91,3 +93,17 @@ list-name = Name
 list-folder = Folder
 list-parts = Parts
 list-added = Added
+
+filter-add = Filter
+filter-format = Format
+filter-parts = Parts
+filter-single = Single file
+filter-multi = Multi-part
+sort-label = Sort
+sort-name = Name
+sort-recent = Recently added
+header-models = { $count ->
+    [one] 1 model
+   *[other] { $n } models
+}
+header-match = { $shown } of { $total } models match

@@ -42,16 +42,21 @@ pub fn no_library<'a>(p: Palette) -> Element<'a, Message> {
 }
 
 pub fn no_results<'a>(p: Palette, query: &str) -> Element<'a, Message> {
+    let (title, body) = if query.trim().is_empty() {
+        (t("empty-filters-title"), t("empty-filters-body"))
+    } else {
+        (
+            t_args("empty-results-title", &[("query", Arg::str(query.trim()))]),
+            t("empty-results-body"),
+        )
+    };
     centered(column![
         icons::icon(Icon::Search, theme::S9, p.n.ink_3),
-        text(t_args(
-            "empty-results-title",
-            &[("query", Arg::str(query.trim()))]
-        ))
-        .size(theme::SIZE_SECTION)
-        .font(theme::FONT_BOLD)
-        .color(p.n.ink),
-        text(t("empty-results-body"))
+        text(title)
+            .size(theme::SIZE_SECTION)
+            .font(theme::FONT_BOLD)
+            .color(p.n.ink),
+        text(body)
             .size(theme::SIZE_BODY)
             .color(p.n.ink_2)
             .width(BODY_WIDTH)

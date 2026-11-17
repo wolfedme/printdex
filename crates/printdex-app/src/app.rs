@@ -16,6 +16,7 @@ use printdex_core::{
 };
 use tokio_util::sync::CancellationToken;
 
+use crate::filters::{self, Chip};
 use crate::grid::GridMetrics;
 use crate::i18n::{Arg, t, t_args};
 use crate::nav::{self, Move};
@@ -136,6 +137,9 @@ pub struct App {
     pub error: Option<String>,
     pub screen: Screen,
     pub model: Option<ModelView>,
+    /// Active filter chips, in the order they were added.
+    pub chips: Vec<Chip>,
+    pub filter_menu: bool,
     pub settings: Settings,
     /// The OS's light/dark preference, used when the mode is System.
     pub system_mode: Mode,
@@ -175,6 +179,8 @@ pub enum Message {
     OpenModel(ModelId),
     OpenSettings,
     Back,
+    ToggleFilterMenu,
+    ToggleChip(Chip),
     ModelLoaded(ModelId, Result<Option<ModelDetail>, Arc<CoreError>>),
     SelectPart(usize),
     /// Open the selected part with the OS default app (O).
@@ -207,6 +213,8 @@ impl App {
             error: None,
             screen: Screen::Library,
             model: None,
+            chips: Vec::new(),
+            filter_menu: false,
             settings,
             system_mode: Mode::default(),
             window: INITIAL_WINDOW,
@@ -425,6 +433,10 @@ impl App {
                 operation::select_all(search_id()),
             ]),
             Message::Escape if self.screen != Screen::Library => self.update(Message::Back),
+            Message::Escape if self.filter_menu => {
+                self.filter_menu = false;
+                Task::none()
+            }
             Message::Escape => {
                 if self.search.query.text.is_empty() {
                     self.selected = None;
@@ -443,6 +455,18 @@ impl App {
             Message::DismissError => {
                 self.error = None;
                 Task::none()
+            }
+            Message::ToggleFilterMenu => {
+                self.filter_menu = !self.filter_menu;
+                Task::none()
+            }
+            Message::ToggleChip(chip) => {
+                filters::toggle(&mut self.chips, chip);
+                let filter = filters::to_filter(&self.chips);
+                match self.search.update(|q| q.filter = filter) {
+                    Some(ticket) => self.run_search(ticket),
+                    None => Task::none(),
+                }
             }
             Message::OpenSelected => match (self.screen, self.selected) {
                 (Screen::Library, Some(id)) => self.update(Message::OpenModel(id)),
@@ -1082,6 +1106,34 @@ mod tests {
                 .collect(),
             assets: vec![],
         }
+    }
+
+    #[test]
+    fn chips_combine_with_text() {
+        let mut a = app();
+        let _ = a.update(Message::SearchChanged("bin".into()));
+        let _ = a.update(Message::ToggleChip(Chip::Format(
+            printdex_core::PrintableFormat::ThreeMf,
+        )));
+        assert_eq!(a.search.query.text, "bin");
+        assert_eq!(
+            a.search.query.filter.formats,
+            vec![printdex_core::PrintableFormat::ThreeMf]
+        );
+        assert!(a.search.loading);
+        let _ = a.update(Message::ToggleChip(Chip::Format(
+            printdex_core::PrintableFormat::ThreeMf,
+        )));
+        assert!(a.search.query.filter.is_empty());
+    }
+
+    #[test]
+    fn chips_survive_scope_change() {
+        let mut a = app();
+        let _ = a.update(Message::ToggleChip(Chip::MultiPart(true)));
+        let _ = a.update(Message::SelectScope(Some(LibraryId::new())));
+        assert_eq!(a.chips, vec![Chip::MultiPart(true)]);
+        assert_eq!(a.search.query.filter.multi_part, Some(true));
     }
 
     #[test]
