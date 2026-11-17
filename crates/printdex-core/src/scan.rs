@@ -319,6 +319,10 @@ async fn run_scan_with(
         }
     }
 
+    // New models get catalogue numbers after sidecars had a chance to
+    // bring back their old ones.
+    db.assign_numbers(lib.id).await?;
+
     Ok(ScanSummary {
         files_seen: files_seen as u64,
         fingerprinted: fingerprinted as u64,

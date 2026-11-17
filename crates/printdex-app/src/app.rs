@@ -1399,6 +1399,7 @@ mod tests {
             name: name.into(),
             rel_path: name.into(),
             kind: ModelKind::Folder,
+            number: None,
             part_count: 1,
             missing: false,
             created_at: 0,
@@ -1793,6 +1794,7 @@ mod tests {
             name: "Bin".into(),
             rel_path: "bins/bin".into(),
             kind: ModelKind::Folder,
+            number: Some(1),
             created_at: 0,
             parts: parts
                 .iter()

@@ -2,7 +2,7 @@
 
 use iced::widget::{Space, button, column, container, mouse_area, row, scrollable, stack, text};
 use iced::{Alignment, Element, Length};
-use printdex_core::{ModelHit, ThumbTarget};
+use printdex_core::{ModelHit, ThumbTarget, format_number};
 
 use crate::app::{App, GRID_PAD_X, GRID_PAD_Y, GridViewport, Message, grid_id};
 use crate::format::{group, parent_path};
@@ -107,10 +107,20 @@ fn pane<'a>(app: &App, p: Palette, m: &GridMetrics, hit: &ModelHit) -> Element<'
     let body = column![
         well,
         container(
-            text(hit.name.clone())
-                .size(theme::SIZE_BODY)
-                .font(theme::FONT_STRONG)
-                .line_height(1.3)
+            row![
+                text(hit.name.clone())
+                    .size(theme::SIZE_BODY)
+                    .font(theme::FONT_STRONG)
+                    .line_height(1.3)
+                    .width(Length::Fill),
+                text(hit.number.map(format_number).unwrap_or_default())
+                    .size(theme::SIZE_DATA)
+                    .font(theme::FONT_DATA)
+                    .color(p.n.ink_3)
+                    .line_height(1.6)
+                    .wrapping(text::Wrapping::None),
+            ]
+            .spacing(theme::S3)
         )
         .height(34)
         .clip(true),

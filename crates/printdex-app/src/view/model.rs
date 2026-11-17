@@ -4,6 +4,7 @@ use iced::widget::{Space, button, column, container, image, row, scrollable, sta
 use iced::{Alignment, ContentFit, Element, Length};
 use printdex_core::{
     Detail, ModelDetail, ModelKind, PartInfo, PrintableFormat, ThumbFailure, ThumbTarget,
+    format_number,
 };
 
 use super::organize;
@@ -175,6 +176,10 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
                     .font(theme::FONT_BOLD)
                     .color(p.n.ink)
                     .wrapping(text::Wrapping::None),
+                text(d.number.map(format_number).unwrap_or_default())
+                    .size(theme::SIZE_BODY)
+                    .font(theme::FONT_DATA)
+                    .color(p.n.ink_3),
                 Space::new().width(Length::Fill),
                 icon_button(
                     p,

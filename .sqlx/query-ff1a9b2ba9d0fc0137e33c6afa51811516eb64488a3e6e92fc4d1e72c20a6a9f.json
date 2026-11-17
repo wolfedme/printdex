@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT next_number as \"n!: i64\" FROM libraries WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "n!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "libraries",
+            "name": "next_number"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ff1a9b2ba9d0fc0137e33c6afa51811516eb64488a3e6e92fc4d1e72c20a6a9f"
+}

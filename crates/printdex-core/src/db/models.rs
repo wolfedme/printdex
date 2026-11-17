@@ -36,6 +36,8 @@ pub struct ModelDetail {
     pub name: String,
     pub rel_path: String,
     pub kind: ModelKind,
+    /// Catalogue number in its library (№ 0412).
+    pub number: Option<u32>,
     /// When Printdex first saw the model, unix milliseconds.
     pub created_at: i64,
     pub parts: Vec<PartInfo>,
@@ -67,7 +69,7 @@ impl Db {
     pub async fn model_detail(&self, id: ModelId) -> Result<Option<ModelDetail>> {
         let Some(m) = sqlx::query!(
             r#"SELECT id as "id!: ModelId", library_id as "library_id!: LibraryId",
-                      name, rel_path, kind, created_at
+                      name, rel_path, kind, created_at, number
                FROM models WHERE id = ? AND missing_since IS NULL"#,
             id
         )
@@ -121,6 +123,7 @@ impl Db {
             name: m.name,
             rel_path: m.rel_path,
             kind: ModelKind::from_db(&m.kind).unwrap_or(ModelKind::Folder),
+            number: m.number.and_then(|n| u32::try_from(n).ok()),
             created_at: m.created_at,
             parts,
             assets,
