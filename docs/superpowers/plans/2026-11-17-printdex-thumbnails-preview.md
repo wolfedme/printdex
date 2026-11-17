@@ -1,12 +1,12 @@
 # Printdex Thumbnails & 3D Preview (Milestone 2) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Every model and part shows a real preview in its material colour, previews appear progressively without ever blocking scrolling, and the model view gets an interactive 3D preview with orbit, pan, zoom and dimensions. A 300 MB STL never freezes the UI.
 
 **Architecture:** Two new crates, as the architecture doc §5.1 laid out. `printdex-mesh` parses STL, 3MF and OBJ into a triangle soup with bounds and pulls embedded 3MF thumbnails; it is synchronous, pure and has no async or GPU code. `printdex-render` holds the shared camera, lighting and material ramp, a CPU rasterizer for thumbnails, and (part B) the wgpu pipeline for the interactive viewer. `printdex-core` gains a thumbnail service: a priority queue fed by what is on screen, a cache keyed by part fingerprint, and a `ThumbnailReady` event. The app asks for the visible models after every scroll, resize or search, and swaps the placeholder for the cached PNG when the event arrives.
 
-**Tech Stack:** zip + quick-xml (3MF), tobj (OBJ), image (PNG encode/decode, folder images), glam (camera maths), wgpu through iced's shader widget (viewer, part B). STL is a hand-written parser over `BufReader`. No `unsafe`, no memory mapping.
+**Tech Stack:** zip + quick-xml (3MF), a hand-written OBJ reader (only `v`/`f` lines; tobj was the plan), image (PNG encode/decode, folder images), glam (camera maths), wgpu through iced's shader widget (viewer, part B). STL is a hand-written parser over `BufReader`. No `unsafe`, no memory mapping.
 
 **Specs:** v1 design §6 (part fields: dimensions, triangle count, thumbnail ref), §7 (thumbnails, 3D preview, performance targets), §9 (model view); architecture design §5.1–5.2, §6, §12; DESIGN.md "Secondary (material colours)", "Model pane", "Motion" (print-in). Epic: issue #18.
 
@@ -64,44 +64,44 @@ crates/printdex-app/src/view/*.rs        grid, list, model view use real preview
 
 ### Task 1: `printdex-mesh` crate and STL
 
-- [ ] New crate, workspace member, `[lints] workspace = true`. Types: `Mesh { positions: Vec<[f32; 3]> }` (three per triangle), `Mesh::bounds() -> Option<Bounds>`, `Mesh::triangles()`, `Bounds { min, max, size() }`, `MeshError { Io, Malformed(String), TooLarge { triangles } }`, `Limits { max_triangles }`.
-- [ ] Failing tests: `binary_stl_reads_triangles`, `ascii_stl_reads_triangles`, `binary_stl_starting_with_solid_is_binary` (header begins "solid" but size matches the binary formula), `rejects_truncated_binary`, `rejects_count_larger_than_file`, `drops_non_finite_vertices`, `bounds_of_cube`, `stl_never_panics` (1k random and truncated inputs).
-- [ ] Implement over `BufReader<File>` with an 80-byte header + count check, 50-byte records; ASCII by line tokenizer. Skip stored normals.
-- [ ] Commit `feat(mesh): STL parser`.
+- [x] New crate, workspace member, `[lints] workspace = true`. Types: `Mesh { positions: Vec<[f32; 3]> }` (three per triangle), `Mesh::bounds() -> Option<Bounds>`, `Mesh::triangles()`, `Bounds { min, max, size() }`, `MeshError { Io, Malformed(String), TooLarge { triangles } }`, `Limits { max_triangles }`.
+- [x] Failing tests: `binary_stl_reads_triangles`, `ascii_stl_reads_triangles`, `binary_stl_starting_with_solid_is_binary` (header begins "solid" but size matches the binary formula), `rejects_truncated_binary`, `rejects_count_larger_than_file`, `drops_non_finite_vertices`, `bounds_of_cube`, `stl_never_panics` (1k random and truncated inputs).
+- [x] Implement over `BufReader<File>` with an 80-byte header + count check, 50-byte records; ASCII by line tokenizer. Skip stored normals.
+- [x] Commit `feat(mesh): STL parser`.
 
 ### Task 2: 3MF
 
-- [ ] Failing tests (fixtures built in the test with `zip::ZipWriter`): `reads_mesh_object`, `applies_build_item_transform`, `resolves_components`, `finds_thumbnail_via_rels`, `finds_bambu_plate_thumbnail` (`Metadata/plate_1.png` when no relationship), `rejects_missing_model_part`, `caps_decompressed_size`, `rejects_bad_indices`, `threemf_never_panics`.
-- [ ] Implement: find the model part through `_rels/.rels` (fallback `3D/3dmodel.model`), stream the XML with quick-xml, objects by id, components with transforms (depth-limited to 16 to stop cycles), build items with transforms. `thumbnail(path) -> Option<Vec<u8>>` returns PNG/JPEG bytes. Entry reads go through `Read::take(cap)`.
-- [ ] Commit `feat(mesh): 3MF parser and embedded thumbnails`.
+- [x] Failing tests (fixtures built in the test with `zip::ZipWriter`): `reads_mesh_object`, `applies_build_item_transform`, `resolves_components`, `finds_thumbnail_via_rels`, `finds_bambu_plate_thumbnail` (`Metadata/plate_1.png` when no relationship), `rejects_missing_model_part`, `caps_decompressed_size`, `rejects_bad_indices`, `threemf_never_panics`.
+- [x] Implement: find the model part through `_rels/.rels` (fallback `3D/3dmodel.model`), stream the XML with quick-xml, objects by id, components with transforms (depth-limited to 16 to stop cycles), build items with transforms. `thumbnail(path) -> Option<Vec<u8>>` returns PNG/JPEG bytes. Entry reads go through `Read::take(cap)`.
+- [x] Commit `feat(mesh): 3MF parser and embedded thumbnails`.
 
 ### Task 3: OBJ
 
-- [ ] Failing tests: `reads_triangles`, `triangulates_quads`, `rejects_out_of_range_index` (tobj errors or our check), `obj_never_panics`.
-- [ ] Implement with `tobj::load_obj_buf` over `BufReader`, materials ignored (no `.mtl` reads), `triangulate: true`, `single_index: false`.
-- [ ] `load(path, format, limits)` dispatcher. Commit `feat(mesh): OBJ parser`.
+- [x] Failing tests: `reads_triangles`, `triangulates_quads`, `rejects_out_of_range_index` (tobj errors or our check), `obj_never_panics`.
+- [x] Implement as a small streaming reader over `BufReader` (`v` and `f` lines, fan triangulation, negative indices), materials ignored (no `.mtl` reads). Chosen over tobj: less code than the glue, and the same limits as STL.
+- [x] `load(path, format, limits)` dispatcher. Commit `feat(mesh): OBJ parser`.
 
 ### Task 4: `printdex-render` CPU rasterizer
 
-- [ ] Failing tests: `camera_frames_bounds` (all projected corners inside the image with margin), `empty_mesh_renders_transparent`, `cube_uses_three_ramp_tones` (top face clay-1, two visible sides clay-2/clay-3), `depth_test_keeps_nearest`, `edge_line_drawn_on_silhouette`, `render_is_deterministic`, `ramps_match_design_md` (hex values from the table).
-- [ ] `Camera::framing(bounds, aspect)`: three-quarter view from the front-right, 30° elevation, Z up (STL convention), orthographic so dimensions read true; `Material::{Petg, Pla, Tpu, Unknown}` with `ramp() -> [top, side, shade, edge]`; `shade(normal) -> rgb` blending shade → side → top by the light term; `render(&Mesh, Material, w, h) -> RgbaImage` with a z-buffer, 2×2 supersampling, then an edge pass on depth discontinuities in the edge colour.
-- [ ] Commit `feat(render): CPU thumbnail renderer`.
+- [x] Failing tests: `camera_frames_bounds` (all projected corners inside the image with margin), `empty_mesh_renders_transparent`, `cube_uses_three_ramp_tones` (top face clay-1, two visible sides clay-2/clay-3), `depth_test_keeps_nearest`, `edge_line_drawn_on_silhouette`, `render_is_deterministic`, `ramps_match_design_md` (hex values from the table).
+- [x] `Camera::framing(bounds, aspect)`: three-quarter view from the front-right, 30° elevation, Z up (STL convention), orthographic so dimensions read true; the model's lowest point sits on a bed line 80% down where the app draws the contact shadow; `Material::{Petg, Pla, Tpu, Unknown}` with `ramp() -> [top, side, shade, edge]`; `shade(normal) -> rgb` blending shade → side → top by the light term; `render(&Mesh, Material, w, h) -> RgbaImage` with a z-buffer, 2×2 supersampling, then an edge pass on depth discontinuities in the edge colour.
+- [x] Commit `feat(render): CPU thumbnail renderer`.
 
 ### Task 5: Thumbnail service in core
 
-- [ ] Migration `0002_part_measurements.sql`; `Db::cover_sources(model_ids)` (parts with format/fp, image assets) and `Db::set_measurements(part, fp, dims, tris)`; regenerate `.sqlx/`.
-- [ ] Failing tests (`thumbs.rs`, `tests/thumbs.rs`): `cover_prefers_embedded_then_image_then_render`, `cache_keyed_by_fingerprint`, `failed_part_is_not_retried`, `visible_set_reorders_queue`, `budget_limits_concurrent_bytes`, `ready_event_carries_path`, `measurements_stored`, `deleted_cache_rerenders`.
-- [ ] `Engine::thumbnails()` → `ThumbnailService` (one per engine): `request_visible(Vec<ThumbTarget>)` where `ThumbTarget = Model(ModelId) | Part(PartId)`, `cached(target) -> Option<PathBuf>` (cheap, for already-done covers), `EngineEvent::ThumbnailReady { target, path }` / `ThumbnailFailed { target, reason }`. Workers: up to `min(4, cores/2)` jobs, rayon for parse + raster + PNG encode, budget semaphore, atomic cache writes (temp + rename).
-- [ ] Commit `feat(core): thumbnail queue and cache`.
+- [x] Migration `0002_part_measurements.sql`; `Db::cover_sources(model_ids)` (parts with format/fp, image assets) and `Db::set_measurements(part, fp, dims, tris)`; regenerate `.sqlx/`.
+- [x] Failing tests (`thumbs.rs`, `tests/thumbs.rs`): `cover_prefers_embedded_then_image_then_render`, `cache_keyed_by_fingerprint`, `failed_part_is_not_retried`, `visible_set_reorders_queue`, `budget_limits_concurrent_bytes`, `ready_event_carries_path`, `measurements_stored`, `deleted_cache_rerenders`.
+- [x] `Engine::thumbnails()` → `ThumbnailService` (one per engine): `request_visible(Vec<ThumbTarget>)` where `ThumbTarget = Model(ModelId) | Part(PartId)`, `cached(target) -> Option<PathBuf>` (cheap, for already-done covers), `EngineEvent::ThumbnailReady { target, path }` / `ThumbnailFailed { target, reason }`. Workers: up to `min(4, cores/2)` jobs, rayon for parse + raster + PNG encode, budget semaphore, atomic cache writes (temp + rename).
+- [x] Commit `feat(core): thumbnail queue and cache`.
 
 ### Task 6: Previews in the app
 
-- [ ] Failing tests (`app.rs`, `thumbs.rs`): `scroll_requests_visible_models`, `ready_event_swaps_placeholder`, `missing_thumb_keeps_placeholder`, `model_view_requests_parts`.
-- [ ] Visible set = models in the built rows (grid) or rows (list), plus the open model's parts. Sent after scroll/resize/search/open, debounced to one per frame. `image::Handle::from_path` per ready path, kept in a bounded map (LRU 2k entries).
-- [ ] Grid pane, list thumbnail, model view preview well and part tiles show the thumbnail over the contact shadow; while pending, the placeholder plus a small "Rendering preview" label (DESIGN.md "Model pane"). Hover lift keeps working.
-- [ ] Model view caption adds dimensions (`48 × 32 × 20 mm`) and triangle count when known.
-- [ ] Screenshots `docs/screenshots/m2-grid-*.png`, `m2-model-*.png` from a generated sample library with real meshes.
-- [ ] Commit `feat(app): real previews in grid, list and model view`.
+- [x] Failing tests (`app.rs`, `thumbs.rs`): `scroll_requests_visible_models`, `ready_event_swaps_placeholder`, `missing_thumb_keeps_placeholder`, `model_view_requests_parts`.
+- [x] Visible set = models in the built rows (grid) or rows (list), plus the open model's parts. Sent after scroll/resize/search/open, debounced to one per frame. `image::Handle::from_path` per ready path, kept in a bounded map (LRU 2k entries).
+- [x] Grid pane, list thumbnail, model view preview well and part tiles show the thumbnail over the contact shadow; while pending, the placeholder plus a small "Rendering preview" label (DESIGN.md "Model pane"). Hover lift keeps working.
+- [x] Model view caption adds dimensions (`48 × 32 × 20 mm`) and triangle count when known.
+- [x] Screenshots `docs/screenshots/m2-grid-*.png`, `m2-model-*.png` from a generated sample library with real meshes.
+- [x] Commit `feat(app): real previews in grid, list and model view`.
 
 ## Part B — 3D preview and polish (separate PR)
 
