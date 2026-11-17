@@ -5,6 +5,7 @@
 
 pub mod cpu;
 pub mod db;
+pub mod engine;
 pub mod error;
 pub mod events;
 pub mod fingerprint;
@@ -14,8 +15,13 @@ pub mod scan;
 pub mod time;
 pub mod walk;
 
+pub use db::{Library, LibraryKind, ModelHit, Stats};
+pub use engine::Engine;
 pub use error::{CoreError, Result};
+pub use events::{EngineEvent, ScanPhase};
+pub use grouping::ModelKind;
 pub use ids::{AssetId, LibraryId, ModelId, PartId};
+pub use scan::ScanSummary;
 
 /// Version of the engine crate.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

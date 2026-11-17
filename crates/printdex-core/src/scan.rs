@@ -179,6 +179,12 @@ async fn run_scan(
     progress(ScanPhase::Walking, files_seen, files_seen);
 
     let known = db.known_files(lib.id).await?;
+    // A library that had files and now shows an empty root is far more likely
+    // an unmounted share (empty mount point) than a deliberately emptied
+    // folder. Refuse instead of marking the whole library missing.
+    if files.is_empty() && walked.skipped.is_empty() && !known.is_empty() {
+        return Err(CoreError::LibraryOffline(lib.path.clone()));
+    }
     let known: HashMap<&str, &KnownFile> = known.iter().map(|k| (k.rel_path.as_str(), k)).collect();
     let which: Vec<usize> = (0..files.len())
         .filter(|&i| needs_fingerprint(&known, &files[i]))
@@ -469,6 +475,19 @@ mod tests {
         let r = scan_library(&f.db, &f.lib, &f.tx, c).await;
         assert!(matches!(r, Err(CoreError::Cancelled)));
         assert_eq!(f.count("SELECT count(*) FROM models").await, 0);
+    }
+
+    #[tokio::test]
+    async fn empty_root_with_known_files_is_offline() {
+        // An unmounted NAS share often leaves an empty mount-point folder.
+        let f = Fixture::new(TREE).await;
+        f.scan().await;
+        for e in fs::read_dir(&f.root).unwrap() {
+            fs::remove_dir_all(e.unwrap().path()).unwrap();
+        }
+        let r = scan_library(&f.db, &f.lib, &f.tx, CancellationToken::new()).await;
+        assert!(matches!(r, Err(CoreError::LibraryOffline(_))), "{r:?}");
+        assert_eq!(f.count("SELECT count(*) FROM models WHERE missing_since IS NOT NULL").await, 0);
     }
 
     #[test]
