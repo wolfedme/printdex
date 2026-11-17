@@ -22,7 +22,7 @@ pub mod walk;
 
 pub use db::{
     AssetInfo, Library, LibraryKind, ModelDetail, ModelHit, PartInfo, RecipeFacts, Scope,
-    SearchFilter, Smart, SmartCounts, SortOrder, Stats,
+    SearchFilter, Smart, SmartCounts, SortOrder, Stats, format_number,
 };
 pub use engine::{Engine, LibraryStatus};
 pub use error::{CoreError, Result};

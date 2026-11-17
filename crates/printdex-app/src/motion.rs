@@ -19,8 +19,7 @@ use crate::theme::Palette;
 pub const INSTANT: Duration = Duration::from_millis(90);
 /// Hover, selection ring, state colours.
 pub const QUICK: Duration = Duration::from_millis(160);
-/// Panels and sliding indicators (the log form, milestone 3).
-#[allow(dead_code)]
+/// Panels and sliding indicators (the log form).
 pub const MOVE: Duration = Duration::from_millis(260);
 /// The print-in.
 pub const FOCAL: Duration = Duration::from_millis(720);
@@ -132,7 +131,12 @@ pub struct Motion {
     print_ins: HashMap<ThumbTarget, (Instant, f32)>,
     /// Start of the latest print-in, for the stagger.
     last_print_in: Option<Instant>,
+    /// The side-column panel (log form) opened.
+    panel: Option<Instant>,
 }
+
+/// How far the log form slides in from, in px.
+pub const PANEL_SLIDE: f32 = 24.0;
 
 impl Motion {
     pub fn new(now: Instant) -> Motion {
@@ -148,6 +152,7 @@ impl Motion {
             palette: None,
             print_ins: HashMap::new(),
             last_print_in: None,
+            panel: None,
         }
     }
 
@@ -237,6 +242,23 @@ impl Motion {
     pub fn pressed(&mut self, id: ModelId, now: Instant) {
         self.now = now;
         self.press = Some((id, now));
+    }
+
+    /// The log form slides in from the right.
+    pub fn panel_opened(&mut self, now: Instant) {
+        self.now = now;
+        self.panel = Some(now);
+    }
+
+    /// The log form's offset from its place (px) and opacity.
+    pub fn panel(&self) -> (f32, f32) {
+        match self.panel {
+            Some(start) if !self.reduce && running(start, MOVE, self.now) => {
+                let p = progress(start, MOVE, self.now);
+                (PANEL_SLIDE * (1.0 - p), p)
+            }
+            _ => (0.0, 1.0),
+        }
     }
 
     pub fn chip_added(&mut self, chip: Chip, now: Instant) {
@@ -359,6 +381,7 @@ impl Motion {
         quick.into_iter().flatten().any(|s| running(s, QUICK, now))
             || self.press.is_some_and(|(_, s)| running(s, INSTANT, now))
             || self.chip.is_some_and(|(_, s)| running(s, CHIP, now))
+            || self.panel.is_some_and(|s| running(s, MOVE, now))
             || self.palette.is_some_and(|(_, s)| running(s, THEME, now))
             || self
                 .last_print_in

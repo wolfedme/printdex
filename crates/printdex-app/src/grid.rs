@@ -16,7 +16,11 @@ pub const PANE_PADDING: f32 = theme::S4;
 /// Preview well aspect ratio (height / width).
 pub const WELL_RATIO: f32 = 0.75;
 /// Text block under the well: gap, two name lines, gap, path line.
-pub const TEXT_BLOCK: f32 = theme::S4 + 2.0 * 17.0 + theme::S2 + 16.0;
+/// Height of the chips (or folder) line on a card.
+pub const CHIP_LINE: f32 = 18.0;
+/// Height of the last-print line on a card.
+pub const STATUS_LINE: f32 = 16.0;
+pub const TEXT_BLOCK: f32 = theme::S4 + 2.0 * 17.0 + 2.0 * theme::S2 + CHIP_LINE + STATUS_LINE;
 /// Rows built above and below the viewport.
 pub const OVERSCAN: usize = 1;
 

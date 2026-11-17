@@ -3,6 +3,7 @@
 mod files;
 mod libraries;
 mod models;
+pub(crate) mod numbers;
 mod organize;
 mod prints;
 mod search;
@@ -21,6 +22,7 @@ use crate::error::Result;
 pub use files::KnownFile;
 pub use libraries::{Library, LibraryKind};
 pub use models::{AssetInfo, ModelDetail, PartInfo};
+pub use numbers::{NumberQuery, format_number, parse_number_query};
 pub use organize::Organize;
 pub use prints::MAX_PHOTOS;
 pub use search::{

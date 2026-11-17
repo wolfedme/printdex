@@ -6,6 +6,7 @@ mod list;
 mod model;
 mod organize;
 mod preview;
+mod prints;
 mod settings;
 mod sidebar;
 mod statusbar;

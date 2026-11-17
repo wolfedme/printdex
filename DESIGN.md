@@ -435,7 +435,7 @@ App-drawn: a 2px accent ring outside a 1px gap in the `ground` colour, on exactl
 - **Filter chips:** 10px corners, 24px, pane fill with `rule` border, grey key then value and a remove icon.
 
 ### Model pane (signature)
-Pane glass, bright 1px edge, 14px corners, 8px padding. Inside: an opaque preview in the material ramp on a `tray` well, a parts count when there is more than one file, the name (600, two lines max) with the catalogue number "№ 0412" in `ink-3` mono, recipe chips, and the last print as icon, word and date. Selected: Signal Wash fill plus a 2px accent ring. A preview still rendering shows a small "Rendering preview" label and never blocks the grid. The catalogue number (per library, never reused) is a proposal awaiting Max's confirmation.
+Pane glass, bright 1px edge, 14px corners, 8px padding. Inside: an opaque preview in the material ramp on a `tray` well, a parts count when there is more than one file, the name (600, two lines max) with the catalogue number "№ 0412" in `ink-3` mono, recipe chips, and the last print as icon, word and date. Selected: Signal Wash fill plus a 2px accent ring. A preview still rendering shows a small "Rendering preview" label and never blocks the grid. The catalogue number is per library and never reused (Max confirmed 2026-11-17); search finds it as `412`, `0412` or `№ 412`.
 
 ### Inputs / Fields
 - **Style:** 30px, 10px corners, `ground` fill, `rule` border; units in small mono `ink-3`.

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use sqlx::{QueryBuilder, Row, Sqlite};
 
 use crate::db::Db;
+use crate::db::numbers::{NumberQuery, parse_number_query};
 use crate::error::Result;
 use crate::grouping::ModelKind;
 use crate::ids::{CollectionId, LibraryId, ModelId};
@@ -54,6 +55,8 @@ pub struct ModelHit {
     pub name: String,
     pub rel_path: String,
     pub kind: ModelKind,
+    /// Catalogue number in its library (№ 0412).
+    pub number: Option<u32>,
     /// Parts present on disk.
     pub part_count: u32,
     pub missing: bool,
@@ -128,6 +131,24 @@ pub fn to_fts_query(input: &str) -> Option<String> {
     (!terms.is_empty()).then(|| terms.join(" "))
 }
 
+/// What a search matches on.
+enum Text {
+    /// Blank: everything.
+    All,
+    Fts(String),
+    /// A catalogue number; plain digits also match text.
+    Number(NumberQuery, Option<String>),
+}
+
+fn text_query(input: &str) -> Text {
+    match (parse_number_query(input), to_fts_query(input)) {
+        (Some(n), _) if n.exact => Text::Number(n, None),
+        (Some(n), fts) => Text::Number(n, fts),
+        (None, Some(fts)) => Text::Fts(fts),
+        (None, None) => Text::All,
+    }
+}
+
 /// SQL for a model's latest attempt column `col` (correlated on `m`).
 fn latest(col: &str) -> String {
     format!(
@@ -148,20 +169,33 @@ fn material_sql() -> String {
 fn push_from_where(
     q: &mut QueryBuilder<Sqlite>,
     scope: &Scope,
-    fts: Option<&str>,
+    text: &Text,
     filter: &SearchFilter,
 ) {
-    match fts {
-        Some(_) => q.push(" FROM models_fts f JOIN models m ON m.rowid = f.rowid"),
-        None => q.push(" FROM models m"),
+    match text {
+        Text::Fts(_) => q.push(" FROM models_fts f JOIN models m ON m.rowid = f.rowid"),
+        _ => q.push(" FROM models m"),
     };
     if let Scope::Collection(c) = scope {
         q.push(" JOIN collection_models cm ON cm.model_id = m.id AND cm.collection_id = ")
             .push_bind(*c);
     }
     q.push(" WHERE m.missing_since IS NULL");
-    if let Some(text) = fts {
-        q.push(" AND models_fts MATCH ").push_bind(text.to_owned());
+    match text {
+        Text::All => {}
+        Text::Fts(fts) => {
+            q.push(" AND models_fts MATCH ").push_bind(fts.clone());
+        }
+        Text::Number(n, None) => {
+            q.push(" AND m.number = ").push_bind(i64::from(n.number));
+        }
+        Text::Number(n, Some(fts)) => {
+            q.push(" AND (m.number = ")
+                .push_bind(i64::from(n.number))
+                .push(" OR m.rowid IN (SELECT rowid FROM models_fts WHERE models_fts MATCH ")
+                .push_bind(fts.clone())
+                .push("))");
+        }
     }
     match scope {
         Scope::All | Scope::Collection(_) => {}
@@ -216,6 +250,7 @@ fn hit_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<ModelHit> {
     let successes: i64 = row.try_get("successes")?;
     let material: Option<String> = row.try_get("material")?;
     let part_count: i64 = row.try_get("part_count")?;
+    let number: Option<i64> = row.try_get("number")?;
     let recipe = recipe.map(|s| {
         let settings: PrintSettings = serde_json::from_str(&s).unwrap_or_default();
         RecipeFacts {
@@ -246,6 +281,7 @@ fn hit_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<ModelHit> {
         name: row.try_get("name")?,
         rel_path: row.try_get("rel_path")?,
         kind: ModelKind::from_db(&kind).unwrap_or(ModelKind::Folder),
+        number: number.and_then(|n| u32::try_from(n).ok()),
         part_count: u32::try_from(part_count).unwrap_or(u32::MAX),
         missing: false,
         created_at: row.try_get("created_at")?,
@@ -284,9 +320,9 @@ impl Db {
         sort: SortOrder,
         limit: u32,
     ) -> Result<Vec<ModelHit>> {
-        let fts = to_fts_query(input);
+        let text = text_query(input);
         let mut q = QueryBuilder::<Sqlite>::new(format!(
-            "SELECT m.id, m.library_id, m.name, m.rel_path, m.kind, m.created_at,
+            "SELECT m.id, m.library_id, m.name, m.rel_path, m.kind, m.created_at, m.number,
                     (SELECT count(*) FROM parts p WHERE p.model_id = m.id AND p.missing_since IS NULL) as part_count,
                     (SELECT r.settings FROM recipes r WHERE r.model_id = m.id) as recipe,
                     {} as last_result, {} as last_at,
@@ -296,12 +332,18 @@ impl Db {
             latest("printed_at"),
             material_sql()
         ));
-        push_from_where(&mut q, scope, fts.as_deref(), filter);
+        push_from_where(&mut q, scope, &text, filter);
         q.push(" ORDER BY ");
-        match (sort, scope, fts.is_some()) {
+        if let Text::Number(n, _) = &text {
+            // The model with that number first.
+            q.push("(m.number = ")
+                .push_bind(i64::from(n.number))
+                .push(") DESC, ");
+        }
+        match (sort, scope, &text) {
             (SortOrder::Collection, Scope::Collection(_), _) => q.push("cm.position, "),
             (SortOrder::RecentlyAdded, _, _) => q.push("m.created_at DESC, "),
-            (_, _, true) => q.push("bm25(models_fts, 10.0, 1.0, 4.0, 1.0, 1.0), "),
+            (_, _, Text::Fts(_)) => q.push("bm25(models_fts, 10.0, 1.0, 4.0, 1.0, 1.0), "),
             _ => q.push(""),
         };
         q.push("m.name COLLATE NOCASE, m.rel_path LIMIT ")
@@ -318,9 +360,9 @@ impl Db {
         input: &str,
         filter: &SearchFilter,
     ) -> Result<u64> {
-        let fts = to_fts_query(input);
+        let text = text_query(input);
         let mut q = QueryBuilder::<Sqlite>::new("SELECT count(*)");
-        push_from_where(&mut q, scope, fts.as_deref(), filter);
+        push_from_where(&mut q, scope, &text, filter);
         let n: i64 = q.build_query_scalar().fetch_one(self.reader()).await?;
         Ok(u64::try_from(n).unwrap_or(0))
     }

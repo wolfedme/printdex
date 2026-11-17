@@ -92,6 +92,7 @@ mod tests {
             name: name.into(),
             rel_path: name.into(),
             kind: ModelKind::Folder,
+            number: None,
             part_count: 1,
             missing: false,
             created_at: 0,

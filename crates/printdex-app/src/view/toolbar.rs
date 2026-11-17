@@ -59,6 +59,7 @@ fn chip_text(chip: Chip) -> (String, String) {
         ),
         Chip::MultiPart(false) => (t("filter-parts"), t("filter-single")),
         Chip::MultiPart(true) => (t("filter-parts"), t("filter-multi")),
+        Chip::Material(m) => (t("filter-material"), m.material().label().to_owned()),
     }
 }
 
@@ -254,7 +255,7 @@ pub fn filter_bar(app: &App, p: Palette) -> Element<'_, Message> {
                 .on_press(Message::ToggleChip(chip)),
         );
     }
-    container(r)
+    container(r.wrap().vertical_spacing(theme::S3))
         .padding([theme::S4, theme::S7])
         .width(Length::Fill)
         .style(move |_| p.bar())

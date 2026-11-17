@@ -346,23 +346,7 @@ pub fn notes<'a>(o: &'a OrgState, p: Palette, id: ModelId) -> Element<'a, Messag
                         text_editor::Binding::from_key_press(kp)
                     }
                 })
-                .style(move |_, status| {
-                    use iced::widget::text_input::Status as In;
-                    use text_editor::Status as Ed;
-                    let s = p.search_field(match status {
-                        Ed::Active => In::Active,
-                        Ed::Hovered => In::Hovered,
-                        Ed::Focused { is_hovered } => In::Focused { is_hovered },
-                        Ed::Disabled => In::Disabled,
-                    });
-                    text_editor::Style {
-                        background: s.background,
-                        border: s.border,
-                        placeholder: s.placeholder,
-                        value: s.value,
-                        selection: s.selection,
-                    }
-                });
+                .style(move |_, status| editor_style(p, status));
             let actions = row![
                 hint(p, "Ctrl Enter", t("notes-key-save")),
                 hint(p, "Esc", t("notes-key-cancel")),
@@ -423,6 +407,25 @@ pub fn notes<'a>(o: &'a OrgState, p: Palette, id: ModelId) -> Element<'a, Messag
         .width(Length::Fill)
         .style(move |_| p.pane(false, false))
         .into()
+}
+
+/// Text editor style matching the text fields.
+pub fn editor_style(p: Palette, status: text_editor::Status) -> text_editor::Style {
+    use iced::widget::text_input::Status as In;
+    use text_editor::Status as Ed;
+    let s = p.search_field(match status {
+        Ed::Active => In::Active,
+        Ed::Hovered => In::Hovered,
+        Ed::Focused { is_hovered } => In::Focused { is_hovered },
+        Ed::Disabled => In::Disabled,
+    });
+    text_editor::Style {
+        background: s.background,
+        border: s.border,
+        placeholder: s.placeholder,
+        value: s.value,
+        selection: s.selection,
+    }
 }
 
 #[cfg(test)]

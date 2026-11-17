@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE libraries SET next_number = max(next_number, ?1 + 1)\n               WHERE id = (SELECT library_id FROM models WHERE id = ?2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "bd890cc3e2dc9dc3b483eb8453e69868aae6386c2ed5b39ada65045326b95417"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!: ModelId\" FROM models\n               WHERE library_id = ? AND number IS NULL\n               ORDER BY created_at, rel_path",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: ModelId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "eac40f9a713a5153bcdce7195e0fb87a0d282c04ca5b1bbf7cf2885fd2a8ed0e"
+}

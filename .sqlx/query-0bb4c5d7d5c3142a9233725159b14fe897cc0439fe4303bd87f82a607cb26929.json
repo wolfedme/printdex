@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE models SET number = ?1 WHERE id = ?2 AND number IS NULL\n               AND NOT EXISTS (SELECT 1 FROM models o\n                               WHERE o.library_id = models.library_id AND o.number = ?1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "0bb4c5d7d5c3142a9233725159b14fe897cc0439fe4303bd87f82a607cb26929"
+}

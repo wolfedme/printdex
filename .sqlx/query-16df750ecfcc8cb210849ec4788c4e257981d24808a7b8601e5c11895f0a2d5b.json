@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT number as \"n?: i64\" FROM models WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "n?: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "number"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "16df750ecfcc8cb210849ec4788c4e257981d24808a7b8601e5c11895f0a2d5b"
+}

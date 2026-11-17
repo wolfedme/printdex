@@ -47,6 +47,9 @@ pub struct SidecarFile {
     pub writer: String,
     #[serde(default)]
     pub model_id: String,
+    /// Catalogue number in the library (№ 0412), kept across reinstalls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<u32>,
     /// Last change to notes, source, tags or collections (unix ms).
     #[serde(default)]
     pub updated_at: i64,
@@ -104,6 +107,7 @@ impl SidecarFile {
             schema: SCHEMA,
             writer: install.hyphenated().to_string(),
             model_id: model.to_string(),
+            number: None,
             updated_at: org.updated_at,
             notes: org.notes.clone(),
             source: org.source.clone(),
@@ -219,7 +223,9 @@ pub async fn snapshot(db: &Db, id: ModelId, install: Uuid) -> Result<Option<Side
     let (Some(org), Some(data)) = (db.organize(id).await?, db.model_data(id).await?) else {
         return Ok(None);
     };
-    Ok(Some(SidecarFile::from_data(install, id, &org, &data)))
+    let mut file = SidecarFile::from_data(install, id, &org, &data);
+    file.number = db.model_number(id).await?;
+    Ok(Some(file))
 }
 
 /// Writes `text` to `path` atomically and returns the new file's mtime.
@@ -314,6 +320,10 @@ pub struct Imported {
 /// Imports `file` into model `id`, record by record (newest wins).
 pub async fn import(db: &Db, id: ModelId, file: &SidecarFile, install: Uuid) -> Result<Imported> {
     let current = db.organize(id).await?.ok_or(CoreError::ModelNotFound)?;
+    if let Some(n) = file.number.filter(|n| *n > 0) {
+        // Only a model without a number takes it, and only when it is free.
+        db.claim_number(id, n).await?;
+    }
     if file.updated_at > current.updated_at {
         db.import_organize(
             id,
@@ -570,6 +580,7 @@ mod tests {
             schema: SCHEMA,
             writer: "w".into(),
             model_id: "m".into(),
+            number: Some(7),
             updated_at: 5,
             notes: "Remixed.\n\nUse the 3MF.".into(),
             source: Some("https://printables.com/model/1".into()),

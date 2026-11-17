@@ -2,7 +2,7 @@
 
 use iced::widget::{Space, button, column, container, mouse_area, row, scrollable, text};
 use iced::{Alignment, Element, Length};
-use printdex_core::{ModelHit, ThumbTarget};
+use printdex_core::{ModelHit, ThumbTarget, format_number};
 
 use super::preview::{Look, preview};
 use super::widgets::date;
@@ -14,7 +14,9 @@ use crate::theme::{self, Palette};
 
 const THUMB_COLUMN: f32 = 64.0;
 const PARTS_COLUMN: f32 = 72.0;
+const NUMBER_COLUMN: f32 = 64.0;
 const ADDED_COLUMN: f32 = 112.0;
+const STATUS_COLUMN: f32 = 200.0;
 
 pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     let hits = &app.search.hits;
@@ -31,8 +33,10 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
         row![
             Space::new().width(THUMB_COLUMN - theme::S5),
             heading(p, t("list-name")).width(Length::FillPortion(3)),
+            heading(p, "№".to_owned()).width(NUMBER_COLUMN),
             heading(p, t("list-folder")).width(Length::FillPortion(3)),
             heading(p, t("list-parts")).width(PARTS_COLUMN),
+            heading(p, t("list-last-print")).width(STATUS_COLUMN),
             heading(p, t("list-added")).width(ADDED_COLUMN),
         ]
         .spacing(theme::S5)
@@ -94,6 +98,12 @@ fn list_row<'a>(app: &App, p: Palette, hit: &ModelHit) -> Element<'a, Message> {
             .font(theme::FONT_STRONG)
             .wrapping(text::Wrapping::None)
             .width(Length::FillPortion(3)),
+        text(hit.number.map(format_number).unwrap_or_default())
+            .size(theme::SIZE_DATA)
+            .font(theme::FONT_DATA)
+            .color(p.n.ink_3)
+            .wrapping(text::Wrapping::None)
+            .width(NUMBER_COLUMN),
         text(parent_path(&hit.rel_path).to_owned())
             .size(theme::SIZE_DATA)
             .font(theme::FONT_DATA)
@@ -104,6 +114,9 @@ fn list_row<'a>(app: &App, p: Palette, hit: &ModelHit) -> Element<'a, Message> {
             .size(theme::SIZE_BODY)
             .font(theme::FONT_MEDIUM)
             .width(PARTS_COLUMN),
+        container(super::prints::status_line(p, hit.last_print.as_ref()))
+            .width(STATUS_COLUMN)
+            .clip(true),
         text(date(hit.created_at))
             .size(theme::SIZE_BODY)
             .color(p.n.ink_2)

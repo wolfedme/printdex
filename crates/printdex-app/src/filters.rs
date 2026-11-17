@@ -1,7 +1,7 @@
 //! Filter chips: what the user picked under "+ Filter", turned into the
 //! engine's [`SearchFilter`].
 
-use printdex_core::{PrintableFormat, SearchFilter};
+use printdex_core::{Material, PrintableFormat, SearchFilter};
 
 /// One active filter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -11,15 +11,45 @@ pub enum Chip {
     Format(PrintableFormat),
     /// Single-file models (`false`) or multi-part models (`true`).
     MultiPart(bool),
+    /// Models whose material (recipe, else latest attempt) is this one.
+    /// Several material chips match any of them.
+    Material(MatChip),
+}
+
+/// The materials the filter menu offers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MatChip {
+    Pla,
+    Petg,
+    Abs,
+    Asa,
+    Tpu,
+}
+
+impl MatChip {
+    pub fn material(self) -> Material {
+        match self {
+            MatChip::Pla => Material::Pla,
+            MatChip::Petg => Material::Petg,
+            MatChip::Abs => Material::Abs,
+            MatChip::Asa => Material::Asa,
+            MatChip::Tpu => Material::Tpu,
+        }
+    }
 }
 
 /// Every chip the filter menu offers, in menu order.
-pub const MENU: [Chip; 5] = [
+pub const MENU: [Chip; 10] = [
     Chip::Format(PrintableFormat::Stl),
     Chip::Format(PrintableFormat::ThreeMf),
     Chip::Format(PrintableFormat::Obj),
     Chip::MultiPart(false),
     Chip::MultiPart(true),
+    Chip::Material(MatChip::Pla),
+    Chip::Material(MatChip::Petg),
+    Chip::Material(MatChip::Abs),
+    Chip::Material(MatChip::Asa),
+    Chip::Material(MatChip::Tpu),
 ];
 
 /// Adds `chip`, or removes it when it is already active. The two parts
@@ -46,6 +76,12 @@ pub fn to_filter(chips: &[Chip]) -> SearchFilter {
                 }
             }
             Chip::MultiPart(m) => filter.multi_part = Some(m),
+            Chip::Material(m) => {
+                let m = m.material();
+                if !filter.materials.contains(&m) {
+                    filter.materials.push(m);
+                }
+            }
         }
     }
     filter
@@ -66,6 +102,17 @@ mod tests {
         assert_eq!(f.formats, vec![PrintableFormat::Stl, PrintableFormat::Obj]);
         assert_eq!(f.multi_part, Some(true));
         assert!(to_filter(&[]).is_empty());
+    }
+
+    #[test]
+    fn material_chips_filter_any_of_them() {
+        let mut chips = Vec::new();
+        toggle(&mut chips, Chip::Material(MatChip::Petg));
+        toggle(&mut chips, Chip::Material(MatChip::Pla));
+        assert_eq!(
+            to_filter(&chips).materials,
+            vec![Material::Petg, Material::Pla]
+        );
     }
 
     #[test]

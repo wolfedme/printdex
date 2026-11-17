@@ -371,3 +371,80 @@ async fn data_survives_reopen() {
     let f = f.reopen().await;
     assert_eq!(f.engine.model_data(bin).await.unwrap().unwrap().tags, ["x"]);
 }
+
+async fn number_of(f: &Fx, name: &str) -> Option<u32> {
+    f.engine
+        .search(name, 10)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|h| h.name == name)
+        .unwrap()
+        .number
+}
+
+#[tokio::test]
+async fn catalogue_numbers_are_never_reused() {
+    let f = Fx::new(&["A/a.stl", "B/b.stl"]).await;
+    assert_eq!(number_of(&f, "A").await, Some(1));
+    assert_eq!(number_of(&f, "B").await, Some(2));
+    fs::remove_dir_all(f.root().join("B")).unwrap();
+    touch(&f.root(), "C/c.stl");
+    f.rescan().await;
+    assert_eq!(
+        number_of(&f, "C").await,
+        Some(3),
+        "B's number stays retired"
+    );
+    // B comes back with its old number.
+    touch(&f.root(), "B/b.stl");
+    f.rescan().await;
+    assert_eq!(number_of(&f, "B").await, Some(2));
+}
+
+#[tokio::test]
+async fn search_finds_catalogue_numbers() {
+    let f = Fx::new(&["A/a.stl", "B/b.stl", "Part 2/x.stl"]).await;
+    let names = |hits: Vec<printdex_core::ModelHit>| -> Vec<String> {
+        hits.into_iter().map(|h| h.name).collect()
+    };
+    // "№ 2" is only the number; plain "2" also matches names, number first.
+    assert_eq!(names(f.engine.search("№ 2", 10).await.unwrap()), ["B"]);
+    assert_eq!(names(f.engine.search("#0002", 10).await.unwrap()), ["B"]);
+    assert_eq!(
+        names(f.engine.search("2", 10).await.unwrap()),
+        ["B", "Part 2"]
+    );
+}
+
+#[tokio::test]
+async fn sidecar_brings_number_back_after_reinstall() {
+    let f = Fx::new(&["A/a.stl", "B/b.stl", "C/c.stl"]).await;
+    let c = f.model("C").await;
+    f.engine.add_tag(c, "keep").await.unwrap();
+    f.engine.flush_sidecars().await;
+    assert_eq!(f.read("C/.printdex.toml").number, Some(3));
+    // A fresh install, with a new model that sorts first.
+    touch(&f.root(), "0 New/n.stl");
+    let engine = Engine::open(&f.dir.path().join("data2")).await.unwrap();
+    let lib = engine.add_library(&f.root(), None).await.unwrap();
+    engine
+        .rescan(lib.id, CancellationToken::new())
+        .await
+        .unwrap();
+    let g = Fx {
+        dir: tempfile::tempdir().unwrap(),
+        engine,
+        lib,
+    };
+    assert_eq!(number_of(&g, "C").await, Some(3));
+    // The others continue after the highest known number: lower ones may
+    // have belonged to models that are gone, so they are not handed out.
+    let mut rest = vec![
+        number_of(&g, "0 New").await.unwrap(),
+        number_of(&g, "A").await.unwrap(),
+        number_of(&g, "B").await.unwrap(),
+    ];
+    rest.sort_unstable();
+    assert_eq!(rest, [4, 5, 6]);
+}
