@@ -1,0 +1,2623 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-16T20:46:51+00:00",
+  "title": "Design System: Printdex",
+  "extensions": {
+    "provenance": {
+      "world": "Frosted print",
+      "colourThemeDefault": "graphite",
+      "source": "docs/design/mockups.html (reference only; layered CSS)",
+      "replaces": "Specimen cabinet proposal (never shipped)",
+      "target": "iced theme module in printdex-app; widgets use tokens only",
+      "hexNote": "sRGB hex given beside each OKLCH value; RRGGBBAA when translucent; values marked out of gamut use the per-channel clamp."
+    },
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "Content Glass",
+        "canonical": "oklch(0.965 0.010 265 / 0.86)",
+        "srgb": "#f0f3fadb",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.004 265)",
+          "oklch(0.35 0.007 265)",
+          "oklch(0.45 0.009 265)",
+          "oklch(0.55 0.010 265)",
+          "oklch(0.65 0.010 265)",
+          "oklch(0.80 0.008 265)",
+          "oklch(0.95 0.004 265)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Pane Glass",
+        "canonical": "oklch(0.99 0.005 265 / 0.72)",
+        "srgb": "#fafcffb8",
+        "note": "Slightly outside sRGB; hex is the per-channel clamp.",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.002 265)",
+          "oklch(0.35 0.003 265)",
+          "oklch(0.45 0.004 265)",
+          "oklch(0.55 0.005 265)",
+          "oklch(0.65 0.005 265)",
+          "oklch(0.80 0.004 265)",
+          "oklch(0.95 0.002 265)"
+        ]
+      },
+      "tray": {
+        "role": "neutral",
+        "displayName": "Preview Well",
+        "canonical": "oklch(0.94 0.012 265 / 0.7)",
+        "srgb": "#e7ebf4b2",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.005 265)",
+          "oklch(0.35 0.008 265)",
+          "oklch(0.45 0.011 265)",
+          "oklch(0.55 0.012 265)",
+          "oklch(0.65 0.012 265)",
+          "oklch(0.80 0.010 265)",
+          "oklch(0.95 0.005 265)"
+        ]
+      },
+      "edge": {
+        "role": "neutral",
+        "displayName": "Bright Edge",
+        "canonical": "oklch(1 0 0 / 0.9)",
+        "srgb": "#ffffffe6",
+        "tonalRamp": [
+          "oklch(0.15 0.000 0)",
+          "oklch(0.25 0.000 0)",
+          "oklch(0.35 0.000 0)",
+          "oklch(0.45 0.000 0)",
+          "oklch(0.55 0.000 0)",
+          "oklch(0.65 0.000 0)",
+          "oklch(0.80 0.000 0)",
+          "oklch(0.95 0.000 0)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Graphite Ink",
+        "canonical": "oklch(0.23 0.02 265)",
+        "srgb": "#181d27",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.008 265)",
+          "oklch(0.35 0.014 265)",
+          "oklch(0.45 0.018 265)",
+          "oklch(0.55 0.020 265)",
+          "oklch(0.65 0.020 265)",
+          "oklch(0.80 0.016 265)",
+          "oklch(0.95 0.008 265)"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Secondary Ink",
+        "canonical": "oklch(0.43 0.02 265)",
+        "srgb": "#4a505b",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.008 265)",
+          "oklch(0.35 0.014 265)",
+          "oklch(0.45 0.018 265)",
+          "oklch(0.55 0.020 265)",
+          "oklch(0.65 0.020 265)",
+          "oklch(0.80 0.016 265)",
+          "oklch(0.95 0.008 265)"
+        ]
+      },
+      "ink-3": {
+        "role": "neutral",
+        "displayName": "Tertiary Ink",
+        "canonical": "oklch(0.52 0.02 265)",
+        "srgb": "#636975",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.008 265)",
+          "oklch(0.35 0.014 265)",
+          "oklch(0.45 0.018 265)",
+          "oklch(0.55 0.020 265)",
+          "oklch(0.65 0.020 265)",
+          "oklch(0.80 0.016 265)",
+          "oklch(0.95 0.008 265)"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Hairline Rule",
+        "canonical": "oklch(0.25 0.03 265 / 0.12)",
+        "srgb": "#1b21301f",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.012 265)",
+          "oklch(0.35 0.021 265)",
+          "oklch(0.45 0.027 265)",
+          "oklch(0.55 0.030 265)",
+          "oklch(0.65 0.030 265)",
+          "oklch(0.80 0.024 265)",
+          "oklch(0.95 0.012 265)"
+        ]
+      },
+      "rule-soft": {
+        "role": "neutral",
+        "displayName": "Soft Rule / Chip Fill",
+        "canonical": "oklch(0.25 0.03 265 / 0.06)",
+        "srgb": "#1b21300f",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.012 265)",
+          "oklch(0.35 0.021 265)",
+          "oklch(0.45 0.027 265)",
+          "oklch(0.55 0.030 265)",
+          "oklch(0.65 0.030 265)",
+          "oklch(0.80 0.024 265)",
+          "oklch(0.95 0.012 265)"
+        ]
+      },
+      "rail": {
+        "role": "neutral",
+        "displayName": "Sidebar Glass",
+        "canonical": "oklch(0.93 0.020 265 / 0.82)",
+        "srgb": "#e1e8f6d1",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.008 265)",
+          "oklch(0.35 0.014 265)",
+          "oklch(0.45 0.018 265)",
+          "oklch(0.55 0.020 265)",
+          "oklch(0.65 0.020 265)",
+          "oklch(0.80 0.016 265)",
+          "oklch(0.95 0.008 265)"
+        ]
+      },
+      "rail-hi": {
+        "role": "neutral",
+        "displayName": "Sidebar Hover",
+        "canonical": "oklch(0.99 0.010 265 / 0.65)",
+        "srgb": "#f8fcffa6",
+        "note": "Slightly outside sRGB; hex is the per-channel clamp.",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.004 265)",
+          "oklch(0.35 0.007 265)",
+          "oklch(0.45 0.009 265)",
+          "oklch(0.55 0.010 265)",
+          "oklch(0.65 0.010 265)",
+          "oklch(0.80 0.008 265)",
+          "oklch(0.95 0.004 265)"
+        ]
+      },
+      "rail-rule": {
+        "role": "neutral",
+        "displayName": "Sidebar Rule",
+        "canonical": "oklch(1 0 0 / 0.5)",
+        "srgb": "#ffffff80",
+        "tonalRamp": [
+          "oklch(0.15 0.000 0)",
+          "oklch(0.25 0.000 0)",
+          "oklch(0.35 0.000 0)",
+          "oklch(0.45 0.000 0)",
+          "oklch(0.55 0.000 0)",
+          "oklch(0.65 0.000 0)",
+          "oklch(0.80 0.000 0)",
+          "oklch(0.95 0.000 0)"
+        ]
+      },
+      "on-rail": {
+        "role": "neutral",
+        "displayName": "Sidebar Ink",
+        "canonical": "oklch(0.2 0.02 265)",
+        "srgb": "#12161f",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.008 265)",
+          "oklch(0.35 0.014 265)",
+          "oklch(0.45 0.018 265)",
+          "oklch(0.55 0.020 265)",
+          "oklch(0.65 0.020 265)",
+          "oklch(0.80 0.016 265)",
+          "oklch(0.95 0.008 265)"
+        ]
+      },
+      "on-rail-2": {
+        "role": "neutral",
+        "displayName": "Sidebar Secondary Ink",
+        "canonical": "oklch(0.38 0.02 265)",
+        "srgb": "#3d424d",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.008 265)",
+          "oklch(0.35 0.014 265)",
+          "oklch(0.45 0.018 265)",
+          "oklch(0.55 0.020 265)",
+          "oklch(0.65 0.020 265)",
+          "oklch(0.80 0.016 265)",
+          "oklch(0.95 0.008 265)"
+        ]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Signal Yellow",
+        "canonical": "oklch(0.62 0.17 100)",
+        "srgb": "#9f8600",
+        "note": "Slightly outside sRGB; hex is the per-channel clamp.",
+        "tonalRamp": [
+          "oklch(0.15 0.000 100)",
+          "oklch(0.25 0.067 100)",
+          "oklch(0.35 0.118 100)",
+          "oklch(0.45 0.151 100)",
+          "oklch(0.55 0.168 100)",
+          "oklch(0.65 0.168 100)",
+          "oklch(0.80 0.136 100)",
+          "oklch(0.95 0.067 100)"
+        ]
+      },
+      "accent-soft": {
+        "role": "primary",
+        "displayName": "Signal Wash",
+        "canonical": "oklch(0.94 0.076 100 / 0.8)",
+        "srgb": "#f7edb2cc",
+        "tonalRamp": [
+          "oklch(0.15 0.000 100)",
+          "oklch(0.25 0.030 100)",
+          "oklch(0.35 0.053 100)",
+          "oklch(0.45 0.068 100)",
+          "oklch(0.55 0.075 100)",
+          "oklch(0.65 0.075 100)",
+          "oklch(0.80 0.061 100)",
+          "oklch(0.95 0.030 100)"
+        ]
+      },
+      "accent-ink": {
+        "role": "primary",
+        "displayName": "Signal Ink",
+        "canonical": "oklch(0.48 0.17 100)",
+        "srgb": "#755c00",
+        "note": "Slightly outside sRGB; hex is the per-channel clamp.",
+        "tonalRamp": [
+          "oklch(0.15 0.000 100)",
+          "oklch(0.25 0.067 100)",
+          "oklch(0.35 0.118 100)",
+          "oklch(0.45 0.151 100)",
+          "oklch(0.55 0.168 100)",
+          "oklch(0.65 0.168 100)",
+          "oklch(0.80 0.136 100)",
+          "oklch(0.95 0.067 100)"
+        ]
+      },
+      "primary": {
+        "role": "primary",
+        "displayName": "Signal Yellow (main action)",
+        "canonical": "oklch(0.62 0.17 100)",
+        "srgb": "#9f8600",
+        "note": "Slightly outside sRGB; hex is the per-channel clamp.",
+        "tonalRamp": [
+          "oklch(0.15 0.000 100)",
+          "oklch(0.25 0.067 100)",
+          "oklch(0.35 0.118 100)",
+          "oklch(0.45 0.151 100)",
+          "oklch(0.55 0.168 100)",
+          "oklch(0.65 0.168 100)",
+          "oklch(0.80 0.136 100)",
+          "oklch(0.95 0.067 100)"
+        ]
+      },
+      "primary-hi": {
+        "role": "primary",
+        "displayName": "Signal Yellow, hover",
+        "canonical": "oklch(0.57 0.17 100)",
+        "srgb": "#907600",
+        "note": "Slightly outside sRGB; hex is the per-channel clamp.",
+        "tonalRamp": [
+          "oklch(0.15 0.000 100)",
+          "oklch(0.25 0.067 100)",
+          "oklch(0.35 0.118 100)",
+          "oklch(0.45 0.151 100)",
+          "oklch(0.55 0.168 100)",
+          "oklch(0.65 0.168 100)",
+          "oklch(0.80 0.136 100)",
+          "oklch(0.95 0.067 100)"
+        ]
+      },
+      "on-primary": {
+        "role": "primary",
+        "displayName": "Ink on Signal",
+        "canonical": "oklch(0.18 0.068 100)",
+        "srgb": "#191100",
+        "note": "Slightly outside sRGB; hex is the per-channel clamp.",
+        "tonalRamp": [
+          "oklch(0.15 0.000 100)",
+          "oklch(0.25 0.027 100)",
+          "oklch(0.35 0.047 100)",
+          "oklch(0.45 0.060 100)",
+          "oklch(0.55 0.067 100)",
+          "oklch(0.65 0.067 100)",
+          "oklch(0.80 0.055 100)",
+          "oklch(0.95 0.027 100)"
+        ]
+      },
+      "ok": {
+        "role": "tertiary",
+        "displayName": "Printed Green",
+        "canonical": "oklch(0.53 0.135 150)",
+        "srgb": "#1a813f",
+        "tonalRamp": [
+          "oklch(0.15 0.000 150)",
+          "oklch(0.25 0.053 150)",
+          "oklch(0.35 0.093 150)",
+          "oklch(0.45 0.120 150)",
+          "oklch(0.55 0.133 150)",
+          "oklch(0.65 0.133 150)",
+          "oklch(0.80 0.108 150)",
+          "oklch(0.95 0.053 150)"
+        ]
+      },
+      "ok-soft": {
+        "role": "tertiary",
+        "displayName": "Printed Wash",
+        "canonical": "oklch(0.94 0.04 150)",
+        "srgb": "#d9f3dd",
+        "tonalRamp": [
+          "oklch(0.15 0.000 150)",
+          "oklch(0.25 0.016 150)",
+          "oklch(0.35 0.028 150)",
+          "oklch(0.45 0.036 150)",
+          "oklch(0.55 0.040 150)",
+          "oklch(0.65 0.040 150)",
+          "oklch(0.80 0.032 150)",
+          "oklch(0.95 0.016 150)"
+        ]
+      },
+      "fail": {
+        "role": "tertiary",
+        "displayName": "Failure Red",
+        "canonical": "oklch(0.545 0.19 28)",
+        "srgb": "#c72e28",
+        "tonalRamp": [
+          "oklch(0.15 0.000 28)",
+          "oklch(0.25 0.075 28)",
+          "oklch(0.35 0.131 28)",
+          "oklch(0.45 0.169 28)",
+          "oklch(0.55 0.188 28)",
+          "oklch(0.65 0.188 28)",
+          "oklch(0.80 0.152 28)",
+          "oklch(0.95 0.075 28)"
+        ]
+      },
+      "fail-soft": {
+        "role": "tertiary",
+        "displayName": "Failure Wash",
+        "canonical": "oklch(0.95 0.035 28)",
+        "srgb": "#ffe6e2",
+        "note": "Slightly outside sRGB; hex is the per-channel clamp.",
+        "tonalRamp": [
+          "oklch(0.15 0.000 28)",
+          "oklch(0.25 0.014 28)",
+          "oklch(0.35 0.024 28)",
+          "oklch(0.45 0.031 28)",
+          "oklch(0.55 0.035 28)",
+          "oklch(0.65 0.035 28)",
+          "oklch(0.80 0.028 28)",
+          "oklch(0.95 0.014 28)"
+        ]
+      },
+      "partial": {
+        "role": "tertiary",
+        "displayName": "Partial Amber",
+        "canonical": "oklch(0.52 0.12 78)",
+        "srgb": "#8e5e00",
+        "note": "Slightly outside sRGB; hex is the per-channel clamp.",
+        "tonalRamp": [
+          "oklch(0.15 0.000 78)",
+          "oklch(0.25 0.047 78)",
+          "oklch(0.35 0.083 78)",
+          "oklch(0.45 0.107 78)",
+          "oklch(0.55 0.119 78)",
+          "oklch(0.65 0.119 78)",
+          "oklch(0.80 0.096 78)",
+          "oklch(0.95 0.047 78)"
+        ]
+      },
+      "partial-soft": {
+        "role": "tertiary",
+        "displayName": "Partial Wash",
+        "canonical": "oklch(0.95 0.05 85)",
+        "srgb": "#feedc9",
+        "tonalRamp": [
+          "oklch(0.15 0.000 85)",
+          "oklch(0.25 0.020 85)",
+          "oklch(0.35 0.035 85)",
+          "oklch(0.45 0.044 85)",
+          "oklch(0.55 0.049 85)",
+          "oklch(0.65 0.049 85)",
+          "oklch(0.80 0.040 85)",
+          "oklch(0.95 0.020 85)"
+        ]
+      },
+      "offline": {
+        "role": "tertiary",
+        "displayName": "Offline Slate",
+        "canonical": "oklch(0.52 0.03 250)",
+        "srgb": "#5c6b7a",
+        "tonalRamp": [
+          "oklch(0.15 0.000 250)",
+          "oklch(0.25 0.012 250)",
+          "oklch(0.35 0.021 250)",
+          "oklch(0.45 0.027 250)",
+          "oklch(0.55 0.030 250)",
+          "oklch(0.65 0.030 250)",
+          "oklch(0.80 0.024 250)",
+          "oklch(0.95 0.012 250)"
+        ]
+      },
+      "ground-solid": {
+        "role": "neutral",
+        "displayName": "Content Glass (solid)",
+        "canonical": "oklch(0.965 0.010 265)",
+        "srgb": "#f0f3fa",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.004 265)",
+          "oklch(0.35 0.007 265)",
+          "oklch(0.45 0.009 265)",
+          "oklch(0.55 0.010 265)",
+          "oklch(0.65 0.010 265)",
+          "oklch(0.80 0.008 265)",
+          "oklch(0.95 0.004 265)"
+        ]
+      },
+      "surface-solid": {
+        "role": "neutral",
+        "displayName": "Pane Glass (solid)",
+        "canonical": "oklch(0.995 0.005 265)",
+        "srgb": "#fcfdff",
+        "note": "Slightly outside sRGB; hex is the per-channel clamp.",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.002 265)",
+          "oklch(0.35 0.003 265)",
+          "oklch(0.45 0.004 265)",
+          "oklch(0.55 0.005 265)",
+          "oklch(0.65 0.005 265)",
+          "oklch(0.80 0.004 265)",
+          "oklch(0.95 0.002 265)"
+        ]
+      },
+      "tray-solid": {
+        "role": "neutral",
+        "displayName": "Preview Well (solid)",
+        "canonical": "oklch(0.945 0.012 265)",
+        "srgb": "#e9edf5",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.005 265)",
+          "oklch(0.35 0.008 265)",
+          "oklch(0.45 0.011 265)",
+          "oklch(0.55 0.012 265)",
+          "oklch(0.65 0.012 265)",
+          "oklch(0.80 0.010 265)",
+          "oklch(0.95 0.005 265)"
+        ]
+      },
+      "edge-solid": {
+        "role": "neutral",
+        "displayName": "Bright Edge (solid)",
+        "canonical": "oklch(0.9 0.01 250)",
+        "srgb": "#d9dfe5",
+        "tonalRamp": [
+          "oklch(0.15 0.000 250)",
+          "oklch(0.25 0.004 250)",
+          "oklch(0.35 0.007 250)",
+          "oklch(0.45 0.009 250)",
+          "oklch(0.55 0.010 250)",
+          "oklch(0.65 0.010 250)",
+          "oklch(0.80 0.008 250)",
+          "oklch(0.95 0.004 250)"
+        ]
+      },
+      "rail-solid": {
+        "role": "neutral",
+        "displayName": "Sidebar Glass (solid)",
+        "canonical": "oklch(0.93 0.020 265)",
+        "srgb": "#e1e8f6",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.008 265)",
+          "oklch(0.35 0.014 265)",
+          "oklch(0.45 0.018 265)",
+          "oklch(0.55 0.020 265)",
+          "oklch(0.65 0.020 265)",
+          "oklch(0.80 0.016 265)",
+          "oklch(0.95 0.008 265)"
+        ]
+      },
+      "rail-hi-solid": {
+        "role": "neutral",
+        "displayName": "Sidebar Hover (solid)",
+        "canonical": "oklch(0.98 0.010 265)",
+        "srgb": "#f5f8ff",
+        "note": "Slightly outside sRGB; hex is the per-channel clamp.",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.004 265)",
+          "oklch(0.35 0.007 265)",
+          "oklch(0.45 0.009 265)",
+          "oklch(0.55 0.010 265)",
+          "oklch(0.65 0.010 265)",
+          "oklch(0.80 0.008 265)",
+          "oklch(0.95 0.004 265)"
+        ]
+      },
+      "accent-soft-solid": {
+        "role": "primary",
+        "displayName": "Signal Wash (solid)",
+        "canonical": "oklch(0.94 0.076 100)",
+        "srgb": "#f7edb2",
+        "tonalRamp": [
+          "oklch(0.15 0.000 100)",
+          "oklch(0.25 0.030 100)",
+          "oklch(0.35 0.053 100)",
+          "oklch(0.45 0.068 100)",
+          "oklch(0.55 0.075 100)",
+          "oklch(0.65 0.075 100)",
+          "oklch(0.80 0.061 100)",
+          "oklch(0.95 0.030 100)"
+        ]
+      },
+      "ground-dark": {
+        "role": "neutral",
+        "displayName": "Content Glass (dark)",
+        "canonical": "oklch(0.2 0.009 265 / 0.84)",
+        "srgb": "#14161ad6",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.004 265)",
+          "oklch(0.35 0.006 265)",
+          "oklch(0.45 0.008 265)",
+          "oklch(0.55 0.009 265)",
+          "oklch(0.65 0.009 265)",
+          "oklch(0.80 0.007 265)",
+          "oklch(0.95 0.004 265)"
+        ]
+      },
+      "surface-dark": {
+        "role": "neutral",
+        "displayName": "Pane Glass (dark)",
+        "canonical": "oklch(0.29 0.010 265 / 0.62)",
+        "srgb": "#292b309e",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.004 265)",
+          "oklch(0.35 0.007 265)",
+          "oklch(0.45 0.009 265)",
+          "oklch(0.55 0.010 265)",
+          "oklch(0.65 0.010 265)",
+          "oklch(0.80 0.008 265)",
+          "oklch(0.95 0.004 265)"
+        ]
+      },
+      "tray-dark": {
+        "role": "neutral",
+        "displayName": "Preview Well (dark)",
+        "canonical": "oklch(0.25 0.010 265 / 0.6)",
+        "srgb": "#1f222799",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.004 265)",
+          "oklch(0.35 0.007 265)",
+          "oklch(0.45 0.009 265)",
+          "oklch(0.55 0.010 265)",
+          "oklch(0.65 0.010 265)",
+          "oklch(0.80 0.008 265)",
+          "oklch(0.95 0.004 265)"
+        ]
+      },
+      "edge-dark": {
+        "role": "neutral",
+        "displayName": "Bright Edge (dark)",
+        "canonical": "oklch(1 0 0 / 0.1)",
+        "srgb": "#ffffff1a",
+        "tonalRamp": [
+          "oklch(0.15 0.000 0)",
+          "oklch(0.25 0.000 0)",
+          "oklch(0.35 0.000 0)",
+          "oklch(0.45 0.000 0)",
+          "oklch(0.55 0.000 0)",
+          "oklch(0.65 0.000 0)",
+          "oklch(0.80 0.000 0)",
+          "oklch(0.95 0.000 0)"
+        ]
+      },
+      "ink-dark": {
+        "role": "neutral",
+        "displayName": "Graphite Ink (dark)",
+        "canonical": "oklch(0.95 0.008 265)",
+        "srgb": "#eceef4",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.003 265)",
+          "oklch(0.35 0.006 265)",
+          "oklch(0.45 0.007 265)",
+          "oklch(0.55 0.008 265)",
+          "oklch(0.65 0.008 265)",
+          "oklch(0.80 0.006 265)",
+          "oklch(0.95 0.003 265)"
+        ]
+      },
+      "ink-2-dark": {
+        "role": "neutral",
+        "displayName": "Secondary Ink (dark)",
+        "canonical": "oklch(0.8 0.012 265)",
+        "srgb": "#babec6",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.005 265)",
+          "oklch(0.35 0.008 265)",
+          "oklch(0.45 0.011 265)",
+          "oklch(0.55 0.012 265)",
+          "oklch(0.65 0.012 265)",
+          "oklch(0.80 0.010 265)",
+          "oklch(0.95 0.005 265)"
+        ]
+      },
+      "ink-3-dark": {
+        "role": "neutral",
+        "displayName": "Tertiary Ink (dark)",
+        "canonical": "oklch(0.7 0.012 265)",
+        "srgb": "#9b9ea6",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.005 265)",
+          "oklch(0.35 0.008 265)",
+          "oklch(0.45 0.011 265)",
+          "oklch(0.55 0.012 265)",
+          "oklch(0.65 0.012 265)",
+          "oklch(0.80 0.010 265)",
+          "oklch(0.95 0.005 265)"
+        ]
+      },
+      "rule-dark": {
+        "role": "neutral",
+        "displayName": "Hairline Rule (dark)",
+        "canonical": "oklch(1 0 0 / 0.1)",
+        "srgb": "#ffffff1a",
+        "tonalRamp": [
+          "oklch(0.15 0.000 0)",
+          "oklch(0.25 0.000 0)",
+          "oklch(0.35 0.000 0)",
+          "oklch(0.45 0.000 0)",
+          "oklch(0.55 0.000 0)",
+          "oklch(0.65 0.000 0)",
+          "oklch(0.80 0.000 0)",
+          "oklch(0.95 0.000 0)"
+        ]
+      },
+      "rule-soft-dark": {
+        "role": "neutral",
+        "displayName": "Soft Rule / Chip Fill (dark)",
+        "canonical": "oklch(1 0 0 / 0.06)",
+        "srgb": "#ffffff0f",
+        "tonalRamp": [
+          "oklch(0.15 0.000 0)",
+          "oklch(0.25 0.000 0)",
+          "oklch(0.35 0.000 0)",
+          "oklch(0.45 0.000 0)",
+          "oklch(0.55 0.000 0)",
+          "oklch(0.65 0.000 0)",
+          "oklch(0.80 0.000 0)",
+          "oklch(0.95 0.000 0)"
+        ]
+      },
+      "rail-dark": {
+        "role": "neutral",
+        "displayName": "Sidebar Glass (dark)",
+        "canonical": "oklch(0.17 0.017 265 / 0.82)",
+        "srgb": "#0c0f17d1",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.007 265)",
+          "oklch(0.35 0.012 265)",
+          "oklch(0.45 0.015 265)",
+          "oklch(0.55 0.017 265)",
+          "oklch(0.65 0.017 265)",
+          "oklch(0.80 0.014 265)",
+          "oklch(0.95 0.007 265)"
+        ]
+      },
+      "rail-hi-dark": {
+        "role": "neutral",
+        "displayName": "Sidebar Hover (dark)",
+        "canonical": "oklch(1 0 0 / 0.09)",
+        "srgb": "#ffffff17",
+        "tonalRamp": [
+          "oklch(0.15 0.000 0)",
+          "oklch(0.25 0.000 0)",
+          "oklch(0.35 0.000 0)",
+          "oklch(0.45 0.000 0)",
+          "oklch(0.55 0.000 0)",
+          "oklch(0.65 0.000 0)",
+          "oklch(0.80 0.000 0)",
+          "oklch(0.95 0.000 0)"
+        ]
+      },
+      "rail-rule-dark": {
+        "role": "neutral",
+        "displayName": "Sidebar Rule (dark)",
+        "canonical": "oklch(1 0 0 / 0.08)",
+        "srgb": "#ffffff14",
+        "tonalRamp": [
+          "oklch(0.15 0.000 0)",
+          "oklch(0.25 0.000 0)",
+          "oklch(0.35 0.000 0)",
+          "oklch(0.45 0.000 0)",
+          "oklch(0.55 0.000 0)",
+          "oklch(0.65 0.000 0)",
+          "oklch(0.80 0.000 0)",
+          "oklch(0.95 0.000 0)"
+        ]
+      },
+      "on-rail-dark": {
+        "role": "neutral",
+        "displayName": "Sidebar Ink (dark)",
+        "canonical": "oklch(0.95 0.008 265)",
+        "srgb": "#eceef4",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.003 265)",
+          "oklch(0.35 0.006 265)",
+          "oklch(0.45 0.007 265)",
+          "oklch(0.55 0.008 265)",
+          "oklch(0.65 0.008 265)",
+          "oklch(0.80 0.006 265)",
+          "oklch(0.95 0.003 265)"
+        ]
+      },
+      "on-rail-2-dark": {
+        "role": "neutral",
+        "displayName": "Sidebar Secondary Ink (dark)",
+        "canonical": "oklch(0.78 0.012 265)",
+        "srgb": "#b4b7bf",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.005 265)",
+          "oklch(0.35 0.008 265)",
+          "oklch(0.45 0.011 265)",
+          "oklch(0.55 0.012 265)",
+          "oklch(0.65 0.012 265)",
+          "oklch(0.80 0.010 265)",
+          "oklch(0.95 0.005 265)"
+        ]
+      },
+      "accent-dark": {
+        "role": "primary",
+        "displayName": "Signal Yellow (dark)",
+        "canonical": "oklch(0.9 0.18 100)",
+        "srgb": "#fadf27",
+        "tonalRamp": [
+          "oklch(0.15 0.000 100)",
+          "oklch(0.25 0.071 100)",
+          "oklch(0.35 0.124 100)",
+          "oklch(0.45 0.160 100)",
+          "oklch(0.55 0.178 100)",
+          "oklch(0.65 0.178 100)",
+          "oklch(0.80 0.144 100)",
+          "oklch(0.95 0.071 100)"
+        ]
+      },
+      "accent-soft-dark": {
+        "role": "primary",
+        "displayName": "Signal Wash (dark)",
+        "canonical": "oklch(0.38 0.07 100 / 0.6)",
+        "srgb": "#4b430f99",
+        "tonalRamp": [
+          "oklch(0.15 0.000 100)",
+          "oklch(0.25 0.028 100)",
+          "oklch(0.35 0.048 100)",
+          "oklch(0.45 0.062 100)",
+          "oklch(0.55 0.069 100)",
+          "oklch(0.65 0.069 100)",
+          "oklch(0.80 0.056 100)",
+          "oklch(0.95 0.028 100)"
+        ]
+      },
+      "accent-ink-dark": {
+        "role": "primary",
+        "displayName": "Signal Ink (dark)",
+        "canonical": "oklch(0.9 0.14 100)",
+        "srgb": "#f4e06a",
+        "tonalRamp": [
+          "oklch(0.15 0.000 100)",
+          "oklch(0.25 0.055 100)",
+          "oklch(0.35 0.097 100)",
+          "oklch(0.45 0.124 100)",
+          "oklch(0.55 0.138 100)",
+          "oklch(0.65 0.138 100)",
+          "oklch(0.80 0.112 100)",
+          "oklch(0.95 0.055 100)"
+        ]
+      },
+      "primary-dark": {
+        "role": "primary",
+        "displayName": "Signal Yellow (main action) (dark)",
+        "canonical": "oklch(0.9 0.18 100)",
+        "srgb": "#fadf27",
+        "tonalRamp": [
+          "oklch(0.15 0.000 100)",
+          "oklch(0.25 0.071 100)",
+          "oklch(0.35 0.124 100)",
+          "oklch(0.45 0.160 100)",
+          "oklch(0.55 0.178 100)",
+          "oklch(0.65 0.178 100)",
+          "oklch(0.80 0.144 100)",
+          "oklch(0.95 0.071 100)"
+        ]
+      },
+      "primary-hi-dark": {
+        "role": "primary",
+        "displayName": "Signal Yellow, hover (dark)",
+        "canonical": "oklch(0.95 0.18 100)",
+        "srgb": "#fff043",
+        "note": "Slightly outside sRGB; hex is the per-channel clamp.",
+        "tonalRamp": [
+          "oklch(0.15 0.000 100)",
+          "oklch(0.25 0.071 100)",
+          "oklch(0.35 0.124 100)",
+          "oklch(0.45 0.160 100)",
+          "oklch(0.55 0.178 100)",
+          "oklch(0.65 0.178 100)",
+          "oklch(0.80 0.144 100)",
+          "oklch(0.95 0.071 100)"
+        ]
+      },
+      "on-primary-dark": {
+        "role": "primary",
+        "displayName": "Ink on Signal (dark)",
+        "canonical": "oklch(0.18 0.068 100)",
+        "srgb": "#191100",
+        "note": "Slightly outside sRGB; hex is the per-channel clamp.",
+        "tonalRamp": [
+          "oklch(0.15 0.000 100)",
+          "oklch(0.25 0.027 100)",
+          "oklch(0.35 0.047 100)",
+          "oklch(0.45 0.060 100)",
+          "oklch(0.55 0.067 100)",
+          "oklch(0.65 0.067 100)",
+          "oklch(0.80 0.055 100)",
+          "oklch(0.95 0.027 100)"
+        ]
+      },
+      "ok-dark": {
+        "role": "tertiary",
+        "displayName": "Printed Green (dark)",
+        "canonical": "oklch(0.74 0.14 150)",
+        "srgb": "#62c37a",
+        "tonalRamp": [
+          "oklch(0.15 0.000 150)",
+          "oklch(0.25 0.055 150)",
+          "oklch(0.35 0.097 150)",
+          "oklch(0.45 0.124 150)",
+          "oklch(0.55 0.138 150)",
+          "oklch(0.65 0.138 150)",
+          "oklch(0.80 0.112 150)",
+          "oklch(0.95 0.055 150)"
+        ]
+      },
+      "ok-soft-dark": {
+        "role": "tertiary",
+        "displayName": "Printed Wash (dark)",
+        "canonical": "oklch(0.3 0.05 150)",
+        "srgb": "#1a3520",
+        "tonalRamp": [
+          "oklch(0.15 0.000 150)",
+          "oklch(0.25 0.020 150)",
+          "oklch(0.35 0.035 150)",
+          "oklch(0.45 0.044 150)",
+          "oklch(0.55 0.049 150)",
+          "oklch(0.65 0.049 150)",
+          "oklch(0.80 0.040 150)",
+          "oklch(0.95 0.020 150)"
+        ]
+      },
+      "fail-dark": {
+        "role": "tertiary",
+        "displayName": "Failure Red (dark)",
+        "canonical": "oklch(0.70 0.19 18)",
+        "srgb": "#fe6270",
+        "tonalRamp": [
+          "oklch(0.15 0.000 18)",
+          "oklch(0.25 0.075 18)",
+          "oklch(0.35 0.131 18)",
+          "oklch(0.45 0.169 18)",
+          "oklch(0.55 0.188 18)",
+          "oklch(0.65 0.188 18)",
+          "oklch(0.80 0.152 18)",
+          "oklch(0.95 0.075 18)"
+        ]
+      },
+      "fail-soft-dark": {
+        "role": "tertiary",
+        "displayName": "Failure Wash (dark)",
+        "canonical": "oklch(0.33 0.08 18)",
+        "srgb": "#572125",
+        "tonalRamp": [
+          "oklch(0.15 0.000 18)",
+          "oklch(0.25 0.032 18)",
+          "oklch(0.35 0.055 18)",
+          "oklch(0.45 0.071 18)",
+          "oklch(0.55 0.079 18)",
+          "oklch(0.65 0.079 18)",
+          "oklch(0.80 0.064 18)",
+          "oklch(0.95 0.032 18)"
+        ]
+      },
+      "partial-dark": {
+        "role": "tertiary",
+        "displayName": "Partial Amber (dark)",
+        "canonical": "oklch(0.82 0.13 85)",
+        "srgb": "#ebbd57",
+        "tonalRamp": [
+          "oklch(0.15 0.000 85)",
+          "oklch(0.25 0.051 85)",
+          "oklch(0.35 0.090 85)",
+          "oklch(0.45 0.116 85)",
+          "oklch(0.55 0.128 85)",
+          "oklch(0.65 0.128 85)",
+          "oklch(0.80 0.104 85)",
+          "oklch(0.95 0.051 85)"
+        ]
+      },
+      "partial-soft-dark": {
+        "role": "tertiary",
+        "displayName": "Partial Wash (dark)",
+        "canonical": "oklch(0.34 0.06 85)",
+        "srgb": "#46350d",
+        "tonalRamp": [
+          "oklch(0.15 0.000 85)",
+          "oklch(0.25 0.024 85)",
+          "oklch(0.35 0.041 85)",
+          "oklch(0.45 0.053 85)",
+          "oklch(0.55 0.059 85)",
+          "oklch(0.65 0.059 85)",
+          "oklch(0.80 0.048 85)",
+          "oklch(0.95 0.024 85)"
+        ]
+      },
+      "offline-dark": {
+        "role": "tertiary",
+        "displayName": "Offline Slate (dark)",
+        "canonical": "oklch(0.68 0.03 250)",
+        "srgb": "#8b9aab",
+        "tonalRamp": [
+          "oklch(0.15 0.000 250)",
+          "oklch(0.25 0.012 250)",
+          "oklch(0.35 0.021 250)",
+          "oklch(0.45 0.027 250)",
+          "oklch(0.55 0.030 250)",
+          "oklch(0.65 0.030 250)",
+          "oklch(0.80 0.024 250)",
+          "oklch(0.95 0.012 250)"
+        ]
+      },
+      "ground-dark-solid": {
+        "role": "neutral",
+        "displayName": "Content Glass (dark, solid)",
+        "canonical": "oklch(0.2 0.009 265)",
+        "srgb": "#14161a",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.004 265)",
+          "oklch(0.35 0.006 265)",
+          "oklch(0.45 0.008 265)",
+          "oklch(0.55 0.009 265)",
+          "oklch(0.65 0.009 265)",
+          "oklch(0.80 0.007 265)",
+          "oklch(0.95 0.004 265)"
+        ]
+      },
+      "surface-dark-solid": {
+        "role": "neutral",
+        "displayName": "Pane Glass (dark, solid)",
+        "canonical": "oklch(0.26 0.010 265)",
+        "srgb": "#222429",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.004 265)",
+          "oklch(0.35 0.007 265)",
+          "oklch(0.45 0.009 265)",
+          "oklch(0.55 0.010 265)",
+          "oklch(0.65 0.010 265)",
+          "oklch(0.80 0.008 265)",
+          "oklch(0.95 0.004 265)"
+        ]
+      },
+      "tray-dark-solid": {
+        "role": "neutral",
+        "displayName": "Preview Well (dark, solid)",
+        "canonical": "oklch(0.235 0.010 265)",
+        "srgb": "#1c1e23",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.004 265)",
+          "oklch(0.35 0.007 265)",
+          "oklch(0.45 0.009 265)",
+          "oklch(0.55 0.010 265)",
+          "oklch(0.65 0.010 265)",
+          "oklch(0.80 0.008 265)",
+          "oklch(0.95 0.004 265)"
+        ]
+      },
+      "edge-dark-solid": {
+        "role": "neutral",
+        "displayName": "Bright Edge (dark, solid)",
+        "canonical": "oklch(0.31 0.015 265)",
+        "srgb": "#2d3038",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.006 265)",
+          "oklch(0.35 0.010 265)",
+          "oklch(0.45 0.013 265)",
+          "oklch(0.55 0.015 265)",
+          "oklch(0.65 0.015 265)",
+          "oklch(0.80 0.012 265)",
+          "oklch(0.95 0.006 265)"
+        ]
+      },
+      "rail-dark-solid": {
+        "role": "neutral",
+        "displayName": "Sidebar Glass (dark, solid)",
+        "canonical": "oklch(0.17 0.017 265)",
+        "srgb": "#0c0f17",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.007 265)",
+          "oklch(0.35 0.012 265)",
+          "oklch(0.45 0.015 265)",
+          "oklch(0.55 0.017 265)",
+          "oklch(0.65 0.017 265)",
+          "oklch(0.80 0.014 265)",
+          "oklch(0.95 0.007 265)"
+        ]
+      },
+      "rail-hi-dark-solid": {
+        "role": "neutral",
+        "displayName": "Sidebar Hover (dark, solid)",
+        "canonical": "oklch(0.26 0.020 265)",
+        "srgb": "#1f242e",
+        "tonalRamp": [
+          "oklch(0.15 0.000 265)",
+          "oklch(0.25 0.008 265)",
+          "oklch(0.35 0.014 265)",
+          "oklch(0.45 0.018 265)",
+          "oklch(0.55 0.020 265)",
+          "oklch(0.65 0.020 265)",
+          "oklch(0.80 0.016 265)",
+          "oklch(0.95 0.008 265)"
+        ]
+      },
+      "accent-soft-dark-solid": {
+        "role": "primary",
+        "displayName": "Signal Wash (dark, solid)",
+        "canonical": "oklch(0.34 0.07 100)",
+        "srgb": "#413801",
+        "tonalRamp": [
+          "oklch(0.15 0.000 100)",
+          "oklch(0.25 0.028 100)",
+          "oklch(0.35 0.048 100)",
+          "oklch(0.45 0.062 100)",
+          "oklch(0.55 0.069 100)",
+          "oklch(0.65 0.069 100)",
+          "oklch(0.80 0.056 100)",
+          "oklch(0.95 0.028 100)"
+        ]
+      },
+      "mat-petg": {
+        "role": "secondary",
+        "displayName": "PETG Teal",
+        "canonical": "oklch(0.7 0.11 200)",
+        "srgb": "#2bb3b9",
+        "tonalRamp": [
+          "oklch(0.86 0.08 195)",
+          "oklch(0.7 0.11 200)",
+          "oklch(0.56 0.11 205)",
+          "oklch(0.48 0.1 205)"
+        ],
+        "rampNote": "Preview face ramp: top face, side, shade, edge. Fixed in every colour theme."
+      },
+      "mat-pla": {
+        "role": "secondary",
+        "displayName": "PLA Orange",
+        "canonical": "oklch(0.76 0.14 55)",
+        "srgb": "#f49752",
+        "tonalRamp": [
+          "oklch(0.88 0.1 65)",
+          "oklch(0.76 0.14 55)",
+          "oklch(0.63 0.15 45)",
+          "oklch(0.55 0.13 45)"
+        ],
+        "rampNote": "Preview face ramp: top face, side, shade, edge. Fixed in every colour theme."
+      },
+      "mat-tpu": {
+        "role": "secondary",
+        "displayName": "TPU Magenta",
+        "canonical": "oklch(0.7 0.15 345)",
+        "srgb": "#de75b4",
+        "tonalRamp": [
+          "oklch(0.85 0.09 340)",
+          "oklch(0.7 0.15 345)",
+          "oklch(0.56 0.16 350)",
+          "oklch(0.48 0.14 350)"
+        ],
+        "rampNote": "Preview face ramp: top face, side, shade, edge. Fixed in every colour theme."
+      },
+      "mat-asa": {
+        "role": "secondary",
+        "displayName": "ASA / Unknown Neutral",
+        "canonical": "oklch(0.62 0.015 260)",
+        "srgb": "#81868f",
+        "tonalRamp": [
+          "oklch(0.82 0.01 260)",
+          "oklch(0.62 0.015 260)",
+          "oklch(0.45 0.02 260)",
+          "oklch(0.38 0.02 260)"
+        ],
+        "rampNote": "Preview face ramp: top face, side, shade, edge. Fixed in every colour theme."
+      },
+      "contact-shadow": {
+        "role": "neutral",
+        "displayName": "Contact Shadow",
+        "canonical": "oklch(0.25 0.02 165 / 0.14)",
+        "srgb": "#19251f24",
+        "tonalRamp": [
+          "oklch(0.15 0.000 165)",
+          "oklch(0.25 0.008 165)",
+          "oklch(0.35 0.014 165)",
+          "oklch(0.45 0.018 165)",
+          "oklch(0.55 0.020 165)",
+          "oklch(0.65 0.020 165)",
+          "oklch(0.80 0.016 165)",
+          "oklch(0.95 0.008 165)"
+        ]
+      },
+      "contact-shadow-dark": {
+        "role": "neutral",
+        "displayName": "Contact Shadow (dark)",
+        "canonical": "oklch(0.05 0.01 165 / 0.5)",
+        "srgb": "#00010080",
+        "tonalRamp": [
+          "oklch(0.15 0.000 165)",
+          "oklch(0.25 0.004 165)",
+          "oklch(0.35 0.007 165)",
+          "oklch(0.45 0.009 165)",
+          "oklch(0.55 0.010 165)",
+          "oklch(0.65 0.010 165)",
+          "oklch(0.80 0.008 165)",
+          "oklch(0.95 0.004 165)"
+        ]
+      }
+    },
+    "colorThemes": {
+      "graphite": {
+        "displayName": "Graphite signal",
+        "default": true,
+        "description": "Neutral smoked glass, signal-yellow accent.",
+        "light": {
+          "glass": {
+            "ground": {
+              "oklch": "oklch(0.965 0.010 265 / 0.86)",
+              "srgb": "#f0f3fadb"
+            },
+            "surface": {
+              "oklch": "oklch(0.99 0.005 265 / 0.72)",
+              "srgb": "#fafcffb8"
+            },
+            "tray": {
+              "oklch": "oklch(0.94 0.012 265 / 0.7)",
+              "srgb": "#e7ebf4b2"
+            },
+            "rail": {
+              "oklch": "oklch(0.93 0.020 265 / 0.82)",
+              "srgb": "#e1e8f6d1"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.99 0.010 265 / 0.65)",
+              "srgb": "#f8fcffa6"
+            }
+          },
+          "accent": {
+            "accent": {
+              "oklch": "oklch(0.62 0.17 100)",
+              "srgb": "#9f8600"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.94 0.076 100 / 0.8)",
+              "srgb": "#f7edb2cc"
+            },
+            "accent-ink": {
+              "oklch": "oklch(0.48 0.17 100)",
+              "srgb": "#755c00"
+            },
+            "primary": {
+              "oklch": "oklch(0.62 0.17 100)",
+              "srgb": "#9f8600"
+            },
+            "primary-hi": {
+              "oklch": "oklch(0.57 0.17 100)",
+              "srgb": "#907600"
+            },
+            "on-primary": {
+              "oklch": "oklch(0.18 0.068 100)",
+              "srgb": "#191100"
+            }
+          },
+          "solidFallback": {
+            "ground": {
+              "oklch": "oklch(0.965 0.010 265)",
+              "srgb": "#f0f3fa"
+            },
+            "surface": {
+              "oklch": "oklch(0.995 0.005 265)",
+              "srgb": "#fcfdff"
+            },
+            "tray": {
+              "oklch": "oklch(0.945 0.012 265)",
+              "srgb": "#e9edf5"
+            },
+            "rail": {
+              "oklch": "oklch(0.93 0.020 265)",
+              "srgb": "#e1e8f6"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.98 0.010 265)",
+              "srgb": "#f5f8ff"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.94 0.076 100)",
+              "srgb": "#f7edb2"
+            }
+          }
+        },
+        "dark": {
+          "glass": {
+            "ground": {
+              "oklch": "oklch(0.2 0.009 265 / 0.84)",
+              "srgb": "#14161ad6"
+            },
+            "surface": {
+              "oklch": "oklch(0.29 0.010 265 / 0.62)",
+              "srgb": "#292b309e"
+            },
+            "tray": {
+              "oklch": "oklch(0.25 0.010 265 / 0.6)",
+              "srgb": "#1f222799"
+            },
+            "rail": {
+              "oklch": "oklch(0.17 0.017 265 / 0.82)",
+              "srgb": "#0c0f17d1"
+            },
+            "rail-hi": {
+              "oklch": "oklch(1 0 0 / 0.09)",
+              "srgb": "#ffffff17"
+            }
+          },
+          "accent": {
+            "accent": {
+              "oklch": "oklch(0.9 0.18 100)",
+              "srgb": "#fadf27"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.38 0.07 100 / 0.6)",
+              "srgb": "#4b430f99"
+            },
+            "accent-ink": {
+              "oklch": "oklch(0.9 0.14 100)",
+              "srgb": "#f4e06a"
+            },
+            "primary": {
+              "oklch": "oklch(0.9 0.18 100)",
+              "srgb": "#fadf27"
+            },
+            "primary-hi": {
+              "oklch": "oklch(0.95 0.18 100)",
+              "srgb": "#fff043"
+            },
+            "on-primary": {
+              "oklch": "oklch(0.18 0.068 100)",
+              "srgb": "#191100"
+            }
+          },
+          "solidFallback": {
+            "ground": {
+              "oklch": "oklch(0.2 0.009 265)",
+              "srgb": "#14161a"
+            },
+            "surface": {
+              "oklch": "oklch(0.26 0.010 265)",
+              "srgb": "#222429"
+            },
+            "tray": {
+              "oklch": "oklch(0.235 0.010 265)",
+              "srgb": "#1c1e23"
+            },
+            "rail": {
+              "oklch": "oklch(0.17 0.017 265)",
+              "srgb": "#0c0f17"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.26 0.020 265)",
+              "srgb": "#1f242e"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.34 0.07 100)",
+              "srgb": "#413801"
+            }
+          }
+        }
+      },
+      "frost": {
+        "displayName": "Violet frost",
+        "default": false,
+        "description": "Milky glass, violet accent.",
+        "light": {
+          "glass": {
+            "ground": {
+              "oklch": "oklch(0.975 0.006 250 / 0.86)",
+              "srgb": "#f4f7fbdb"
+            },
+            "surface": {
+              "oklch": "oklch(1 0 0 / 0.72)",
+              "srgb": "#ffffffb8"
+            },
+            "tray": {
+              "oklch": "oklch(0.95 0.008 250 / 0.7)",
+              "srgb": "#ebeff4b2"
+            },
+            "rail": {
+              "oklch": "oklch(0.96 0.01 250 / 0.82)",
+              "srgb": "#edf2f8d1"
+            },
+            "rail-hi": {
+              "oklch": "oklch(1 0 0 / 0.6)",
+              "srgb": "#ffffff99"
+            }
+          },
+          "accent": {
+            "accent": {
+              "oklch": "oklch(0.6 0.2 300)",
+              "srgb": "#955be3"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.93 0.04 300 / 0.8)",
+              "srgb": "#ece2ffcc"
+            },
+            "accent-ink": {
+              "oklch": "oklch(0.47 0.18 300)",
+              "srgb": "#6d37ae"
+            },
+            "primary": {
+              "oklch": "oklch(0.52 0.2 295)",
+              "srgb": "#7544cd"
+            },
+            "primary-hi": {
+              "oklch": "oklch(0.47 0.2 295)",
+              "srgb": "#6833bc"
+            },
+            "on-primary": {
+              "oklch": "oklch(0.99 0 0)",
+              "srgb": "#fcfcfc"
+            }
+          },
+          "solidFallback": {
+            "ground": {
+              "oklch": "oklch(0.965 0.008 250)",
+              "srgb": "#f0f4f9"
+            },
+            "surface": {
+              "oklch": "oklch(0.995 0.003 250)",
+              "srgb": "#fcfeff"
+            },
+            "tray": {
+              "oklch": "oklch(0.945 0.01 250)",
+              "srgb": "#e8edf3"
+            },
+            "rail": {
+              "oklch": "oklch(0.93 0.014 250)",
+              "srgb": "#e1e9f1"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.98 0.006 250)",
+              "srgb": "#f5f9fc"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.94 0.035 300)",
+              "srgb": "#eee6ff"
+            }
+          }
+        },
+        "dark": {
+          "glass": {
+            "ground": {
+              "oklch": "oklch(0.21 0.015 265 / 0.84)",
+              "srgb": "#15181fd6"
+            },
+            "surface": {
+              "oklch": "oklch(0.3 0.015 265 / 0.62)",
+              "srgb": "#2a2e369e"
+            },
+            "tray": {
+              "oklch": "oklch(0.26 0.015 265 / 0.6)",
+              "srgb": "#20242b99"
+            },
+            "rail": {
+              "oklch": "oklch(0.18 0.015 265 / 0.82)",
+              "srgb": "#0e1218d1"
+            },
+            "rail-hi": {
+              "oklch": "oklch(1 0 0 / 0.09)",
+              "srgb": "#ffffff17"
+            }
+          },
+          "accent": {
+            "accent": {
+              "oklch": "oklch(0.74 0.15 300)",
+              "srgb": "#ba93fb"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.4 0.08 300 / 0.6)",
+              "srgb": "#4e3d6c99"
+            },
+            "accent-ink": {
+              "oklch": "oklch(0.84 0.1 300)",
+              "srgb": "#d4bcff"
+            },
+            "primary": {
+              "oklch": "oklch(0.72 0.15 298)",
+              "srgb": "#b18ef6"
+            },
+            "primary-hi": {
+              "oklch": "oklch(0.78 0.13 298)",
+              "srgb": "#c2a5ff"
+            },
+            "on-primary": {
+              "oklch": "oklch(0.18 0.03 298)",
+              "srgb": "#130f1d"
+            }
+          },
+          "solidFallback": {
+            "ground": {
+              "oklch": "oklch(0.2 0.014 265)",
+              "srgb": "#13161d"
+            },
+            "surface": {
+              "oklch": "oklch(0.26 0.015 265)",
+              "srgb": "#20242b"
+            },
+            "tray": {
+              "oklch": "oklch(0.235 0.015 265)",
+              "srgb": "#1b1e25"
+            },
+            "rail": {
+              "oklch": "oklch(0.17 0.014 265)",
+              "srgb": "#0c0f16"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.26 0.016 265)",
+              "srgb": "#20242c"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.34 0.07 300)",
+              "srgb": "#3e2f57"
+            }
+          }
+        }
+      },
+      "quartz": {
+        "displayName": "Smoked quartz",
+        "default": false,
+        "description": "Warm smoky glass, periwinkle accent.",
+        "light": {
+          "glass": {
+            "ground": {
+              "oklch": "oklch(0.965 0.020 60 / 0.86)",
+              "srgb": "#fef1e6db"
+            },
+            "surface": {
+              "oklch": "oklch(0.99 0.010 60 / 0.72)",
+              "srgb": "#fffaf5b8"
+            },
+            "tray": {
+              "oklch": "oklch(0.94 0.024 60 / 0.7)",
+              "srgb": "#f8e8dcb2"
+            },
+            "rail": {
+              "oklch": "oklch(0.93 0.043 50 / 0.82)",
+              "srgb": "#ffe0cfd1"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.99 0.022 50 / 0.65)",
+              "srgb": "#fff8efa6"
+            }
+          },
+          "accent": {
+            "accent": {
+              "oklch": "oklch(0.52 0.16 278)",
+              "srgb": "#575ac2"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.94 0.076 278 / 0.8)",
+              "srgb": "#dfe7ffcc"
+            },
+            "accent-ink": {
+              "oklch": "oklch(0.48 0.16 278)",
+              "srgb": "#4c4db5"
+            },
+            "primary": {
+              "oklch": "oklch(0.52 0.16 278)",
+              "srgb": "#575ac2"
+            },
+            "primary-hi": {
+              "oklch": "oklch(0.47 0.16 278)",
+              "srgb": "#4a4ab2"
+            },
+            "on-primary": {
+              "oklch": "oklch(0.99 0 0)",
+              "srgb": "#fcfcfc"
+            }
+          },
+          "solidFallback": {
+            "ground": {
+              "oklch": "oklch(0.965 0.020 60)",
+              "srgb": "#fef1e6"
+            },
+            "surface": {
+              "oklch": "oklch(0.995 0.010 60)",
+              "srgb": "#fffcf7"
+            },
+            "tray": {
+              "oklch": "oklch(0.945 0.024 60)",
+              "srgb": "#faeadd"
+            },
+            "rail": {
+              "oklch": "oklch(0.93 0.043 50)",
+              "srgb": "#ffe0cf"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.98 0.022 50)",
+              "srgb": "#fff5ec"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.94 0.076 278)",
+              "srgb": "#dfe7ff"
+            }
+          }
+        },
+        "dark": {
+          "glass": {
+            "ground": {
+              "oklch": "oklch(0.2 0.019 60 / 0.84)",
+              "srgb": "#1d140dd6"
+            },
+            "surface": {
+              "oklch": "oklch(0.29 0.020 60 / 0.62)",
+              "srgb": "#3329219e"
+            },
+            "tray": {
+              "oklch": "oklch(0.25 0.020 60 / 0.6)",
+              "srgb": "#291f1899"
+            },
+            "rail": {
+              "oklch": "oklch(0.17 0.034 50 / 0.82)",
+              "srgb": "#1b0a03d1"
+            },
+            "rail-hi": {
+              "oklch": "oklch(1 0 0 / 0.09)",
+              "srgb": "#ffffff17"
+            }
+          },
+          "accent": {
+            "accent": {
+              "oklch": "oklch(0.74 0.13 278)",
+              "srgb": "#98a2fc"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.38 0.07 278 / 0.6)",
+              "srgb": "#3a3e6799"
+            },
+            "accent-ink": {
+              "oklch": "oklch(0.84 0.10 278)",
+              "srgb": "#bbc5ff"
+            },
+            "primary": {
+              "oklch": "oklch(0.74 0.13 278)",
+              "srgb": "#98a2fc"
+            },
+            "primary-hi": {
+              "oklch": "oklch(0.79 0.13 278)",
+              "srgb": "#a7b2ff"
+            },
+            "on-primary": {
+              "oklch": "oklch(0.18 0.068 278)",
+              "srgb": "#0c0b2e"
+            }
+          },
+          "solidFallback": {
+            "ground": {
+              "oklch": "oklch(0.2 0.019 60)",
+              "srgb": "#1d140d"
+            },
+            "surface": {
+              "oklch": "oklch(0.26 0.020 60)",
+              "srgb": "#2b221a"
+            },
+            "tray": {
+              "oklch": "oklch(0.235 0.020 60)",
+              "srgb": "#251c15"
+            },
+            "rail": {
+              "oklch": "oklch(0.17 0.034 50)",
+              "srgb": "#1b0a03"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.26 0.043 50)",
+              "srgb": "#351d10"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.34 0.07 278)",
+              "srgb": "#30335c"
+            }
+          }
+        }
+      },
+      "seaglass": {
+        "displayName": "Sea glass",
+        "default": false,
+        "description": "Pale green glass, deep navy accent.",
+        "light": {
+          "glass": {
+            "ground": {
+              "oklch": "oklch(0.965 0.037 170 / 0.86)",
+              "srgb": "#dcfcf0db"
+            },
+            "surface": {
+              "oklch": "oklch(0.99 0.019 170 / 0.72)",
+              "srgb": "#f0fffab8"
+            },
+            "tray": {
+              "oklch": "oklch(0.94 0.044 170 / 0.7)",
+              "srgb": "#cff5e7b2"
+            },
+            "rail": {
+              "oklch": "oklch(0.93 0.085 175 / 0.82)",
+              "srgb": "#aafbe5d1"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.99 0.043 175 / 0.65)",
+              "srgb": "#dffffaa6"
+            }
+          },
+          "accent": {
+            "accent": {
+              "oklch": "oklch(0.42 0.13 258)",
+              "srgb": "#174a92"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.94 0.076 258 / 0.8)",
+              "srgb": "#ccedffcc"
+            },
+            "accent-ink": {
+              "oklch": "oklch(0.42 0.13 258)",
+              "srgb": "#174a92"
+            },
+            "primary": {
+              "oklch": "oklch(0.42 0.13 258)",
+              "srgb": "#174a92"
+            },
+            "primary-hi": {
+              "oklch": "oklch(0.37 0.13 258)",
+              "srgb": "#063c82"
+            },
+            "on-primary": {
+              "oklch": "oklch(0.99 0 0)",
+              "srgb": "#fcfcfc"
+            }
+          },
+          "solidFallback": {
+            "ground": {
+              "oklch": "oklch(0.965 0.037 170)",
+              "srgb": "#dcfcf0"
+            },
+            "surface": {
+              "oklch": "oklch(0.995 0.019 170)",
+              "srgb": "#f2fffb"
+            },
+            "tray": {
+              "oklch": "oklch(0.945 0.044 170)",
+              "srgb": "#d1f7e8"
+            },
+            "rail": {
+              "oklch": "oklch(0.93 0.085 175)",
+              "srgb": "#aafbe5"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.98 0.043 175)",
+              "srgb": "#dcfff7"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.94 0.076 258)",
+              "srgb": "#ccedff"
+            }
+          }
+        },
+        "dark": {
+          "glass": {
+            "ground": {
+              "oklch": "oklch(0.2 0.034 170 / 0.84)",
+              "srgb": "#041b14d6"
+            },
+            "surface": {
+              "oklch": "oklch(0.29 0.037 170 / 0.62)",
+              "srgb": "#1731289e"
+            },
+            "tray": {
+              "oklch": "oklch(0.25 0.037 170 / 0.6)",
+              "srgb": "#0c271f99"
+            },
+            "rail": {
+              "oklch": "oklch(0.17 0.068 175 / 0.82)",
+              "srgb": "#00180ed1"
+            },
+            "rail-hi": {
+              "oklch": "oklch(1 0 0 / 0.09)",
+              "srgb": "#ffffff17"
+            }
+          },
+          "accent": {
+            "accent": {
+              "oklch": "oklch(0.74 0.12 255)",
+              "srgb": "#75aef5"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.38 0.07 255 / 0.6)",
+              "srgb": "#27436799"
+            },
+            "accent-ink": {
+              "oklch": "oklch(0.84 0.10 255)",
+              "srgb": "#9eceff"
+            },
+            "primary": {
+              "oklch": "oklch(0.74 0.12 255)",
+              "srgb": "#75aef5"
+            },
+            "primary-hi": {
+              "oklch": "oklch(0.79 0.12 255)",
+              "srgb": "#85beff"
+            },
+            "on-primary": {
+              "oklch": "oklch(0.18 0.068 255)",
+              "srgb": "#00102e"
+            }
+          },
+          "solidFallback": {
+            "ground": {
+              "oklch": "oklch(0.2 0.034 170)",
+              "srgb": "#041b14"
+            },
+            "surface": {
+              "oklch": "oklch(0.26 0.037 170)",
+              "srgb": "#0f2a21"
+            },
+            "tray": {
+              "oklch": "oklch(0.235 0.037 170)",
+              "srgb": "#08241b"
+            },
+            "rail": {
+              "oklch": "oklch(0.17 0.068 175)",
+              "srgb": "#00180e"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.26 0.085 175)",
+              "srgb": "#003022"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.34 0.07 255)",
+              "srgb": "#1d395b"
+            }
+          }
+        }
+      },
+      "resin": {
+        "displayName": "Amber resin",
+        "default": false,
+        "description": "Honey-tinted glass, deep indigo accent.",
+        "light": {
+          "glass": {
+            "ground": {
+              "oklch": "oklch(0.965 0.051 85 / 0.86)",
+              "srgb": "#fff2cddb"
+            },
+            "surface": {
+              "oklch": "oklch(0.99 0.025 85 / 0.72)",
+              "srgb": "#fffbe9b8"
+            },
+            "tray": {
+              "oklch": "oklch(0.94 0.061 85 / 0.7)",
+              "srgb": "#fee9bdb2"
+            },
+            "rail": {
+              "oklch": "oklch(0.93 0.090 75 / 0.82)",
+              "srgb": "#ffe0a4d1"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.99 0.051 75 / 0.65)",
+              "srgb": "#fff8d6a6"
+            }
+          },
+          "accent": {
+            "accent": {
+              "oklch": "oklch(0.45 0.2 280)",
+              "srgb": "#4838bf"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.94 0.076 280 / 0.8)",
+              "srgb": "#e0e6ffcc"
+            },
+            "accent-ink": {
+              "oklch": "oklch(0.45 0.2 280)",
+              "srgb": "#4838bf"
+            },
+            "primary": {
+              "oklch": "oklch(0.45 0.2 280)",
+              "srgb": "#4838bf"
+            },
+            "primary-hi": {
+              "oklch": "oklch(0.40 0.2 280)",
+              "srgb": "#3d26ae"
+            },
+            "on-primary": {
+              "oklch": "oklch(0.99 0 0)",
+              "srgb": "#fcfcfc"
+            }
+          },
+          "solidFallback": {
+            "ground": {
+              "oklch": "oklch(0.965 0.051 85)",
+              "srgb": "#fff2cd"
+            },
+            "surface": {
+              "oklch": "oklch(0.995 0.025 85)",
+              "srgb": "#fffdeb"
+            },
+            "tray": {
+              "oklch": "oklch(0.945 0.061 85)",
+              "srgb": "#ffebbf"
+            },
+            "rail": {
+              "oklch": "oklch(0.93 0.090 75)",
+              "srgb": "#ffe0a4"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.98 0.051 75)",
+              "srgb": "#fff4d3"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.94 0.076 280)",
+              "srgb": "#e0e6ff"
+            }
+          }
+        },
+        "dark": {
+          "glass": {
+            "ground": {
+              "oklch": "oklch(0.2 0.046 85 / 0.84)",
+              "srgb": "#1f1400d6"
+            },
+            "surface": {
+              "oklch": "oklch(0.29 0.051 85 / 0.62)",
+              "srgb": "#3729089e"
+            },
+            "tray": {
+              "oklch": "oklch(0.25 0.051 85 / 0.6)",
+              "srgb": "#2d1f0099"
+            },
+            "rail": {
+              "oklch": "oklch(0.17 0.082 75 / 0.82)",
+              "srgb": "#220500d1"
+            },
+            "rail-hi": {
+              "oklch": "oklch(1 0 0 / 0.09)",
+              "srgb": "#ffffff17"
+            }
+          },
+          "accent": {
+            "accent": {
+              "oklch": "oklch(0.72 0.16 285)",
+              "srgb": "#9c93ff"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.38 0.07 285 / 0.6)",
+              "srgb": "#3f3c6699"
+            },
+            "accent-ink": {
+              "oklch": "oklch(0.84 0.13 285)",
+              "srgb": "#c2beff"
+            },
+            "primary": {
+              "oklch": "oklch(0.72 0.16 285)",
+              "srgb": "#9c93ff"
+            },
+            "primary-hi": {
+              "oklch": "oklch(0.77 0.16 285)",
+              "srgb": "#aba3ff"
+            },
+            "on-primary": {
+              "oklch": "oklch(0.18 0.068 285)",
+              "srgb": "#100a2e"
+            }
+          },
+          "solidFallback": {
+            "ground": {
+              "oklch": "oklch(0.2 0.046 85)",
+              "srgb": "#1f1400"
+            },
+            "surface": {
+              "oklch": "oklch(0.26 0.051 85)",
+              "srgb": "#2f2202"
+            },
+            "tray": {
+              "oklch": "oklch(0.235 0.051 85)",
+              "srgb": "#291c00"
+            },
+            "rail": {
+              "oklch": "oklch(0.17 0.082 75)",
+              "srgb": "#220500"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.26 0.090 75)",
+              "srgb": "#3c1a00"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.34 0.07 285)",
+              "srgb": "#35325a"
+            }
+          }
+        }
+      },
+      "rose": {
+        "displayName": "Rose PETG",
+        "default": false,
+        "description": "Blush-tinted glass, midnight-blue accent.",
+        "light": {
+          "glass": {
+            "ground": {
+              "oklch": "oklch(0.965 0.034 15 / 0.86)",
+              "srgb": "#ffebecdb"
+            },
+            "surface": {
+              "oklch": "oklch(0.99 0.017 15 / 0.72)",
+              "srgb": "#fff7f8b8"
+            },
+            "tray": {
+              "oklch": "oklch(0.94 0.041 15 / 0.7)",
+              "srgb": "#ffe1e2b2"
+            },
+            "rail": {
+              "oklch": "oklch(0.93 0.076 10 / 0.82)",
+              "srgb": "#ffd4dcd1"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.99 0.037 10 / 0.65)",
+              "srgb": "#fff2f6a6"
+            }
+          },
+          "accent": {
+            "accent": {
+              "oklch": "oklch(0.42 0.12 250)",
+              "srgb": "#004f8b"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.94 0.076 250 / 0.8)",
+              "srgb": "#c5f0ffcc"
+            },
+            "accent-ink": {
+              "oklch": "oklch(0.42 0.12 250)",
+              "srgb": "#004f8b"
+            },
+            "primary": {
+              "oklch": "oklch(0.42 0.12 250)",
+              "srgb": "#004f8b"
+            },
+            "primary-hi": {
+              "oklch": "oklch(0.37 0.12 250)",
+              "srgb": "#00407c"
+            },
+            "on-primary": {
+              "oklch": "oklch(0.99 0 0)",
+              "srgb": "#fcfcfc"
+            }
+          },
+          "solidFallback": {
+            "ground": {
+              "oklch": "oklch(0.965 0.034 15)",
+              "srgb": "#ffebec"
+            },
+            "surface": {
+              "oklch": "oklch(0.995 0.017 15)",
+              "srgb": "#fff9fa"
+            },
+            "tray": {
+              "oklch": "oklch(0.945 0.041 15)",
+              "srgb": "#ffe2e4"
+            },
+            "rail": {
+              "oklch": "oklch(0.93 0.076 10)",
+              "srgb": "#ffd4dc"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.98 0.037 10)",
+              "srgb": "#ffeff3"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.94 0.076 250)",
+              "srgb": "#c5f0ff"
+            }
+          }
+        },
+        "dark": {
+          "glass": {
+            "ground": {
+              "oklch": "oklch(0.2 0.031 15 / 0.84)",
+              "srgb": "#221011d6"
+            },
+            "surface": {
+              "oklch": "oklch(0.29 0.034 15 / 0.62)",
+              "srgb": "#3b24269e"
+            },
+            "tray": {
+              "oklch": "oklch(0.25 0.034 15 / 0.6)",
+              "srgb": "#301b1c99"
+            },
+            "rail": {
+              "oklch": "oklch(0.17 0.061 10 / 0.82)",
+              "srgb": "#230209d1"
+            },
+            "rail-hi": {
+              "oklch": "oklch(1 0 0 / 0.09)",
+              "srgb": "#ffffff17"
+            }
+          },
+          "accent": {
+            "accent": {
+              "oklch": "oklch(0.76 0.1 245)",
+              "srgb": "#79b8ed"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.38 0.07 245 / 0.6)",
+              "srgb": "#1e466599"
+            },
+            "accent-ink": {
+              "oklch": "oklch(0.84 0.08 245)",
+              "srgb": "#9fd1fc"
+            },
+            "primary": {
+              "oklch": "oklch(0.76 0.1 245)",
+              "srgb": "#79b8ed"
+            },
+            "primary-hi": {
+              "oklch": "oklch(0.81 0.1 245)",
+              "srgb": "#89c8fe"
+            },
+            "on-primary": {
+              "oklch": "oklch(0.18 0.068 245)",
+              "srgb": "#00122d"
+            }
+          },
+          "solidFallback": {
+            "ground": {
+              "oklch": "oklch(0.2 0.031 15)",
+              "srgb": "#221011"
+            },
+            "surface": {
+              "oklch": "oklch(0.26 0.034 15)",
+              "srgb": "#331d1f"
+            },
+            "tray": {
+              "oklch": "oklch(0.235 0.034 15)",
+              "srgb": "#2c1719"
+            },
+            "rail": {
+              "oklch": "oklch(0.17 0.061 10)",
+              "srgb": "#230209"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.26 0.076 10)",
+              "srgb": "#41101b"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.34 0.07 245)",
+              "srgb": "#123b5a"
+            }
+          }
+        }
+      },
+      "glacier": {
+        "displayName": "Glacier",
+        "default": false,
+        "description": "Icy blue glass, chartreuse accent.",
+        "light": {
+          "glass": {
+            "ground": {
+              "oklch": "oklch(0.965 0.037 235 / 0.86)",
+              "srgb": "#ddf8ffdb"
+            },
+            "surface": {
+              "oklch": "oklch(0.99 0.019 235 / 0.72)",
+              "srgb": "#f0feffb8"
+            },
+            "tray": {
+              "oklch": "oklch(0.94 0.044 235 / 0.7)",
+              "srgb": "#d0f1ffb2"
+            },
+            "rail": {
+              "oklch": "oklch(0.93 0.085 240 / 0.82)",
+              "srgb": "#b4f0ffd1"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.99 0.043 240 / 0.65)",
+              "srgb": "#e3ffffa6"
+            }
+          },
+          "accent": {
+            "accent": {
+              "oklch": "oklch(0.62 0.2 128)",
+              "srgb": "#629a00"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.94 0.076 128 / 0.8)",
+              "srgb": "#dcf6bfcc"
+            },
+            "accent-ink": {
+              "oklch": "oklch(0.48 0.2 128)",
+              "srgb": "#3b6f00"
+            },
+            "primary": {
+              "oklch": "oklch(0.62 0.2 128)",
+              "srgb": "#629a00"
+            },
+            "primary-hi": {
+              "oklch": "oklch(0.57 0.2 128)",
+              "srgb": "#548a00"
+            },
+            "on-primary": {
+              "oklch": "oklch(0.18 0.068 128)",
+              "srgb": "#081600"
+            }
+          },
+          "solidFallback": {
+            "ground": {
+              "oklch": "oklch(0.965 0.037 235)",
+              "srgb": "#ddf8ff"
+            },
+            "surface": {
+              "oklch": "oklch(0.995 0.019 235)",
+              "srgb": "#f2ffff"
+            },
+            "tray": {
+              "oklch": "oklch(0.945 0.044 235)",
+              "srgb": "#d1f2ff"
+            },
+            "rail": {
+              "oklch": "oklch(0.93 0.085 240)",
+              "srgb": "#b4f0ff"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.98 0.043 240)",
+              "srgb": "#dffdff"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.94 0.076 128)",
+              "srgb": "#dcf6bf"
+            }
+          }
+        },
+        "dark": {
+          "glass": {
+            "ground": {
+              "oklch": "oklch(0.2 0.034 235 / 0.84)",
+              "srgb": "#051823d6"
+            },
+            "surface": {
+              "oklch": "oklch(0.29 0.037 235 / 0.62)",
+              "srgb": "#182e3b9e"
+            },
+            "tray": {
+              "oklch": "oklch(0.25 0.037 235 / 0.6)",
+              "srgb": "#0e243199"
+            },
+            "rail": {
+              "oklch": "oklch(0.17 0.068 240 / 0.82)",
+              "srgb": "#001129d1"
+            },
+            "rail-hi": {
+              "oklch": "oklch(1 0 0 / 0.09)",
+              "srgb": "#ffffff17"
+            }
+          },
+          "accent": {
+            "accent": {
+              "oklch": "oklch(0.86 0.19 126)",
+              "srgb": "#b2e648"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.38 0.07 126 / 0.6)",
+              "srgb": "#39491d99"
+            },
+            "accent-ink": {
+              "oklch": "oklch(0.86 0.15 126)",
+              "srgb": "#b9e270"
+            },
+            "primary": {
+              "oklch": "oklch(0.86 0.19 126)",
+              "srgb": "#b2e648"
+            },
+            "primary-hi": {
+              "oklch": "oklch(0.91 0.19 126)",
+              "srgb": "#c2f75b"
+            },
+            "on-primary": {
+              "oklch": "oklch(0.18 0.068 126)",
+              "srgb": "#0a1600"
+            }
+          },
+          "solidFallback": {
+            "ground": {
+              "oklch": "oklch(0.2 0.034 235)",
+              "srgb": "#051823"
+            },
+            "surface": {
+              "oklch": "oklch(0.26 0.037 235)",
+              "srgb": "#102733"
+            },
+            "tray": {
+              "oklch": "oklch(0.235 0.037 235)",
+              "srgb": "#0a212d"
+            },
+            "rail": {
+              "oklch": "oklch(0.17 0.068 240)",
+              "srgb": "#001129"
+            },
+            "rail-hi": {
+              "oklch": "oklch(0.26 0.085 240)",
+              "srgb": "#002748"
+            },
+            "accent-soft": {
+              "oklch": "oklch(0.34 0.07 126)",
+              "srgb": "#2f3e12"
+            }
+          }
+        }
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Model name in the model header."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Library name above the grid; settings page titles."
+      },
+      "section": {
+        "displayName": "Section",
+        "purpose": "Pane headings: Recipe, Parts, Print log, Log a print."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default interface text."
+      },
+      "body-strong": {
+        "displayName": "Body strong",
+        "purpose": "Model names on panes, setting names."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Field labels, status lines, status bar, filter chips."
+      },
+      "group-label": {
+        "displayName": "Group label",
+        "purpose": "Sidebar group headings and table column headers; uppercase, no tracking."
+      },
+      "data": {
+        "displayName": "Data",
+        "purpose": "Catalogue numbers, measurements, sizes, paths, key caps (JetBrains Mono, tabular)."
+      },
+      "data-large": {
+        "displayName": "Data, large",
+        "purpose": "Recipe values in the recipe card."
+      }
+    },
+    "shadows": [
+      {
+        "name": "contact-shadow",
+        "value": "ellipse under the preview model, fill contact-shadow at 0.6 opacity",
+        "purpose": "Grounds the opaque model preview in its well. Not a pane shadow."
+      },
+      {
+        "name": "switch-thumb",
+        "value": "0 1px 2px contact-shadow",
+        "purpose": "Switch thumb only."
+      }
+    ],
+    "focus": {
+      "value": "0 0 0 1px {ground}, 0 0 0 3px {accent}",
+      "purpose": "App-drawn 2px accent ring outside a 1px gap; one focused element at a time."
+    },
+    "selection": {
+      "pane": "accent-soft fill + 0 0 0 2px accent ring",
+      "part": "accent border + inset 1px accent",
+      "row": "accent-soft fill",
+      "segment": "accent-soft fill, accent-ink text",
+      "rail": "accent-soft fill, accent-ink icon"
+    },
+    "blur": {
+      "model": "One OS-compositor blur behind a transparent window; panes differ only in fill alpha.",
+      "alphas": {
+        "light": {
+          "rail": 0.82,
+          "ground": 0.86,
+          "surface": 0.72,
+          "tray": 0.7
+        },
+        "dark": {
+          "rail": 0.82,
+          "ground": 0.84,
+          "surface": 0.62,
+          "tray": 0.6
+        }
+      },
+      "platforms": {
+        "windows": "Mica/Acrylic, extends under the native title bar",
+        "macos": "Vibrancy with native transparent title bar; traffic lights over the sidebar",
+        "kde": "Compositor blur on the client area; server-side decorations outside it",
+        "gnome": "No blur; solid set with normal decorations",
+        "softwareRendering": "Solid set",
+        "reduceTransparency": "Solid set"
+      }
+    },
+    "motion": [
+      {
+        "name": "state-change",
+        "value": "120-180ms ease-out",
+        "purpose": "As stated on the mockup's token sheet; none when the OS asks for reduced motion. Not yet exercised in the build."
+      }
+    ],
+    "icons": {
+      "set": "Lucide (ISC)",
+      "size": "16px",
+      "stroke": 1.75,
+      "dense": "14px",
+      "inChip": "12px, stroke 2"
+    },
+    "fonts": [
+      {
+        "family": "Figtree",
+        "license": "SIL OFL",
+        "bundled": true,
+        "use": "All interface text"
+      },
+      {
+        "family": "JetBrains Mono",
+        "license": "SIL OFL",
+        "bundled": true,
+        "use": "Digits as data only: measurements, catalogue numbers, paths, sizes, recipe values, key caps"
+      }
+    ],
+    "layout": {
+      "sidebar": "232px",
+      "modelSideColumn": "384px",
+      "settingsNav": "200px",
+      "statusbar": "30px",
+      "gridGap": "16px rows, 14px columns",
+      "gridColumnsAtMockWidth": 5,
+      "mockWidth": "1280px"
+    },
+    "openItems": [
+      "Offline-library screen not mocked yet.",
+      "Catalogue number № 0412 (per library, never reused) awaits Max's confirmation."
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one main action on a screen, such as Log a print or Save attempt.",
+      "html": "<button class=\"ds-btn-primary\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M20 6 9 17l-5-5\"/></svg>Save attempt</button>",
+      "css": ".ds-btn-primary { display:inline-flex; align-items:center; gap:7px; height:32px; padding:0 12px; border-radius:10px; border:1px solid #9f8600; background:#9f8600; color:#191100; font:500 13px/1.4 Figtree, system-ui, sans-serif; cursor:pointer; } .ds-btn-primary:hover { background:#907600; border-color:#907600; } .ds-btn-primary:focus-visible { outline:none; box-shadow:0 0 0 1px #f0f3fadb, 0 0 0 3px #9f8600; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button",
+      "description": "Ordinary actions on a translucent pane: Open in slicer, Add library.",
+      "html": "<button class=\"ds-btn\">Open in OrcaSlicer</button>",
+      "css": ".ds-btn { display:inline-flex; align-items:center; gap:7px; height:32px; padding:0 12px; border-radius:10px; border:1px solid #1b21301f; background:#fafcffb8; color:#181d27; font:500 13px/1.4 Figtree, system-ui, sans-serif; cursor:pointer; } .ds-btn:hover { background:#1b21300f; } .ds-btn:focus-visible { outline:none; box-shadow:0 0 0 1px #f0f3fadb, 0 0 0 3px #9f8600; } .ds-btn[aria-pressed=true] { background:#f7edb2cc; color:#755c00; border-color:#9f8600; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Low-weight actions: Show in folder, Cancel, Show earlier attempts.",
+      "html": "<button class=\"ds-btn-ghost\">Show in folder</button>",
+      "css": ".ds-btn-ghost { display:inline-flex; align-items:center; gap:7px; height:32px; padding:0 12px; border-radius:10px; border:1px solid transparent; background:none; color:#4a505b; font:500 13px/1.4 Figtree, system-ui, sans-serif; cursor:pointer; } .ds-btn-ghost:hover { background:#1b21300f; color:#181d27; } .ds-btn-ghost:focus-visible { outline:none; box-shadow:0 0 0 1px #f0f3fadb, 0 0 0 3px #9f8600; }"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "search-field",
+      "description": "Toolbar search with its key cap; instant results.",
+      "html": "<label class=\"ds-search\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"11\" cy=\"11\" r=\"8\"/><path d=\"m21 21-4.3-4.3\"/></svg><input placeholder=\"Search library\"><span class=\"ds-kbd\">Ctrl K</span></label>",
+      "css": ".ds-search { display:flex; align-items:center; gap:8px; height:32px; width:320px; padding:0 10px; border:1px solid #1b21301f; border-radius:10px; background:#f0f3fadb; color:#636975; font:400 13px/1.4 Figtree, system-ui, sans-serif; } .ds-search input { border:0; background:none; outline:0; flex:1; min-width:0; font:inherit; color:#181d27; } .ds-search:focus-within { box-shadow:0 0 0 1px #f0f3fadb, 0 0 0 3px #9f8600; } .ds-kbd { font:400 11px/16px 'JetBrains Mono', ui-monospace, monospace; border:1px solid #1b21301f; border-bottom-width:2px; border-radius:3px; padding:0 4px; color:#4a505b; background:#fafcffb8; }"
+    },
+    {
+      "name": "Recipe Chip",
+      "kind": "chip",
+      "refersTo": "chip-recipe",
+      "description": "Full-round requirement chip on model panes and log entries; mono only when it holds a measurement.",
+      "html": "<span class=\"ds-chip\">PETG</span> <span class=\"ds-chip ds-chip-data\">0.20 mm</span>",
+      "css": ".ds-chip { display:inline-flex; align-items:center; height:17px; padding:0 7px; border-radius:999px; background:#1b21300f; color:#181d27; font:400 11px/17px Figtree, system-ui, sans-serif; white-space:nowrap; } .ds-chip-data { font-family:'JetBrains Mono', ui-monospace, monospace; }"
+    },
+    {
+      "name": "Filter Chip",
+      "kind": "chip",
+      "refersTo": "chip-filter",
+      "description": "Active search filter in the toolbar, removable.",
+      "html": "<span class=\"ds-fchip\"><span class=\"k\">Material</span> PETG <span aria-hidden=\"true\">×</span></span>",
+      "css": ".ds-fchip { display:inline-flex; align-items:center; gap:5px; height:24px; padding:0 8px; border:1px solid #1b21301f; border-radius:10px; background:#fafcffb8; color:#181d27; font:400 12px/1.4 Figtree, system-ui, sans-serif; } .ds-fchip .k { color:#636975; }"
+    },
+    {
+      "name": "Model Pane",
+      "kind": "card",
+      "refersTo": "model-pane",
+      "description": "Signature component: frosted pane with an opaque preview in its material colour, name, catalogue number, recipe chips and last print.",
+      "html": "<div class=\"ds-pane\" tabindex=\"0\"><div class=\"ds-well\"><svg viewBox=\"0 0 100 70\" width=\"70%\"><polygon points=\"50,8 90,28 50,48 10,28\" fill=\"#90e2e1\" stroke=\"#006d78\" stroke-width=\".6\"/><polygon points=\"10,28 50,48 50,64 10,44\" fill=\"#2bb3b9\" stroke=\"#006d78\" stroke-width=\".6\"/><polygon points=\"50,48 90,28 90,44 50,64\" fill=\"#008693\" stroke=\"#006d78\" stroke-width=\".6\"/></svg></div><div class=\"ds-name\"><b>Gridfinity bin 2×3</b><span class=\"ds-no\">№ 0412</span></div><div class=\"ds-row\"><span class=\"ds-chip\">PETG</span><span class=\"ds-chip ds-chip-data\">0.20 mm</span></div><div class=\"ds-st\"><span class=\"ok\">✓ Printed 3×</span> · 12 Nov</div></div>",
+      "css": ".ds-pane { width:180px; padding:8px; border:1px solid #ffffffe6; border-radius:14px; background:#fafcffb8; color:#181d27; font:400 13px/1.4 Figtree, system-ui, sans-serif; } .ds-pane:focus-visible { outline:none; box-shadow:0 0 0 1px #f0f3fadb, 0 0 0 3px #9f8600; } .ds-pane[aria-selected=true] { background:#f7edb2cc; box-shadow:0 0 0 2px #9f8600; } .ds-well { aspect-ratio:1/0.82; border-radius:9px; background:#e7ebf4b2; display:grid; place-items:center; } .ds-name { display:flex; gap:8px; margin-top:8px; min-height:36px; } .ds-name b { flex:1; font-weight:600; } .ds-no { font:400 11px/1.6 'JetBrains Mono', ui-monospace, monospace; color:#636975; } .ds-row { display:flex; gap:4px; } .ds-chip { height:17px; padding:0 7px; border-radius:999px; background:#1b21300f; font-size:11px; line-height:17px; } .ds-chip-data { font-family:'JetBrains Mono', ui-monospace, monospace; } .ds-st { margin-top:5px; font-size:12px; color:#4a505b; } .ds-st .ok { color:#1a813f; font-weight:600; }"
+    },
+    {
+      "name": "Sidebar Item",
+      "kind": "nav",
+      "refersTo": "rail-item",
+      "description": "Library, collection, filter and tag rows in the frosted sidebar; active row takes the signal wash.",
+      "html": "<ul class=\"ds-nav\"><li class=\"on\">Workshop SSD<span>1,284</span></li><li>Desk organizers<span>38</span></li><li>Never printed<span>804</span></li></ul>",
+      "css": ".ds-nav { list-style:none; margin:0; padding:8px; width:216px; background:#e1e8f6d1; border-radius:10px; font:400 13px/1.4 Figtree, system-ui, sans-serif; color:#12161f; } .ds-nav li { display:flex; align-items:center; min-height:28px; padding:5px 8px; border-radius:10px; } .ds-nav li span { margin-left:auto; font-size:12px; color:#3d424d; font-variant-numeric:tabular-nums; } .ds-nav li:hover { background:#f8fcffa6; } .ds-nav li.on { background:#f7edb2cc; }"
+    },
+    {
+      "name": "Segmented Control",
+      "kind": "custom",
+      "refersTo": "segment",
+      "description": "Grid/list toggle, Solid/Wire, theme choice; the pressed segment takes the signal wash.",
+      "html": "<div class=\"ds-seg\"><button aria-pressed=\"true\">System</button><button aria-pressed=\"false\">Light</button><button aria-pressed=\"false\">Dark</button></div>",
+      "css": ".ds-seg { display:inline-flex; gap:2px; padding:2px; border:1px solid #1b21301f; border-radius:10px; background:#fafcffb8; } .ds-seg button { border:0; background:none; padding:5px 10px; border-radius:3px; color:#4a505b; font:400 13px/1.4 Figtree, system-ui, sans-serif; cursor:pointer; } .ds-seg button:hover { color:#181d27; background:#1b21300f; } .ds-seg button[aria-pressed=true] { background:#f7edb2cc; color:#755c00; } .ds-seg button:focus-visible { outline:none; box-shadow:0 0 0 1px #f0f3fadb, 0 0 0 3px #9f8600; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Frosted Print",
+    "overview": "Printdex is a shelf of frosted translucent prints. The interface is milky smoked-glass panes over the user's desktop, and every model shows up in the colour of the material it is printed in, so the library reads by material at a glance. The default colour theme, Graphite signal, tints the glass a near-neutral graphite and adds one signal-yellow accent for selection, focus and the main action. Material and status colours never change with the theme.\n\nIt is a dense, keyboard-first desktop tool in light and dark. Panes are calm and quiet so the material-coloured previews carry the screen. Depth comes from translucency and a bright 1px edge, not shadows. It rejects the charcoal slicer-style shell with one orange accent and grey anonymous thumbnails.\n\n**Source of truth.** This file and `.impeccable/design.json` are the single source of truth for the iced port. The design lands as a `theme` module in `printdex-app`; widgets read tokens only, never raw colours or sizes. Use the sRGB hex given next to each OKLCH value (`iced::Color::from_rgba8`); eight-digit hex is `RRGGBBAA`. A † marks a value slightly outside sRGB, where the hex is the per-channel clamp. The mockup's CSS is layered (an old base set from the rejected world, then the frosted world, then palette presets, then review patches) and is reference only: do not port it rule by rule.\n\nScreens recorded: library grid, list view, no results, model, log a print, settings, tokens. The offline-library screen is not mocked yet (open item).",
+    "keyCharacteristics": [
+      "Frosted glass panes over one OS-compositor blur; solid tints wherever blur is unavailable.",
+      "Model previews are opaque and drawn in their material colour (PETG teal, PLA orange, TPU magenta, ASA/unknown neutral).",
+      "One accent per colour theme, for selection, focus, the main action, pressed segments and the active sidebar item.",
+      "Figtree for the interface, JetBrains Mono only for measured and numbered data.",
+      "14px panes, 10px controls, full-round recipe chips; solid 1px borders only.",
+      "Colour theme is a user setting with seven presets; light, dark and system theme are a separate setting."
+    ],
+    "rules": [
+      {
+        "name": "The Material Owns the Hue Rule",
+        "body": "Teal, orange, magenta and the ASA neutral belong to materials. They tint previews only and never colour chrome, tags or collections; collections use the neutral layers icon.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Signal Rule",
+        "body": "The accent marks selection, focus, the main action, pressed segments and the active sidebar item. Nothing else.",
+        "section": "colors"
+      },
+      {
+        "name": "The Accent Is Not a Status Rule",
+        "body": "The accent never carries status text. Partial is always the triangle icon plus the word \"Partial\", so it cannot be mistaken for the yellow accent.",
+        "section": "colors"
+      },
+      {
+        "name": "The Red Means Failed Rule",
+        "body": "Red appears only for failure. Recipe notes and tips stay neutral: lightbulb or info icon in `ink-2`.",
+        "section": "colors"
+      },
+      {
+        "name": "The Mono Means Measured Rule",
+        "body": "JetBrains Mono only for text that carries digits as data: measurements, catalogue numbers, paths, sizes, recipe values (plus keyboard key caps). Words stay in Figtree even inside a data chip (\"PETG\", \"supports\"), and so do counts and dates in running text (\"3 parts\", \"Attempt 3\", \"12 Nov\"), which use tabular figures.",
+        "section": "typography"
+      },
+      {
+        "name": "The No Tracking Rule",
+        "body": "No letter-spacing anywhere, including uppercase group labels.",
+        "section": "typography"
+      },
+      {
+        "name": "The One Blur Rule",
+        "body": "One blur for the whole window. Panes differ only in fill alpha; nothing blurs on its own.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Wallpaper-Proof Sidebar Rule",
+        "body": "The sidebar fill stays at 0.82 alpha so its text holds over a black or a white wallpaper.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Solid Twin Rule",
+        "body": "Every translucent glass token ships with an opaque solid twin.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do read every colour, size and radius from the iced theme module; widgets never hold raw values.",
+      "Do ship each glass token with its solid twin and switch to the solid set on GNOME, software rendering and reduced transparency.",
+      "Do keep the sidebar at 0.82 alpha so text holds over a black or white wallpaper.",
+      "Do draw previews opaque in the material ramp; unknown material uses the ASA neutral ramp.",
+      "Do pair every status colour with its icon and word; partial is always the triangle plus \"Partial\".",
+      "Do use the 2px accent ring outside a 1px gap for focus, on one element at a time.",
+      "Do check a new colour theme's accent against every status and material hue."
+    ],
+    "donts": [
+      "Don't use letter-spacing, dashed or dotted borders, or gradients in the app.",
+      "Don't use material hues for chrome, tags or collections.",
+      "Don't use red for anything but failure, or the accent for status text.",
+      "Don't let a colour theme change material or status colours.",
+      "Don't add drop shadows to panes or attempt an in-app blur.",
+      "Don't draw custom window title bars; use the native decorations.",
+      "Don't build the charcoal slicer-style shell with one orange accent and grey anonymous thumbnails."
+    ]
+  },
+  "motion": [
+    {
+      "name": "dur-instant",
+      "value": "90ms",
+      "purpose": "Press feedback: 1px sink, scale 0.985"
+    },
+    {
+      "name": "dur-quick",
+      "value": "160ms",
+      "purpose": "Hover, selection ring, state colours"
+    },
+    {
+      "name": "dur-move",
+      "value": "260ms",
+      "purpose": "Log panel slide, outcome indicator; screens cross-fade 200ms, theme 240ms"
+    },
+    {
+      "name": "dur-focal",
+      "value": "720ms",
+      "purpose": "Print-in: preview builds up from the bed in 16 steps, stagger 30ms capped at 330ms, once per newly rendered thumbnail; keyed by model id, never replayed by navigation, scrolling or theme changes"
+    },
+    {
+      "name": "ease-out",
+      "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+      "purpose": "Default easing"
+    },
+    {
+      "name": "ease-pop",
+      "value": "cubic-bezier(0.34, 1.45, 0.64, 1)",
+      "purpose": "Toggle knobs (220ms) only"
+    },
+    {
+      "name": "reduced-motion",
+      "value": "fades only",
+      "purpose": "Print-in becomes a 150ms fade; lift, press scale, overshoot, slides and pops off; spinners static"
+    },
+    {
+      "name": "budget",
+      "value": "colour, opacity, translate, clip",
+      "purpose": "Never animate blur or shadows; driven by iced Animation and canvas clip"
+    }
+  ]
+}
