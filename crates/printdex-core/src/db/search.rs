@@ -1,5 +1,7 @@
 //! Full-text model search and library statistics.
 
+use std::collections::HashMap;
+
 use crate::db::Db;
 use crate::error::Result;
 use crate::grouping::ModelKind;
@@ -67,10 +69,20 @@ impl From<HitRow> for ModelHit {
 }
 
 impl Db {
-    /// Models matching `input` (prefix match on name and path, name ranked
-    /// higher), or all models by name when `input` is blank. Missing models
-    /// are left out.
+    /// Models matching `input` across all libraries; see [`Db::search_models_in`].
     pub async fn search_models(&self, input: &str, limit: u32) -> Result<Vec<ModelHit>> {
+        self.search_models_in(None, input, limit).await
+    }
+
+    /// Models matching `input` (prefix match on name and path, name ranked
+    /// higher), or all models by name when `input` is blank. `library`
+    /// limits results to one library. Missing models are left out.
+    pub async fn search_models_in(
+        &self,
+        library: Option<LibraryId>,
+        input: &str,
+        limit: u32,
+    ) -> Result<Vec<ModelHit>> {
         let rows = match to_fts_query(input) {
             None => {
                 sqlx::query_as!(
@@ -81,9 +93,10 @@ impl Db {
                                 WHERE p.model_id = m.id AND p.missing_since IS NULL) as "part_count!: i64",
                               m.missing_since IS NOT NULL as "missing!: bool"
                        FROM models m
-                       WHERE m.missing_since IS NULL
+                       WHERE m.missing_since IS NULL AND (?1 IS NULL OR m.library_id = ?1)
                        ORDER BY m.name COLLATE NOCASE, m.rel_path
-                       LIMIT ?"#,
+                       LIMIT ?2"#,
+                    library,
                     limit
                 )
                 .fetch_all(self.reader())
@@ -98,10 +111,12 @@ impl Db {
                                 WHERE p.model_id = m.id AND p.missing_since IS NULL) as "part_count!: i64",
                               m.missing_since IS NOT NULL as "missing!: bool"
                        FROM models_fts f JOIN models m ON m.rowid = f.rowid
-                       WHERE models_fts MATCH ? AND m.missing_since IS NULL
+                       WHERE models_fts MATCH ?1 AND m.missing_since IS NULL
+                         AND (?2 IS NULL OR m.library_id = ?2)
                        ORDER BY bm25(models_fts, 10.0, 1.0), m.name COLLATE NOCASE
-                       LIMIT ?"#,
+                       LIMIT ?3"#,
                     q,
+                    library,
                     limit
                 )
                 .fetch_all(self.reader())
@@ -109,6 +124,49 @@ impl Db {
             }
         };
         Ok(rows.into_iter().map(ModelHit::from).collect())
+    }
+
+    /// How many present models match `input` (all of them when blank),
+    /// optionally within one library. Same matching as search, no limit.
+    pub async fn count_models(&self, library: Option<LibraryId>, input: &str) -> Result<u64> {
+        let n = match to_fts_query(input) {
+            None => {
+                sqlx::query_scalar!(
+                    r#"SELECT count(*) as "n!: i64" FROM models m
+                       WHERE m.missing_since IS NULL AND (?1 IS NULL OR m.library_id = ?1)"#,
+                    library
+                )
+                .fetch_one(self.reader())
+                .await?
+            }
+            Some(q) => {
+                sqlx::query_scalar!(
+                    r#"SELECT count(*) as "n!: i64"
+                       FROM models_fts f JOIN models m ON m.rowid = f.rowid
+                       WHERE models_fts MATCH ?1 AND m.missing_since IS NULL
+                         AND (?2 IS NULL OR m.library_id = ?2)"#,
+                    q,
+                    library
+                )
+                .fetch_one(self.reader())
+                .await?
+            }
+        };
+        Ok(u64::try_from(n).unwrap_or(0))
+    }
+
+    /// Present-model counts per library. Libraries without models are absent.
+    pub async fn library_model_counts(&self) -> Result<HashMap<LibraryId, u64>> {
+        let rows = sqlx::query!(
+            r#"SELECT library_id as "library_id!: LibraryId", count(*) as "n!: i64"
+               FROM models WHERE missing_since IS NULL GROUP BY library_id"#
+        )
+        .fetch_all(self.reader())
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| (r.library_id, u64::try_from(r.n).unwrap_or(0)))
+            .collect())
     }
 
     /// Row counts.
@@ -322,5 +380,95 @@ mod tests {
                 missing_models: 0
             }
         );
+    }
+
+    impl Fx {
+        async fn second_library(&self) -> LibraryId {
+            self.second_library_named("/lib2").await
+        }
+
+        async fn model_in(&self, lib: LibraryId, rel_path: &str) -> ModelId {
+            let id = ModelId::new();
+            sqlx::query(
+                "INSERT INTO models (id, library_id, rel_path, name, kind, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, 'folder', 1, 1)",
+            )
+            .bind(id)
+            .bind(lib)
+            .bind(rel_path)
+            .bind(rel_path)
+            .execute(self.db.writer())
+            .await
+            .unwrap();
+            id
+        }
+    }
+
+    #[tokio::test]
+    async fn search_filters_by_library() {
+        let f = fx().await;
+        let other = f.second_library().await;
+        let a = f.model_in(f.lib, "Dragon").await;
+        f.model_in(other, "Dragon").await;
+        let hits =
+            f.db.search_models_in(Some(f.lib), "dragon", 50)
+                .await
+                .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, a);
+        let all = f.db.search_models_in(Some(other), "", 50).await.unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(
+            f.db.search_models_in(None, "dragon", 50)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn count_matches_search() {
+        let f = fx().await;
+        let other = f.second_library().await;
+        for n in ["Red Dragon", "Blue Dragon", "Orc"] {
+            f.model(n, n, false).await;
+        }
+        f.model("Gone Dragon", "Gone Dragon", true).await;
+        f.model_in(other, "Green Dragon").await;
+        assert_eq!(f.db.count_models(None, "drag").await.unwrap(), 3);
+        assert_eq!(f.db.count_models(Some(f.lib), "drag").await.unwrap(), 2);
+        assert_eq!(f.db.count_models(None, "  ").await.unwrap(), 4);
+        assert_eq!(f.db.count_models(Some(other), "").await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn library_counts_per_library() {
+        let f = fx().await;
+        let other = f.second_library().await;
+        let _empty = f.second_library_named("/lib3").await;
+        f.model("A", "A", false).await;
+        f.model("B", "B", false).await;
+        f.model("C", "C", true).await;
+        f.model_in(other, "X").await;
+        let counts = f.db.library_model_counts().await.unwrap();
+        assert_eq!(counts.len(), 2);
+        assert_eq!(counts[&f.lib], 2);
+        assert_eq!(counts[&other], 1);
+    }
+
+    impl Fx {
+        async fn second_library_named(&self, path: &str) -> LibraryId {
+            let lib = Library {
+                id: LibraryId::new(),
+                path: PathBuf::from(path),
+                display_name: path.into(),
+                kind: LibraryKind::Local,
+                sidecar_enabled: true,
+                last_full_scan_at: None,
+            };
+            self.db.insert_library(&lib).await.unwrap();
+            lib.id
+        }
     }
 }

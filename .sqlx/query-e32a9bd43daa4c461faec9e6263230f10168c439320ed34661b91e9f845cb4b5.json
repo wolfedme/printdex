@@ -1,0 +1,33 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT library_id as \"library_id!: LibraryId\", count(*) as \"n!: i64\"\n               FROM models WHERE missing_since IS NULL GROUP BY library_id",
+  "describe": {
+    "columns": [
+      {
+        "name": "library_id!: LibraryId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "library_id"
+          }
+        }
+      },
+      {
+        "name": "n!: i64",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "e32a9bd43daa4c461faec9e6263230f10168c439320ed34661b91e9f845cb4b5"
+}

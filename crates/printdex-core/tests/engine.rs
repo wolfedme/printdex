@@ -213,3 +213,24 @@ async fn data_persists_across_reopen() {
 fn default_data_dir_is_available() {
     assert!(Engine::default_data_dir().is_some());
 }
+
+#[tokio::test]
+async fn search_in_scopes_to_library() {
+    let f = Fx::new().await;
+    let a = f.dir.path().join("a");
+    let b = f.dir.path().join("b");
+    touch(&a, "Dragon/x.stl");
+    touch(&a, "Orc/y.stl");
+    touch(&b, "Dragon/z.stl");
+    let la = f.engine.add_library(&a, None).await.unwrap();
+    let lb = f.engine.add_library(&b, None).await.unwrap();
+    f.engine.rescan(la.id, go()).await.unwrap();
+    f.engine.rescan(lb.id, go()).await.unwrap();
+    let hits = f.engine.search_in(Some(lb.id), "dragon", 10).await.unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].library_id, lb.id);
+    assert_eq!(f.engine.count(None, "dragon").await.unwrap(), 2);
+    assert_eq!(f.engine.count(Some(la.id), "").await.unwrap(), 2);
+    let counts = f.engine.library_counts().await.unwrap();
+    assert_eq!((counts[&la.id], counts[&lb.id]), (2, 1));
+}

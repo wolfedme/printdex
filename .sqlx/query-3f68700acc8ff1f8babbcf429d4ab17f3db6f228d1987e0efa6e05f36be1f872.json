@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT m.id as \"id!: ModelId\", m.library_id as \"library_id: LibraryId\",\n                              m.name, m.rel_path, m.kind,\n                              (SELECT count(*) FROM parts p\n                                WHERE p.model_id = m.id AND p.missing_since IS NULL) as \"part_count!: i64\",\n                              m.missing_since IS NOT NULL as \"missing!: bool\"\n                       FROM models_fts f JOIN models m ON m.rowid = f.rowid\n                       WHERE models_fts MATCH ? AND m.missing_since IS NULL\n                       ORDER BY bm25(models_fts, 10.0, 1.0), m.name COLLATE NOCASE\n                       LIMIT ?",
+  "query": "SELECT m.id as \"id!: ModelId\", m.library_id as \"library_id: LibraryId\",\n                              m.name, m.rel_path, m.kind,\n                              (SELECT count(*) FROM parts p\n                                WHERE p.model_id = m.id AND p.missing_since IS NULL) as \"part_count!: i64\",\n                              m.missing_since IS NOT NULL as \"missing!: bool\"\n                       FROM models m\n                       WHERE m.missing_since IS NULL AND (?1 IS NULL OR m.library_id = ?1)\n                       ORDER BY m.name COLLATE NOCASE, m.rel_path\n                       LIMIT ?2",
   "describe": {
     "columns": [
       {
@@ -84,5 +84,5 @@
       false
     ]
   },
-  "hash": "4c22579facbb4f6251006d2981c6f90134e5260197a2dabb217fe8054f426fc3"
+  "hash": "3f68700acc8ff1f8babbcf429d4ab17f3db6f228d1987e0efa6e05f36be1f872"
 }
