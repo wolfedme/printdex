@@ -1,6 +1,6 @@
 # Printdex Library Grid (Milestone 1, part A) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** The first runnable Printdex desktop app: an iced window that opens the engine, lets you add a library folder, scans it with visible progress, and shows every model as a pane in a virtualized grid that filters on every keystroke of the search field. It follows the "Frosted print" design (Graphite signal palette, light and dark), uses Fluent for every string, and is keyboard-first.
 
@@ -69,41 +69,41 @@ crates/printdex-app/
 
 **Files:** `crates/printdex-core/src/db/search.rs`, `crates/printdex-core/src/engine.rs`, `crates/printdex-core/tests/engine.rs`, `.sqlx/`.
 
-- [ ] Write failing tests in `db/search.rs`:
+- [x] Write failing tests in `db/search.rs`:
   - `search_filters_by_library` — two libraries with a "Dragon" each; `search_models_in(Some(lib_a), "dragon", 50)` returns only lib A's.
   - `count_matches_search` — `count_models(None, "drag")` equals the number of hits without a limit; blank query counts all present models; missing models are not counted.
   - `library_counts_per_library` — returns present-model counts keyed by library id; a library with no models is absent (the app treats absent as 0).
-- [ ] Implement `Db::search_models_in(library: Option<LibraryId>, input, limit)`, `Db::count_models(library, input)` and `Db::library_model_counts()` with `query!`/`query_as!` (filter as `(?1 IS NULL OR m.library_id = ?1)`). `search_models` becomes `search_models_in(None, …)`.
-- [ ] Expose on `Engine`: `search_in`, `count`, `library_counts`. Add an engine test `search_in_scopes_to_library` in `tests/engine.rs`.
-- [ ] Regenerate offline metadata with `cargo sqlx prepare --workspace`; commit `.sqlx/`.
-- [ ] `cargo test -p printdex-core`, clippy clean. Commit `feat(core): library-scoped search, counts`.
+- [x] Implement `Db::search_models_in(library: Option<LibraryId>, input, limit)`, `Db::count_models(library, input)` and `Db::library_model_counts()` with `query!`/`query_as!` (filter as `(?1 IS NULL OR m.library_id = ?1)`). `search_models` becomes `search_models_in(None, …)`.
+- [x] Expose on `Engine`: `search_in`, `count`, `library_counts`. Add an engine test `search_in_scopes_to_library` in `tests/engine.rs`.
+- [x] Regenerate offline metadata with `cargo sqlx prepare --workspace`; commit `.sqlx/`.
+- [x] `cargo test -p printdex-core`, clippy clean. Commit `feat(core): library-scoped search, counts`.
 
 ### Task 2: App crate, fonts, icons, Fluent
 
 **Files:** workspace `Cargo.toml`, `crates/printdex-app/{Cargo.toml,assets/**,locales/en/main.ftl,src/main.rs,src/i18n.rs}`, `deny.toml` (only if a new licence appears), `.github/workflows/ci.yml` (Linux system packages if the build needs them).
 
-- [ ] Add the crate to the workspace with `iced = { version = "0.14", features = ["tokio", "svg", "advanced"] }`, `fluent-bundle`, `unic-langid`, `rfd`, `printdex-core`, `tokio`, `tracing`, `tracing-subscriber`, `anyhow`.
-- [ ] Bundle fonts (TTF, Latin subset) and their OFL texts; load them with `.font(include_bytes!(…))`, default font Figtree.
-- [ ] Failing tests in `i18n.rs`:
+- [x] Add the crate to the workspace with `iced = { version = "0.14", features = ["tokio", "svg", "advanced"] }`, `fluent-bundle`, `unic-langid`, `rfd`, `printdex-core`, `tokio`, `tracing`, `tracing-subscriber`, `anyhow`.
+- [x] Bundle fonts (TTF, Latin subset) and their OFL texts; load them with `.font(include_bytes!(…))`, default font Figtree.
+- [x] Failing tests in `i18n.rs`:
   - `english_bundle_parses` — the bundle loads with no errors.
   - `t_returns_message` and `t_args_formats_numbers` (`status-models = { $count } models`).
   - `missing_key_falls_back_to_key` — an unknown key renders as the key itself (never panics).
   - `every_key_used_in_code_exists` — scans `src/**/*.rs` for `t("…")` / `t_args("…"` and checks each key exists in `main.ftl`.
-- [ ] Implement `i18n` with a thread-local `FluentBundle` (no Unicode isolation marks, so captions render cleanly).
-- [ ] `main.rs` opens a blank window titled from Fluent. `cargo run -p printdex-app` starts. Commit `feat(app): iced app crate with fonts and Fluent`.
+- [x] Implement `i18n` with a thread-local `FluentBundle` (no Unicode isolation marks, so captions render cleanly).
+- [x] `main.rs` opens a blank window titled from Fluent. `cargo run -p printdex-app` starts. Commit `feat(app): iced app crate with fonts and Fluent`.
 
 ### Task 3: Theme module (Graphite signal, light and dark)
 
 **Files:** `crates/printdex-app/src/theme.rs`.
 
-- [ ] Failing tests:
+- [x] Failing tests:
   - `hex_parses_rgb_and_rgba` — `hex("#9f8600")` and `hex("#f7edb2cc")` give the right `Color`.
   - `solid_set_is_opaque` — every pane token in the solid palettes (`ground`, `surface`, `tray`, `rail`, `rail_hi`, `edge`) has alpha 1.0, light and dark.
   - `mode_switches_palette` — `Palette::new(ColorTheme::GraphiteSignal, Mode::Dark).ink` is the dark ink, `Mode::Light` the light ink.
   - `status_colours_do_not_depend_on_colour_theme` — `ok`/`fail`/`partial`/`offline` come from a shared table (guards the "theme never changes status colours" rule).
-- [ ] Implement tokens exactly from DESIGN.md: colours (solid set), spacing `S1..S9`, radii (`PANE 14`, `WELL 9`, `CONTROL 10`, `CHIP 999`), type sizes (display 24, title 19, section 15, body 13, caption 12, group 11, data 11), sidebar width 232, status bar 30, button 32.
-- [ ] `Palette` → `iced::Theme::custom` plus style functions used by views: `pane`, `pane_selected` (Signal Wash fill + 2px accent ring), `well`, `rail`, `rail_item(active)`, `toolbar`, `statusbar`, `search_field`, `button_primary`, `button_secondary`, `button_ghost`, `scrollbar`.
-- [ ] Commit `feat(app): theme tokens for Frosted print, Graphite signal`.
+- [x] Implement tokens exactly from DESIGN.md: colours (solid set), spacing `S1..S9`, radii (`PANE 14`, `WELL 9`, `CONTROL 10`, `CHIP 999`), type sizes (display 24, title 19, section 15, body 13, caption 12, group 11, data 11), sidebar width 232, status bar 30, button 32.
+- [x] `Palette` → `iced::Theme::custom` plus style functions used by views: `pane`, `pane_selected` (Signal Wash fill + 2px accent ring), `well`, `rail`, `rail_item(active)`, `toolbar`, `statusbar`, `search_field`, `button_primary`, `button_secondary`, `button_ghost`, `scrollbar`.
+- [x] Commit `feat(app): theme tokens for Frosted print, Graphite signal`.
 
 ### Task 4: Grid geometry and virtualization
 
@@ -111,27 +111,27 @@ crates/printdex-app/
 
 Pane size follows DESIGN.md: five columns at the 1280px mock width with a 232px sidebar and 20px content padding; column gap 14, row gap 16. Panes have a minimum width of 188px and grow to fill the row.
 
-- [ ] Failing tests:
+- [x] Failing tests:
   - `columns_for_width` — 1048px content → 5 columns; 400px → 2; tiny widths → 1.
   - `rows_for_items` — 0 items → 0 rows; 11 items in 5 columns → 3 rows.
   - `visible_range_at_top`, `visible_range_scrolled`, `visible_range_clamps_at_end` — given scroll offset, viewport height, row height and gaps, return the row range to build, with one row of overscan above and below.
   - `scroll_target_keeps_row_visible` — `None` when the row is fully visible, otherwise the offset that brings it to the nearest edge.
-- [ ] Implement as pure functions over a `GridMetrics { columns, pane_width, row_height }`. Commit `feat(app): grid geometry and virtualization math`.
+- [x] Implement as pure functions over a `GridMetrics { columns, pane_width, row_height }`. Commit `feat(app): grid geometry and virtualization math`.
 
 ### Task 5: Search sequencing
 
 **Files:** `crates/printdex-app/src/search.rs`.
 
-- [ ] Failing tests:
+- [x] Failing tests:
   - `stale_results_are_dropped` — start query 1, start query 2, results of 1 arrive → ignored; results of 2 arrive → accepted.
   - `same_text_does_not_restart` — re-issuing the same text and scope keeps the generation.
-- [ ] Implement `SearchState { text, scope, generation, results, total, loading }` with `begin(text, scope) -> Option<Ticket>` and `accept(ticket, hits, total) -> bool`. Every keystroke runs a query (engine search is ~5 ms p95 at 100k parts); no debounce timer. Commit `feat(app): search generations`.
+- [x] Implement `SearchState { text, scope, generation, results, total, loading }` with `begin(text, scope) -> Option<Ticket>` and `accept(ticket, hits, total) -> bool`. Every keystroke runs a query (engine search is ~5 ms p95 at 100k parts); no debounce timer. Commit `feat(app): search generations`.
 
 ### Task 6: App state, update and engine wiring
 
 **Files:** `crates/printdex-app/src/app.rs`, `src/main.rs`.
 
-- [ ] Failing tests on `update()` (no window needed; tasks are not run):
+- [x] Failing tests on `update()` (no window needed; tasks are not run):
   - `boot_without_libraries_shows_empty_state`.
   - `search_input_starts_query` — `SearchChanged("dra")` sets the text and returns a task.
   - `scan_progress_updates_sidebar` — `Engine(ScanProgress{…})` sets the per-library progress; `ScanFinished` clears it.
@@ -139,32 +139,33 @@ Pane size follows DESIGN.md: five columns at the 1280px mock width with a 232px 
   - `selection_survives_refresh` — the selected model id is kept when it is still in the new results and cleared otherwise.
   - `add_library_error_is_shown` — `LibraryAdded(Err(CoreError::LibraryOverlaps{…}))` sets a translated error line; `PickerCancelled` changes nothing.
   - `selecting_library_scopes_search`.
-- [ ] Implement `Message` (`Booted`, `Engine(EngineEvent)`, `SearchChanged`, `Results`, `Counts`, `SelectScope`, `PickLibrary`, `LibraryPicked`, `LibraryAdded`, `Rescan`, `Scroll`, `Resized`, `Key`, `Select`, `ThemeMode`), boot (open engine at `Engine::default_data_dir()`, or `--data-dir` for tests and screenshots), subscription (engine events via `Subscription::run_with`, keyboard, window resize, system theme changes). Adding a library starts its first scan right away.
-- [ ] Commit `feat(app): state, update and engine wiring`.
+- [x] A `--mode light|dark` flag overrides the OS theme until Settings exists (also used for screenshots).
+- [x] Implement `Message` (`Booted`, `Engine(EngineEvent)`, `SearchChanged`, `Results`, `Counts`, `SelectScope`, `PickLibrary`, `LibraryPicked`, `LibraryAdded`, `Rescan`, `Scroll`, `Resized`, `Key`, `Select`, `ThemeMode`), boot (open engine at `Engine::default_data_dir()`, or `--data-dir` for tests and screenshots), subscription (engine events via `Subscription::run_with`, keyboard, window resize, system theme changes). Adding a library starts its first scan right away.
+- [x] Commit `feat(app): state, update and engine wiring`.
 
 ### Task 7: Keyboard navigation
 
 **Files:** `crates/printdex-app/src/nav.rs`, `app.rs`.
 
-- [ ] Failing tests: `right_moves_one`, `down_moves_one_row`, `down_on_last_row_clamps`, `left_at_start_stays`, `first_arrow_selects_first_item`, `home_end`.
-- [ ] Implement `nav::step(selected: Option<usize>, key, columns, len) -> Option<usize>`. Wire keys in `app`: `/` and Ctrl+F focus the search field, Esc clears the search (or blurs it when empty), arrows/Home/End move the selection and scroll it into view using `grid::scroll_target`. Arrow keys are ignored while the search field has focus except Down, which moves focus into the grid.
-- [ ] Commit `feat(app): keyboard navigation`.
+- [x] Failing tests: `right_moves_one`, `down_moves_one_row`, `down_on_last_row_clamps`, `left_at_start_stays`, `first_arrow_selects_first_item`, `home_end`.
+- [x] Implement `nav::step(selected: Option<usize>, key, columns, len) -> Option<usize>`. Wire keys in `app`: `/` and Ctrl+F focus the search field, Esc clears the search (or blurs it when empty), arrows/Home/End move the selection and scroll it into view using `grid::scroll_target`. Arrow keys the search field uses itself (Left/Right/Home/End) stay with it while it has focus; Up and Down move the grid selection. (iced 0.14 has no "unfocus" operation, so Down cannot move focus out of the field.)
+- [x] Commit `feat(app): keyboard navigation`.
 
 ### Task 8: Views
 
 **Files:** `crates/printdex-app/src/view/*.rs`, `src/format.rs`, `assets/placeholder.svg`, `assets/icons/*`.
 
-- [ ] `format.rs` tests first: `groups_thousands` (`12345` → `12,345` in English), `parent_path` (`Minis/Dragons/Red` → `Minis/Dragons`; top-level → empty).
-- [ ] Shell: sidebar (232px, `rail`), main column with toolbar (12×20 padding), content (16×20) and a 30px status bar.
-- [ ] Sidebar: group label "LIBRARIES", "All models" row and one row per library with counts in tabular figures; active row Signal Wash; "Add library" button; scan progress at the foot ("Scanning Minis · 1,234 of 5,000").
-- [ ] Toolbar: scope title (title type), search field with search icon and `/` hint, "Rescan" secondary button.
-- [ ] Grid: a `scrollable` with `on_scroll`; only visible rows are built, with fixed-height spacers above and below. Model pane: `surface` fill, 1px `edge`, 14px corners, 8px padding; `tray` well with the placeholder; parts count chip when > 1; name (600, max two lines); parent path in mono `ink-3`. Selected: Signal Wash + 2px accent ring. Click selects.
-- [ ] Empty states: no library ("Add a folder with your models" + primary "Add library"), no results ("No models match …").
-- [ ] Status bar: model count (capped note when needed), library count, key hints.
-- [ ] Commit `feat(app): library grid views`.
+- [x] `format.rs` tests first: `groups_thousands` (`12345` → `12,345` in English), `parent_path` (`Minis/Dragons/Red` → `Minis/Dragons`; top-level → empty).
+- [x] Shell: sidebar (232px, `rail`), main column with toolbar (12×20 padding), content (16×20) and a 30px status bar.
+- [x] Sidebar: group label "LIBRARIES", "All models" row and one row per library with counts in tabular figures; active row Signal Wash; "Add library" button; scan progress at the foot ("Scanning Minis · 1,234 of 5,000").
+- [x] Toolbar: scope title (title type), search field with search icon and `/` hint, "Rescan" secondary button.
+- [x] Grid: a `scrollable` with `on_scroll`; only visible rows are built, with fixed-height spacers above and below. Model pane: `surface` fill, 1px `edge`, 14px corners, 8px padding; `tray` well with the placeholder; parts count chip when > 1; name (600, max two lines); parent path in mono `ink-3`. Selected: Signal Wash + 2px accent ring. Click selects.
+- [x] Empty states: no library ("Add a folder with your models" + primary "Add library"), no results ("No models match …").
+- [x] Status bar: model count (capped note when needed), library count, key hints.
+- [x] Commit `feat(app): library grid views`.
 
 ### Task 9: Run, screenshot, measure, document
 
-- [ ] Generate a library with `printdex bench gen` (2,000 parts) and a small hand-made one; run the app under Xvfb with Mesa llvmpipe; take screenshots in light and dark; check typing in search and arrow keys.
-- [ ] Measure app start to first painted grid on the 100k-part bench library (target < 1 s, v1 §7) and note the number in the PR.
-- [ ] README: how to run the app. Close the plan's task issues from the PR. Commit `docs: run the desktop app`.
+- [x] Generate a library with `printdex bench gen` (2,000 parts) and a small hand-made one; run the app under Xvfb with Mesa llvmpipe; take screenshots in light and dark; check typing in search and arrow keys.
+- [x] Measure app start to first painted grid on the 100k-part bench library (target < 1 s, v1 §7) and note the number in the PR.
+- [x] README: how to run the app. Close the plan's task issues from the PR. Commit `docs: run the desktop app`.

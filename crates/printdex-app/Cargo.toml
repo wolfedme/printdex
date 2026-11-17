@@ -1,0 +1,32 @@
+[package]
+name = "printdex-app"
+description = "Printdex desktop app: iced front end over the Printdex engine."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "printdex-app"
+path = "src/main.rs"
+
+[dependencies]
+printdex-core.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+fluent-bundle.workspace = true
+iced.workspace = true
+rfd.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+unic-langid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
