@@ -2,6 +2,7 @@
 
 mod files;
 mod libraries;
+mod search;
 
 use std::path::Path;
 use std::str::FromStr;
@@ -14,6 +15,7 @@ use crate::error::Result;
 
 pub use files::KnownFile;
 pub use libraries::{Library, LibraryKind};
+pub use search::{ModelHit, Stats, to_fts_query};
 
 /// Handle to the Printdex database. Cheap to clone.
 #[derive(Clone, Debug)]
