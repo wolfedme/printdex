@@ -19,6 +19,8 @@ pub struct ModelHit {
     /// Parts present on disk.
     pub part_count: u32,
     pub missing: bool,
+    /// When Printdex first saw the model, unix milliseconds.
+    pub created_at: i64,
 }
 
 /// Row counts across all libraries. `models`, `parts` and `assets` count
@@ -88,6 +90,7 @@ struct HitRow {
     kind: String,
     part_count: i64,
     missing: bool,
+    created_at: i64,
 }
 
 impl From<HitRow> for ModelHit {
@@ -100,6 +103,7 @@ impl From<HitRow> for ModelHit {
             kind: ModelKind::from_db(&r.kind).unwrap_or(ModelKind::Folder),
             part_count: u32::try_from(r.part_count).unwrap_or(u32::MAX),
             missing: r.missing,
+            created_at: r.created_at,
         }
     }
 }
@@ -142,7 +146,7 @@ impl Db {
                               m.name, m.rel_path, m.kind,
                               (SELECT count(*) FROM parts p
                                 WHERE p.model_id = m.id AND p.missing_since IS NULL) as "part_count!: i64",
-                              m.missing_since IS NOT NULL as "missing!: bool"
+                              m.missing_since IS NOT NULL as "missing!: bool", m.created_at
                        FROM models m
                        WHERE m.missing_since IS NULL AND ?1 = ?1 AND (?2 IS NULL OR m.library_id = ?2)
                          AND (?3 = 0 OR EXISTS (SELECT 1 FROM parts p
@@ -172,7 +176,7 @@ impl Db {
                               m.name, m.rel_path, m.kind,
                               (SELECT count(*) FROM parts p
                                 WHERE p.model_id = m.id AND p.missing_since IS NULL) as "part_count!: i64",
-                              m.missing_since IS NOT NULL as "missing!: bool"
+                              m.missing_since IS NOT NULL as "missing!: bool", m.created_at
                        FROM models_fts f JOIN models m ON m.rowid = f.rowid
                        WHERE models_fts MATCH ?1 AND m.missing_since IS NULL AND (?2 IS NULL OR m.library_id = ?2)
                          AND (?3 = 0 OR EXISTS (SELECT 1 FROM parts p

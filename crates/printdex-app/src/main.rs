@@ -5,6 +5,7 @@ mod format;
 mod grid;
 mod i18n;
 mod icons;
+mod list;
 mod nav;
 mod search;
 mod settings;

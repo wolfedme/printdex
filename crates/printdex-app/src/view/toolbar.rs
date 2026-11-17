@@ -6,11 +6,15 @@ use iced::{Alignment, Element, Length, Padding};
 use crate::app::{App, Message, TOOLBAR_HEIGHT, search_id};
 use crate::i18n::t;
 use crate::icons::{self, Icon};
+use crate::settings::{Settings, ViewMode};
 use crate::theme::{self, Palette};
+
+use super::widgets;
 
 const SEARCH_WIDTH: f32 = 320.0;
 
 pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
+    let settings = app.settings;
     let title = match app.search.query.scope.and_then(|id| app.library(id)) {
         Some(lib) => lib.display_name.clone(),
         None => t("sidebar-all-models"),
@@ -64,6 +68,15 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
                 .wrapping(text::Wrapping::None),
             Space::new().width(Length::Fill),
             search,
+            widgets::segmented(
+                p,
+                &[
+                    (ViewMode::Grid, Some(Icon::Grid), None),
+                    (ViewMode::List, Some(Icon::List), None),
+                ],
+                app.settings.view,
+                move |view| Message::SettingsChanged(Settings { view, ..settings }),
+            ),
             rescan,
         ]
         .spacing(theme::S5)

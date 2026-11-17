@@ -94,6 +94,7 @@ mod tests {
             kind: ModelKind::Folder,
             part_count: 1,
             missing: false,
+            created_at: 0,
         }
     }
 

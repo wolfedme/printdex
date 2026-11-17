@@ -2,6 +2,7 @@
 
 mod empty;
 mod grid;
+mod list;
 mod model;
 mod sidebar;
 mod statusbar;
@@ -14,6 +15,7 @@ use iced::{Alignment, Element, Length};
 use crate::app::{App, Boot, Message, Screen};
 use crate::i18n::{Arg, t, t_args};
 use crate::icons::{self, Icon};
+use crate::settings::ViewMode;
 use crate::theme::{self, Palette};
 
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -63,6 +65,8 @@ fn library(app: &App, p: Palette) -> Element<'_, Message> {
         && !app.search.query.text.trim().is_empty()
     {
         empty::no_results(p, &app.search.query.text)
+    } else if app.settings.view == ViewMode::List {
+        list::view(app, p)
     } else {
         grid::view(app, p)
     });

@@ -86,3 +86,36 @@ pub fn hairline<'a>(p: Palette) -> Element<'a, Message> {
         .style(move |_| p.hairline())
         .into()
 }
+
+/// A segmented control: one button per option, the active one washed.
+pub fn segmented<'a, T: Copy + PartialEq + 'a>(
+    p: Palette,
+    options: &[(T, Option<Icon>, Option<String>)],
+    active: T,
+    on_pick: impl Fn(T) -> Message + 'a,
+) -> Element<'a, Message> {
+    let mut r = row![].spacing(theme::S1);
+    for (value, icon, label) in options.iter().cloned() {
+        let is_active = value == active;
+        let color = if is_active { p.t.accent_ink } else { p.n.ink_2 };
+        let mut content = row![].spacing(theme::S3).align_y(Alignment::Center);
+        if let Some(i) = icon {
+            content = content.push(icons::icon(i, theme::ICON, color));
+        }
+        if let Some(l) = label {
+            content = content.push(text(l).size(theme::SIZE_BODY));
+        }
+        r = r.push(
+            button(content)
+                .height(theme::CONTROL_HEIGHT - 6.0)
+                .padding([4.0, theme::S4])
+                .style(move |_, status| p.segment(is_active, status))
+                .on_press(on_pick(value)),
+        );
+    }
+    container(r)
+        .padding(2)
+        .height(theme::CONTROL_HEIGHT)
+        .style(move |_| p.segmented())
+        .into()
+}

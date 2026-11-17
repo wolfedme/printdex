@@ -86,3 +86,8 @@ error-already-scanning = This library is already being scanned.
 error-other = Something went wrong. Details are in the log.
 error-settings-save = Your settings couldn’t be saved. Details are in the log.
 error-launch = The file couldn’t be opened. Details are in the log.
+
+list-name = Name
+list-folder = Folder
+list-parts = Parts
+list-added = Added

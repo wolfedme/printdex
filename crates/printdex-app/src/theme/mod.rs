@@ -422,6 +422,35 @@ impl Palette {
         }
     }
 
+    /// A list-mode row; `selected` gets the Signal Wash.
+    pub fn list_row(&self, selected: bool, hovered: bool) -> container::Style {
+        let bg = if selected {
+            Some(self.t.accent_soft.into())
+        } else if hovered {
+            Some(self.n.rule_soft.into())
+        } else {
+            None
+        };
+        container::Style {
+            background: bg,
+            text_color: Some(self.n.ink),
+            ..container::Style::default()
+        }
+    }
+
+    /// The tray behind a segmented control.
+    pub fn segmented(&self) -> container::Style {
+        container::Style {
+            background: Some(self.n.rule_soft.into()),
+            border: Border {
+                color: self.n.rule,
+                width: 1.0,
+                radius: RADIUS_CONTROL.into(),
+            },
+            ..container::Style::default()
+        }
+    }
+
     /// Preview well inside a pane.
     pub fn well(&self) -> container::Style {
         container::Style {
@@ -511,6 +540,27 @@ impl Palette {
                 color: border,
                 width: 1.0,
                 radius: RADIUS_CONTROL.into(),
+            },
+            shadow: Shadow::default(),
+            snap: true,
+        }
+    }
+
+    /// One segment of a segmented control.
+    pub fn segment(&self, active: bool, status: button::Status) -> button::Style {
+        let (bg, fg) = if active {
+            (Some(self.t.accent_soft.into()), self.t.accent_ink)
+        } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+            (Some(self.n.rule_soft.into()), self.n.ink)
+        } else {
+            (None, self.n.ink_2)
+        };
+        button::Style {
+            background: bg,
+            text_color: fg,
+            border: Border {
+                radius: (RADIUS_CONTROL - 3.0).into(),
+                ..Border::default()
             },
             shadow: Shadow::default(),
             snap: true,

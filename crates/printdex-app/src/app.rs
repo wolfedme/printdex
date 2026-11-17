@@ -20,7 +20,7 @@ use crate::grid::GridMetrics;
 use crate::i18n::{Arg, t, t_args};
 use crate::nav::{self, Move};
 use crate::search::{SEARCH_LIMIT, SearchState, Ticket};
-use crate::settings::{Settings, ThemeMode, Translucency};
+use crate::settings::{Settings, ThemeMode, Translucency, ViewMode};
 use crate::theme::{self, ColorTheme, Mode, Palette, Surface};
 
 /// Widget ids the update logic talks to.
@@ -512,6 +512,10 @@ impl App {
             }
             Message::SettingsChanged(settings) => {
                 let old = std::mem::replace(&mut self.settings, settings);
+                if old.view != settings.view {
+                    // The other layout starts at the top.
+                    self.viewport = None;
+                }
                 let search = if old.sort == settings.sort {
                     Task::none()
                 } else {
@@ -642,10 +646,21 @@ impl App {
     fn navigate(&mut self, mv: Move) -> Task<Message> {
         let metrics = self.metrics();
         let len = self.search.hits.len();
-        let Some(index) = nav::step(self.selected_index(), mv, metrics.columns, len) else {
+        let columns = match self.settings.view {
+            ViewMode::Grid => metrics.columns,
+            ViewMode::List => 1,
+        };
+        let Some(index) = nav::step(self.selected_index(), mv, columns, len) else {
             return Task::none();
         };
         self.selected = Some(self.search.hits[index].id);
+        if self.settings.view == ViewMode::List {
+            let vp = self.grid_viewport();
+            return match crate::list::scroll_target(index, vp.offset, vp.height) {
+                Some(y) => operation::scroll_to(grid_id(), AbsoluteOffset { x: 0.0, y }),
+                None => Task::none(),
+            };
+        }
         let row = index / metrics.columns.max(1);
         let vp = self.grid_viewport();
         // Rows start below the grid's top padding: row coordinates are
@@ -844,6 +859,7 @@ mod tests {
             kind: ModelKind::Folder,
             part_count: 1,
             missing: false,
+            created_at: 0,
         }
     }
 
@@ -1066,6 +1082,23 @@ mod tests {
                 .collect(),
             assets: vec![],
         }
+    }
+
+    #[test]
+    fn list_mode_moves_by_row() {
+        let mut a = app();
+        let hits: Vec<_> = (0..12).map(|i| hit(&format!("m{i}"))).collect();
+        deliver(&mut a, hits.clone());
+        let s = Settings {
+            view: ViewMode::List,
+            ..a.settings
+        };
+        let _ = a.update(Message::SettingsChanged(s));
+        let _ = a.update(Message::Nav(Move::Down));
+        let _ = a.update(Message::Nav(Move::Down));
+        assert_eq!(a.selected, Some(hits[1].id));
+        let _ = a.update(Message::OpenSelected);
+        assert_eq!(a.screen, Screen::Model(hits[1].id));
     }
 
     #[test]

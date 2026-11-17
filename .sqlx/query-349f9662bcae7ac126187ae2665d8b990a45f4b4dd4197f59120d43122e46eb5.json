@@ -1,0 +1,100 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT m.id as \"id!: ModelId\", m.library_id as \"library_id: LibraryId\",\n                              m.name, m.rel_path, m.kind,\n                              (SELECT count(*) FROM parts p\n                                WHERE p.model_id = m.id AND p.missing_since IS NULL) as \"part_count!: i64\",\n                              m.missing_since IS NOT NULL as \"missing!: bool\", m.created_at\n                       FROM models_fts f JOIN models m ON m.rowid = f.rowid\n                       WHERE models_fts MATCH ?1 AND m.missing_since IS NULL AND (?2 IS NULL OR m.library_id = ?2)\n                         AND (?3 = 0 OR EXISTS (SELECT 1 FROM parts p\n                               WHERE p.model_id = m.id AND p.missing_since IS NULL\n                                 AND (((?3 & 1) != 0 AND p.format = 'stl')\n                                   OR ((?3 & 2) != 0 AND p.format = '3mf')\n                                   OR ((?3 & 4) != 0 AND p.format = 'obj'))))\n                         AND (?4 IS NULL OR ((SELECT count(*) FROM parts p\n                               WHERE p.model_id = m.id AND p.missing_since IS NULL) >= 2) = ?4)\n                       ORDER BY CASE WHEN ?5 THEN m.created_at END DESC,\n                                bm25(models_fts, 10.0, 1.0), m.name COLLATE NOCASE\n                       LIMIT ?6",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: ModelId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "library_id: LibraryId",
+        "ordinal": 1,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "library_id"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "rel_path",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "rel_path"
+          }
+        }
+      },
+      {
+        "name": "kind",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "name": "part_count!: i64",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "missing!: bool",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": "Expression"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "349f9662bcae7ac126187ae2665d8b990a45f4b4dd4197f59120d43122e46eb5"
+}
