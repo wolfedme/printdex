@@ -3318,6 +3318,8 @@ dependencies = [
  "jiff",
  "opener",
  "printdex-core",
+ "printdex-mesh",
+ "printdex-render",
  "rfd",
  "tempfile",
  "tokio",

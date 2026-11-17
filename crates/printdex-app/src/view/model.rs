@@ -1,10 +1,13 @@
 //! Model view: one model's parts, other files and details.
 
-use iced::widget::{Space, button, column, container, row, scrollable, text};
-use iced::{Alignment, Element, Length};
-use printdex_core::{ModelDetail, ModelKind, PartInfo, PrintableFormat, ThumbTarget};
+use iced::widget::{Space, button, column, container, image, row, scrollable, stack, text};
+use iced::{Alignment, ContentFit, Element, Length};
+use printdex_core::{
+    Detail, ModelDetail, ModelKind, PartInfo, PrintableFormat, ThumbFailure, ThumbTarget,
+};
 
 use super::preview::{self, Look};
+use super::viewer::{self, Scene};
 use super::statusbar::hint;
 use super::widgets::{self, date, icon_button};
 use crate::app::{App, Message, ModelView};
@@ -12,6 +15,7 @@ use crate::format::{file_name, group, parent_path, size};
 use crate::i18n::{Arg, t, t_args};
 use crate::icons::{self, Icon};
 use crate::theme::{self, Palette};
+use crate::viewer::Load;
 
 /// Width of the details column.
 const SIDE_WIDTH: f32 = 384.0;
@@ -41,6 +45,89 @@ fn mm(v: f32) -> String {
     } else {
         format!("{v:.0}")
     }
+}
+
+/// The large preview: the interactive 3D viewer once the part's mesh is
+/// loaded, the thumbnail until then. The flag says whether the viewer
+/// shows (it fills the well with less padding).
+fn preview_well<'a>(app: &'a App, p: Palette, pt: &PartInfo) -> (Element<'a, Message>, bool) {
+    let thumb = |label: Option<String>| -> Element<'a, Message> {
+        let picture = preview::preview(
+            app,
+            p,
+            ThumbTarget::Part(pt.id),
+            Look::still(PREVIEW_WIDTH, PREVIEW_HEIGHT - 2.0 * theme::S9).labelled(),
+        );
+        match label {
+            Some(l) => stack![
+                picture,
+                container(note(p, l))
+                    .align_bottom(Length::Fill)
+                    .align_right(Length::Fill),
+            ]
+            .into(),
+            None => picture,
+        }
+    };
+    let v = &app.viewer;
+    let loaded = match &v.load {
+        Load::Ready(l) => l,
+        Load::Loading(_) => return (thumb(Some(t("viewer-loading"))), false),
+        Load::Failed(ThumbFailure::TooLarge) => {
+            return (thumb(Some(t("preview-too-large"))), false);
+        }
+        Load::Failed(_) => return (thumb(Some(t("viewer-unavailable"))), false),
+        Load::Idle => return (thumb(None), false),
+    };
+    let base: Element<'a, Message> = if v.software {
+        match &v.picture {
+            Some(h) => image(h.clone())
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .content_fit(ContentFit::Contain)
+                .into(),
+            None => container(thumb(None)).center(Length::Fill).into(),
+        }
+    } else {
+        Space::new().into()
+    };
+    let shader = viewer::shader_view(Some(Scene::new(loaded, v.view))).map(Message::Viewer);
+    let mut actions = row![Space::new().width(Length::Fill)].spacing(theme::S3);
+    if loaded.decimated && loaded.detail == Detail::Preview {
+        actions = actions.push(small_button(
+            p,
+            t("viewer-full-detail"),
+            Message::Viewer(crate::viewer::Msg::FullDetail),
+        ));
+    }
+    if v.touched {
+        actions = actions.push(small_button(
+            p,
+            t("viewer-reset"),
+            Message::Viewer(crate::viewer::Msg::Reset),
+        ));
+    }
+    let overlay = container(actions).padding(theme::S4);
+    let layers = stack![base, shader, overlay]
+        .width(Length::Fill)
+        .height(Length::Fill);
+    (layers.into(), true)
+}
+
+fn note<'a>(p: Palette, s: String) -> Element<'a, Message> {
+    text(s)
+        .size(theme::SIZE_DATA)
+        .font(theme::FONT_DATA)
+        .color(p.n.ink_3)
+        .into()
+}
+
+fn small_button<'a>(p: Palette, label: String, msg: Message) -> Element<'a, Message> {
+    button(text(label).size(theme::SIZE_CAPTION))
+        .padding([theme::S2, theme::S4])
+        .style(move |_, status| p.button_secondary(status))
+        .on_press(msg)
+        .into()
 }
 
 fn format_label(f: PrintableFormat) -> &'static str {
@@ -118,7 +205,15 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
             size(pt.size),
             format_label(pt.format).to_owned(),
         ];
-        if let Some([x, y, z]) = pt.dims {
+        // The 3D preview measures as it loads; the database once the
+        // thumbnail has been rendered.
+        let loaded = match &app.viewer.load {
+            Load::Ready(l) if app.viewer.part == Some(pt.id) => Some(l),
+            _ => None,
+        };
+        let dims = loaded.map(|l| l.dims).or(pt.dims);
+        let triangles = loaded.map(|l| l.triangles).or(pt.triangles);
+        if let Some([x, y, z]) = dims {
             parts.push(t_args(
                 "model-measured",
                 &[
@@ -128,27 +223,28 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
                 ],
             ));
         }
-        if let Some(n) = pt.triangles {
+        if let Some(n) = triangles {
             parts.push(t_args(
                 "model-triangles",
                 &[("count", Arg::count(n)), ("n", Arg::str(group(n)))],
             ));
         }
+        if let Some(l) = loaded.filter(|l| l.decimated) {
+            parts.push(t_args(
+                "viewer-simplified",
+                &[("shown", Arg::str(group(l.mesh.triangles() as u64)))],
+            ));
+        }
         parts.join(" · ")
     });
-    let well: Element<'a, Message> = match current {
-        Some(pt) => preview::preview(
-            app,
-            p,
-            ThumbTarget::Part(pt.id),
-            Look::still(PREVIEW_WIDTH, PREVIEW_HEIGHT - 2.0 * theme::S9).labelled(),
-        ),
-        None => icons::placeholder().into(),
+    let (well, three_d) = match current {
+        Some(pt) => preview_well(app, p, pt),
+        None => (icons::placeholder().into(), false),
     };
     let preview = container(
         column![
             container(well)
-                .padding(theme::S9)
+                .padding(if three_d { theme::S2 } else { theme::S9 })
                 .center_x(Length::Fill)
                 .height(PREVIEW_HEIGHT)
                 .style(move |_| p.well()),
@@ -242,6 +338,9 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
             hint(p, "Esc", t("status-key-back")),
             hint(p, "←→", t("status-key-part")),
             hint(p, "O", t("status-key-open-file")),
+            text(t("status-key-turn"))
+                .size(theme::SIZE_CAPTION)
+                .color(p.n.ink_3),
             Space::new().width(Length::Fill),
             text(t_args(
                 "status-added",

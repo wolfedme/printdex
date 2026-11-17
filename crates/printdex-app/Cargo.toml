@@ -14,6 +14,8 @@ path = "src/main.rs"
 
 [dependencies]
 printdex-core.workspace = true
+printdex-mesh.workspace = true
+printdex-render.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 directories.workspace = true

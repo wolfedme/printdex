@@ -26,6 +26,17 @@ fn main() {
     let t = std::time::Instant::now();
     let mesh = load(input.as_ref(), format, Limits::default()).expect("load");
     let loaded = t.elapsed();
+    // DECIMATE=n reduces the mesh to at most n triangles first.
+    let mesh = match std::env::var("DECIMATE").ok().and_then(|v| v.parse().ok()) {
+        Some(n) => {
+            let t = std::time::Instant::now();
+            let before = mesh.triangles();
+            let mesh = printdex_mesh::decimate(mesh, n);
+            println!("decimated {before} -> {} in {:?}", mesh.triangles(), t.elapsed());
+            mesh
+        }
+        None => mesh,
+    };
     let opts = RenderOptions {
         material,
         ..RenderOptions::default()

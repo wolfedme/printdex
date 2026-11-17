@@ -25,6 +25,7 @@ use crate::search::{SEARCH_LIMIT, SearchState, Ticket};
 use crate::settings::{Settings, ThemeMode, Translucency, ViewMode};
 use crate::theme::{self, ColorTheme, Mode, Palette, Surface};
 use crate::thumbs::Thumbs;
+use crate::viewer::{self, Viewer};
 
 /// Widget ids the update logic talks to.
 pub fn search_id() -> Id {
@@ -173,6 +174,8 @@ pub struct App {
     pub window: Size,
     pub viewport: Option<GridViewport>,
     pub thumbs: Thumbs,
+    /// The model view's 3D preview.
+    pub viewer: Viewer,
     cancel: CancellationToken,
     started: std::time::Instant,
 }
@@ -235,6 +238,7 @@ pub enum Message {
     /// A window frame while something animates.
     Frame(std::time::Instant),
     SettingsSaved(Result<(), Arc<std::io::Error>>),
+    Viewer(viewer::Msg),
 }
 
 impl App {
@@ -272,6 +276,7 @@ impl App {
             window: INITIAL_WINDOW,
             viewport: None,
             thumbs: Thumbs::default(),
+            viewer: Viewer::default(),
             cancel: CancellationToken::new(),
             started: std::time::Instant::now(),
         }
@@ -382,7 +387,29 @@ impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.handle(message);
         self.request_thumbnails();
-        task
+        let viewer = self.sync_viewer();
+        Task::batch([task, viewer])
+    }
+
+    /// Loads the selected part into the 3D preview, or closes the preview
+    /// when no model is open.
+    fn sync_viewer(&mut self) -> Task<Message> {
+        let part = match self.screen {
+            Screen::Model(_) => self.current_part().map(|p| p.id),
+            _ => None,
+        };
+        match part {
+            Some(id) => self
+                .viewer
+                .open(self.engine.as_ref(), id)
+                .map(Message::Viewer),
+            None => {
+                if self.viewer.part.is_some() {
+                    self.viewer.close();
+                }
+                Task::none()
+            }
+        }
     }
 
     /// Items on screen that show a thumbnail, most important first: the
@@ -813,6 +840,10 @@ impl App {
                 };
                 Task::batch([search, self.save_settings()])
             }
+            Message::Viewer(msg) => self
+                .viewer
+                .update(self.engine.as_ref(), msg)
+                .map(Message::Viewer),
             Message::SettingsSaved(Ok(())) => Task::none(),
             Message::SettingsSaved(Err(e)) => {
                 tracing::warn!(error = %e, "could not save settings");

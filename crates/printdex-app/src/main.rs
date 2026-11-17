@@ -14,6 +14,7 @@ mod settings;
 mod theme;
 mod thumbs;
 mod view;
+mod viewer;
 
 use std::path::PathBuf;
 

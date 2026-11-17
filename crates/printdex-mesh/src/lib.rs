@@ -10,10 +10,12 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 
+mod decimate;
 mod obj;
 mod stl;
 mod threemf;
 
+pub use decimate::{PREVIEW_TRIANGLES, decimate};
 pub use threemf::thumbnail as threemf_thumbnail;
 
 /// Buffer size for file reads: large enough that slow network shares see

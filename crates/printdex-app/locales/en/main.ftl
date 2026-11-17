@@ -167,6 +167,12 @@ settings-retry = Retry
 preview-rendering = Rendering preview
 preview-too-large = Too large to preview
 preview-unavailable = No preview
+viewer-loading = Loading 3D preview
+viewer-reset = Reset view
+viewer-full-detail = Full detail
+viewer-simplified = 3D preview simplified to { $shown }
+viewer-unavailable = No 3D preview
+status-key-turn = Drag to turn, Shift-drag to move, scroll to zoom
 model-measured = { $x } × { $y } × { $z } mm
 model-triangles = { $count ->
     [one] { $n } triangle

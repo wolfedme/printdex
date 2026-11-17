@@ -27,7 +27,8 @@ pub use grouping::ModelKind;
 pub use ids::{AssetId, LibraryId, ModelId, PartId};
 pub use scan::ScanSummary;
 pub use thumbs::{
-    THUMB_HEIGHT, THUMB_WIDTH, ThumbFailure, ThumbKind, ThumbTarget, ThumbnailService,
+    DEFAULT_CACHE_LIMIT, Detail, Preview, THUMB_HEIGHT, THUMB_WIDTH, ThumbFailure, ThumbKind,
+    ThumbTarget, ThumbnailService,
 };
 pub use walk::PrintableFormat;
 
