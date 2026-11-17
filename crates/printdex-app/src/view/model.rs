@@ -7,8 +7,8 @@ use printdex_core::{
 };
 
 use super::preview::{self, Look};
-use super::viewer::{self, Scene};
 use super::statusbar::hint;
+use super::viewer::{self, Scene};
 use super::widgets::{self, date, icon_button};
 use crate::app::{App, Message, ModelView};
 use crate::format::{file_name, group, parent_path, size};

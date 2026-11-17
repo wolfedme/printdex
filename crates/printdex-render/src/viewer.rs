@@ -24,7 +24,7 @@ const SS: u32 = 2;
 /// Positions per vertex buffer: whole triangles (a multiple of 3), and
 /// 3M × 12 bytes stays well under wgpu's default 256 MB buffer limit.
 const CHUNK_VERTICES: usize = 3 << 20;
-const _: () = assert!(CHUNK_VERTICES % 3 == 0);
+const _: () = assert!(CHUNK_VERTICES.is_multiple_of(3));
 /// Value the depth-value texture is cleared to: "nothing here".
 const EMPTY_DEPTH: f32 = -1.0e30;
 
@@ -277,6 +277,9 @@ pub fn project(sphere: Sphere, view: &View, width: u32, height: u32, p: Vec3) ->
     fit.to_pixel(basis.project(p).0)
 }
 
+/// Largest zoom of the starting view.
+const HOME_MAX_ZOOM: f32 = 1.6;
+
 /// The starting view for a model: the default orbit, zoomed so the model
 /// as seen from there fills a `width` × `height` viewer (the bounding
 /// sphere alone leaves flat or long models small).
@@ -304,7 +307,8 @@ pub fn home_view(sphere: Sphere, bounds: Bounds, width: f32, height: f32) -> Vie
     let usable = 1.0 - 2.0 * crate::camera::ORBIT_MARGIN;
     let sphere_scale = side * usable / (2.0 * sphere.radius);
     let fit_scale = (width * usable / extent.x).min(height * usable / extent.y);
-    let zoom = (fit_scale / sphere_scale).clamp(1.0, crate::camera::MAX_ZOOM);
+    // Capped so turning the model doesn't push it far out of view.
+    let zoom = (fit_scale / sphere_scale).clamp(1.0, HOME_MAX_ZOOM);
     // Centre the box, not the sphere (they differ in screen space only
     // by rounding for a box, but keep it exact).
     let mid = (lo + hi) / 2.0;
@@ -744,7 +748,14 @@ mod tests {
 
     /// Draws `mesh` with the viewer into a transparent RGBA texture and
     /// reads it back.
-    fn draw(d: &wgpu::Device, q: &wgpu::Queue, mesh: &Mesh, view: &View, w: u32, h: u32) -> Vec<u8> {
+    fn draw(
+        d: &wgpu::Device,
+        q: &wgpu::Queue,
+        mesh: &Mesh,
+        view: &View,
+        w: u32,
+        h: u32,
+    ) -> Vec<u8> {
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let mut v = GpuViewer::new(d, format);
         v.set_mesh(d, 1, mesh);
@@ -887,7 +898,10 @@ mod tests {
         };
         let full = draw(&d, &q, &mesh, &view, 64, 48);
         let inside = crop(&full, 64, 48);
-        assert!(inside.chunks(4).all(|p| p[3] == 255), "viewer fully covered");
+        assert!(
+            inside.chunks(4).all(|p| p[3] == 255),
+            "viewer fully covered"
+        );
         let covered = full.chunks(4).filter(|p| p[3] > 0).count();
         assert_eq!(covered, 64 * 48, "nothing drawn outside the viewer");
     }
@@ -907,7 +921,10 @@ mod tests {
                 if i & 4 == 0 { 0.0 } else { 5.0 },
             );
             let px = project(s, &v, 700, 320, p);
-            assert!((0.0..=700.0).contains(&px.x) && (0.0..=320.0).contains(&px.y), "{px}");
+            assert!(
+                (0.0..=700.0).contains(&px.x) && (0.0..=320.0).contains(&px.y),
+                "{px}"
+            );
         }
     }
 

@@ -162,7 +162,8 @@ impl Viewer {
             }
             Msg::Pan(dx, dy) => {
                 self.touched = true;
-                self.view.pan_px(dx, dy, self.size.width.min(self.size.height));
+                self.view
+                    .pan_px(dx, dy, self.size.width.min(self.size.height));
                 Task::none()
             }
             Msg::Zoom(lines) => {
@@ -215,12 +216,9 @@ impl Viewer {
     /// The starting camera for the loaded model at the current size.
     fn home(&self) -> View {
         match &self.load {
-            Load::Ready(l) => printdex_render::home_view(
-                l.sphere,
-                l.bounds,
-                self.size.width,
-                self.size.height,
-            ),
+            Load::Ready(l) => {
+                printdex_render::home_view(l.sphere, l.bounds, self.size.width, self.size.height)
+            }
             _ => View::default(),
         }
     }
@@ -246,8 +244,9 @@ impl Viewer {
         let req = self.request;
         Task::perform(
             async move {
-                let img = printdex_core::cpu::run_cpu(move || printdex_render::render(&mesh, &opts))
-                    .await;
+                let img =
+                    printdex_core::cpu::run_cpu(move || printdex_render::render(&mesh, &opts))
+                        .await;
                 image::Handle::from_rgba(img.width, img.height, img.rgba)
             },
             move |handle| Msg::CpuRendered(req, handle),
@@ -260,8 +259,9 @@ mod tests {
     use super::*;
 
     fn preview() -> Preview {
-        let mut mesh = Mesh::default();
-        mesh.positions = vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 5.0]];
+        let mesh = Mesh {
+            positions: vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 5.0]],
+        };
         Preview {
             mesh,
             dims: [10.0, 10.0, 5.0],
@@ -301,6 +301,7 @@ mod tests {
     fn opening_another_part_resets_the_camera() {
         let mut v = Viewer::default();
         let _ = v.open(None, part(1));
+        let _ = v.update(None, Msg::Loaded(v.request, Ok(preview())));
         let _ = v.update(None, Msg::Zoom(3.0));
         assert!(v.view.zoom > 1.0 && v.touched);
         let _ = v.open(None, part(1));
@@ -319,6 +320,10 @@ mod tests {
         assert_eq!(v.update(None, Msg::Released).units(), 0);
         assert_eq!(v.update(None, Msg::Software).units(), 1);
         assert_eq!(v.update(None, Msg::Released).units(), 1);
-        assert_eq!(v.update(None, Msg::Orbit(5.0, 0.0)).units(), 0, "orbit waits for release");
+        assert_eq!(
+            v.update(None, Msg::Orbit(5.0, 0.0)).units(),
+            0,
+            "orbit waits for release"
+        );
     }
 }

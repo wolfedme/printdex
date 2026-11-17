@@ -18,8 +18,8 @@ use std::collections::{HashSet, VecDeque};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, SystemTime};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, SystemTime};
 
 use tokio::sync::{Notify, Semaphore, broadcast};
 use xxhash_rust::xxh3::xxh3_64;
@@ -42,7 +42,7 @@ pub const BUDGET_MIB: u32 = 768;
 /// Largest folder image decoded for a cover.
 const MAX_IMAGE_BYTES: u64 = 64 << 20;
 /// Default size limit of the thumbnail cache.
-pub const DEFAULT_CACHE_LIMIT: u64 = 1 << 30;
+pub const DEFAULT_CACHE_LIMIT: u64 = 1_000_000_000;
 /// Eviction trims the cache to this share of the limit, so it does not
 /// run again after every new thumbnail.
 const EVICT_TO_PERCENT: u64 = 90;
@@ -272,6 +272,9 @@ impl Gpu {
 /// What a job produced.
 enum Outcome {
     Ready(PathBuf),
+    /// Just rendered (not from the cache), with the model's top edge as a
+    /// fraction of the image height.
+    Rendered(PathBuf, f32),
     Failed(ThumbFailure),
     /// The model or part no longer exists.
     Gone,
@@ -485,6 +488,13 @@ async fn worker(inner: Arc<Inner>) {
                 target,
                 kind: ThumbKind::of(&path),
                 path,
+                print_in: None,
+            },
+            Outcome::Rendered(path, top) => EngineEvent::ThumbnailReady {
+                target,
+                kind: ThumbKind::Render,
+                path,
+                print_in: Some(top),
             },
             Outcome::Failed(reason) => EngineEvent::ThumbnailFailed { target, reason },
             Outcome::Gone => continue,
@@ -558,6 +568,8 @@ fn encode(img: image::RgbaImage) -> Result<Vec<u8>, ThumbFailure> {
 /// What rendering a part produced.
 struct Rendered {
     png: Vec<u8>,
+    /// First row with any of the model, as a fraction of the height.
+    top: f32,
     dims: [f32; 3],
     triangles: u64,
 }
@@ -571,6 +583,18 @@ fn load_mesh(path: &Path, format: PrintableFormat) -> Result<printdex_mesh::Mesh
             MeshError::Malformed(_) => ThumbFailure::Invalid,
         }
     })
+}
+
+/// The first row of `img` with a visible pixel; the height when empty.
+fn top_row(img: &printdex_render::Image) -> u32 {
+    let row = img.width as usize * 4;
+    if row == 0 {
+        return img.height;
+    }
+    img.rgba
+        .chunks(row)
+        .position(|r| r.chunks(4).any(|px| px[3] > 0))
+        .map_or(img.height, |y| y as u32)
 }
 
 fn render_part(path: &Path, format: PrintableFormat, gpu: &Gpu) -> Result<Rendered, ThumbFailure> {
@@ -588,10 +612,12 @@ fn render_part(path: &Path, format: PrintableFormat, gpu: &Gpu) -> Result<Render
     );
     let triangles = mesh.triangles() as u64;
     drop(mesh);
+    let top = top_row(&img) as f32 / img.height.max(1) as f32;
     let rgba =
         image::RgbaImage::from_raw(img.width, img.height, img.rgba).ok_or(ThumbFailure::Invalid)?;
     Ok(Rendered {
         png: encode(rgba)?,
+        top,
         dims: bounds.size(),
         triangles,
     })
@@ -734,7 +760,7 @@ impl Inner {
                     tracing::warn!(error = %e, "storing part measurements failed");
                 }
                 match self.store(&key, "png", r.png).await {
-                    Some(p) => Outcome::Ready(p),
+                    Some(p) => Outcome::Rendered(p, r.top),
                     None => Outcome::Failed(ThumbFailure::Unreadable),
                 }
             }

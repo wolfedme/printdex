@@ -32,7 +32,11 @@ fn main() {
             let t = std::time::Instant::now();
             let before = mesh.triangles();
             let mesh = printdex_mesh::decimate(mesh, n);
-            println!("decimated {before} -> {} in {:?}", mesh.triangles(), t.elapsed());
+            println!(
+                "decimated {before} -> {} in {:?}",
+                mesh.triangles(),
+                t.elapsed()
+            );
             mesh
         }
         None => mesh,

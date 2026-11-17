@@ -107,16 +107,18 @@ crates/printdex-app/src/view/*.rs        grid, list, model view use real preview
 
 ### Task 7: Decimation and preview mesh
 
-- [ ] Pure-Rust vertex-clustering decimation in `printdex-mesh` down to a target (default 400k triangles) for interaction; full resolution on request. Tests: `decimate_hits_target`, `decimate_keeps_bounds`. (meshopt was the approved crate; it needs a C++ toolchain on every builder, so a small Rust clustering pass is tried first and meshopt stays the fallback if quality is poor.)
+- [x] Pure-Rust vertex-clustering decimation in `printdex-mesh` down to a target (default 400k triangles) for interaction; full resolution on request. Tests: `decimate_hits_target`, `decimate_keeps_bounds`. (meshopt was the approved crate; it needs a C++ toolchain on every builder, so a small Rust clustering pass is tried first and meshopt stays the fallback if quality is poor.)
 
 ### Task 8: wgpu viewer
 
-- [ ] iced `shader` widget with a vertex/index buffer upload, same camera/material/lighting as the CPU renderer, orbit (drag), pan (right/middle drag or Shift+drag), zoom (wheel), double-click resets, dimension readout. Parse and decimate on a worker; a loading state with the cached thumbnail shown meanwhile; closing the model cancels the load.
-- [ ] Fallback when iced runs on its software renderer: show the CPU render of the current camera (re-rendered on release).
-- [ ] Tests: camera maths (`orbit_clamps_elevation`, `zoom_limits`, `pan_moves_target`), `opening_large_file_never_blocks_update`.
+- [x] iced `shader` widget with a vertex/index buffer upload, same camera/material/lighting as the CPU renderer, orbit (drag), pan (right/middle drag or Shift+drag), zoom (wheel), double-click resets, dimension readout. Parse and decimate on a worker; a loading state with the cached thumbnail shown meanwhile; closing the model cancels the load.
+- [x] Fallback when iced runs on its software renderer: show the CPU render of the current camera (re-rendered on release).
+- [x] Tests: camera maths (`orbit_clamps_elevation`, `zoom_limits`, `pan_moves_target`), `opening_large_file_never_blocks_update`.
 
 ### Task 9: Print-in motion, cache setting
 
-- [ ] Print-in (DESIGN.md "Motion"): a newly rendered thumbnail builds up from the bed in 16 steps over 720 ms, stagger 30 ms capped at 330 ms; once per newly rendered thumbnail; Reduce motion turns it into a fade.
-- [ ] Settings > Storage: cache size limit (default 1 GB), current usage, "Clear cache"; eviction by least-recently-used file time after each batch.
-- [ ] Commit, screenshots, PR.
+- [x] Print-in (DESIGN.md "Motion"): a newly rendered thumbnail builds up from the bed in 16 steps over 720 ms, stagger 30 ms capped at 330 ms; once per newly rendered thumbnail; Reduce motion turns it into a fade.
+- [x] Settings > Storage: cache size limit (default 1 GB), current usage, "Clear cache"; eviction by least-recently-used file time after each batch.
+- [x] Commit, screenshots, PR.
+
+**As built (part B):** decimation welds identical corners first, then refines the grid by the square root of the miss (2M → 363k triangles in about 0.8 s). The GPU viewer lives in `printdex-render::viewer` (scene pass into offscreen colour and depth-value textures at 2×, then an edge-and-resolve pass blended into the window), so it is tested headless against the CPU render. A zero-size probe widget notices iced's software renderer on the first frame; the viewer then shows CPU pictures, re-rendered when a drag ends or on zoom. The starting view zooms (up to 1.6×) so flat or long models fill the well. "Full detail" loads every triangle up to 8M. Cache limits are 250 MB to 5 GB (default 1 GB); eviction runs when the thumbnail queue goes idle and deletes the least recently used files down to 90% of the limit (a cache hit refreshes the file time at most hourly). `ThumbnailReady` carries `print_in` (the model's top edge) only for fresh renders, so cached previews never replay it.

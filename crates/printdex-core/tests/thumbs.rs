@@ -355,6 +355,39 @@ async fn cache_usage_limit_and_clear() {
     // Clearing empties it; thumbnails come back on request.
     thumbs.clear_cache().await.unwrap();
     assert_eq!(thumbs.cache_usage().await, 0);
-    thumbs.set_cache_limit(printdex_core::DEFAULT_CACHE_LIMIT).await;
+    thumbs
+        .set_cache_limit(printdex_core::DEFAULT_CACHE_LIMIT)
+        .await;
     assert!(fx.thumb(ThumbTarget::Model(b)).await.unwrap().exists());
+}
+
+#[tokio::test]
+async fn fresh_renders_ask_for_print_in() {
+    let mut fx = Fx::new().await;
+    fx.write("box/box.stl", &cuboid_stl(10.0, 20.0, 5.0));
+    fx.scan().await;
+    let target = ThumbTarget::Model(fx.model("box").await);
+    let mut first_and_again = Vec::new();
+    for _ in 0..2 {
+        fx.engine.thumbnails().request_visible([target]);
+        let print_in = tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                if let EngineEvent::ThumbnailReady {
+                    target: t,
+                    print_in,
+                    ..
+                } = fx.events.recv().await.unwrap()
+                    && t == target
+                {
+                    return print_in;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        first_and_again.push(print_in);
+    }
+    let top = first_and_again[0].expect("just rendered");
+    assert!(top > 0.0 && top < 0.5, "{top}");
+    assert_eq!(first_and_again[1], None, "from the cache");
 }
