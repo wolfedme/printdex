@@ -143,8 +143,9 @@ pub fn walk_library(fs: &dyn Fs, root: &Path, cancel: &CancellationToken) -> Res
     walk_from(fs, root, &[String::new()], cancel)
 }
 
-/// Walks only the folders `subtrees` (relative to `root`, `""` for all of
-/// it). A subtree that no longer exists yields no files.
+/// Walks only `subtrees` (folders or files, relative to `root`, `""` for
+/// all of it). A subtree that no longer exists yields no files, and one a
+/// full walk would skip (hidden, NAS junk) yields none either.
 pub fn walk_from(
     fs: &dyn Fs,
     root: &Path,
@@ -164,11 +165,36 @@ pub fn walk_from(
         } else {
             root.join(rel)
         };
-        if !rel.is_empty() && fs.metadata(&dir).is_err() {
-            // Gone (deleted or moved away): nothing to list.
+        if rel.is_empty() {
+            visit(fs, &dir, rel, &output, cancel);
             return;
         }
-        visit(fs, &dir, rel, &output, cancel);
+        // Every folder on the way must be one a full walk would enter.
+        let mut names = rel.split('/');
+        let name = names.next_back().unwrap_or_default();
+        if !names.all(Rules::keep_dir) {
+            return;
+        }
+        match fs.metadata(&dir) {
+            // Gone (deleted or moved away): nothing to list.
+            Err(_) => {}
+            Ok(meta) if meta.is_dir => {
+                if Rules::keep_dir(name) {
+                    visit(fs, &dir, rel, &output, cancel);
+                }
+            }
+            // A single file (a watcher reports files too).
+            Ok(meta) => {
+                if Rules::keep_file(name) {
+                    lock(&output).files.push(FileEntry {
+                        rel_path: rel.clone(),
+                        size: meta.len,
+                        mtime_ns: meta.mtime_ns,
+                        kind: classify(name),
+                    });
+                }
+            }
+        }
     });
     if cancel.is_cancelled() {
         return Err(CoreError::Cancelled);
@@ -339,6 +365,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(paths(&out), ["b/c/z.stl", "b/y.stl"]);
+    }
+
+    #[test]
+    fn subtree_walk_takes_single_files_and_skips_hidden() {
+        let d = tempfile::tempdir().unwrap();
+        touch(d.path(), "a/x.stl", b"x");
+        touch(d.path(), "loose.stl", b"x");
+        touch(d.path(), ".hidden/y.stl", b"x");
+        touch(d.path(), "a/@eaDir/t.stl", b"x");
+        let out = walk_from(
+            &RealFs,
+            d.path(),
+            &[
+                "a/x.stl".into(),
+                "loose.stl".into(),
+                ".hidden/y.stl".into(),
+                "a/@eaDir".into(),
+            ],
+            &CancellationToken::new(),
+        )
+        .unwrap();
+        assert_eq!(paths(&out), ["a/x.stl", "loose.stl"]);
     }
 
     #[test]

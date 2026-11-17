@@ -7,7 +7,7 @@ use crate::error::{CoreError, Result};
 use crate::ids::LibraryId;
 use crate::time::now_ms;
 
-/// Where a library lives. Always `Local` until detection lands (milestone 4).
+/// Where a library lives, detected from its mount (see [`crate::volume`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LibraryKind {
     Local,
@@ -25,11 +25,65 @@ impl LibraryKind {
         }
     }
 
-    fn from_db(s: &str) -> Self {
+    pub fn from_db(s: &str) -> Self {
         match s {
             "removable" => LibraryKind::Removable,
             "network" => LibraryKind::Network,
             _ => LibraryKind::Local,
+        }
+    }
+}
+
+/// How Printdex notices changes in a library.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ChangeMode {
+    /// Watch a local folder; check a share or removable drive every
+    /// [`ChangeMode::SHARE_MINUTES`] minutes.
+    #[default]
+    Auto,
+    /// Watch the folder for changes.
+    Watch,
+    /// Rescan every so many minutes.
+    Every(u16),
+    /// Only when the user asks.
+    Manual,
+}
+
+impl ChangeMode {
+    /// Minutes between checks of a share in [`ChangeMode::Auto`].
+    pub const SHARE_MINUTES: u16 = 15;
+    /// Intervals offered in Settings, in minutes.
+    pub const INTERVALS: [u16; 3] = [5, 15, 60];
+
+    /// What `self` means for a library of `kind`: never `Auto`.
+    pub fn resolve(self, kind: LibraryKind) -> ChangeMode {
+        match (self, kind) {
+            (ChangeMode::Auto, LibraryKind::Local) => ChangeMode::Watch,
+            (ChangeMode::Auto, _) => ChangeMode::Every(ChangeMode::SHARE_MINUTES),
+            (mode, _) => mode,
+        }
+    }
+
+    /// Stable text, as stored in the database.
+    pub fn to_db(self) -> String {
+        match self {
+            ChangeMode::Auto => "auto".into(),
+            ChangeMode::Watch => "watch".into(),
+            ChangeMode::Every(m) => format!("every:{m}"),
+            ChangeMode::Manual => "manual".into(),
+        }
+    }
+
+    /// Parses [`ChangeMode::to_db`]; anything unknown is `Auto`.
+    pub fn from_db(s: &str) -> ChangeMode {
+        match s {
+            "watch" => ChangeMode::Watch,
+            "manual" => ChangeMode::Manual,
+            _ => s
+                .strip_prefix("every:")
+                .and_then(|m| m.parse().ok())
+                .filter(|&m| m > 0)
+                .map_or(ChangeMode::Auto, ChangeMode::Every),
         }
     }
 }
@@ -41,6 +95,7 @@ pub struct Library {
     pub path: PathBuf,
     pub display_name: String,
     pub kind: LibraryKind,
+    pub change_mode: ChangeMode,
     pub sidecar_enabled: bool,
     pub last_full_scan_at: Option<i64>,
 }
@@ -50,6 +105,7 @@ struct LibraryRow {
     path: String,
     display_name: String,
     kind: String,
+    change_mode: String,
     sidecar_enabled: bool,
     last_full_scan_at: Option<i64>,
 }
@@ -61,6 +117,7 @@ impl From<LibraryRow> for Library {
             path: PathBuf::from(r.path),
             display_name: r.display_name,
             kind: LibraryKind::from_db(&r.kind),
+            change_mode: ChangeMode::from_db(&r.change_mode),
             sidecar_enabled: r.sidecar_enabled,
             last_full_scan_at: r.last_full_scan_at,
         }
@@ -75,15 +132,17 @@ impl Db {
             .to_str()
             .ok_or_else(|| CoreError::LibraryPathInvalid(lib.path.clone()))?;
         let kind = lib.kind.as_str();
+        let mode = lib.change_mode.to_db();
         let now = now_ms();
         sqlx::query!(
             "INSERT INTO libraries
-               (id, path, display_name, kind, sidecar_enabled, last_full_scan_at, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+               (id, path, display_name, kind, change_mode, sidecar_enabled, last_full_scan_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             lib.id,
             path,
             lib.display_name,
             kind,
+            mode,
             lib.sidecar_enabled,
             lib.last_full_scan_at,
             now,
@@ -98,7 +157,7 @@ impl Db {
     pub async fn libraries(&self) -> Result<Vec<Library>> {
         let rows = sqlx::query_as!(
             LibraryRow,
-            r#"SELECT id as "id!: LibraryId", path, display_name, kind,
+            r#"SELECT id as "id!: LibraryId", path, display_name, kind, change_mode,
                       sidecar_enabled as "sidecar_enabled: bool", last_full_scan_at
                FROM libraries ORDER BY id"#
         )
@@ -111,7 +170,7 @@ impl Db {
     pub async fn library(&self, id: LibraryId) -> Result<Library> {
         sqlx::query_as!(
             LibraryRow,
-            r#"SELECT id as "id!: LibraryId", path, display_name, kind,
+            r#"SELECT id as "id!: LibraryId", path, display_name, kind, change_mode,
                       sidecar_enabled as "sidecar_enabled: bool", last_full_scan_at
                FROM libraries WHERE id = ?"#,
             id
@@ -148,6 +207,39 @@ impl Db {
         Ok(())
     }
 
+    /// Sets how library `id` notices changes.
+    pub async fn set_change_mode(&self, id: LibraryId, mode: ChangeMode) -> Result<()> {
+        let mode = mode.to_db();
+        let now = now_ms();
+        let r = sqlx::query!(
+            "UPDATE libraries SET change_mode = ?, updated_at = ? WHERE id = ?",
+            mode,
+            now,
+            id
+        )
+        .execute(self.writer())
+        .await?;
+        if r.rows_affected() == 0 {
+            return Err(CoreError::LibraryNotFound(id));
+        }
+        Ok(())
+    }
+
+    /// Records the detected volume kind of library `id`.
+    pub async fn set_library_kind(&self, id: LibraryId, kind: LibraryKind) -> Result<()> {
+        let kind = kind.as_str();
+        let now = now_ms();
+        sqlx::query!(
+            "UPDATE libraries SET kind = ?, updated_at = ? WHERE id = ?",
+            kind,
+            now,
+            id
+        )
+        .execute(self.writer())
+        .await?;
+        Ok(())
+    }
+
     /// Records when a full scan of `id` finished.
     pub async fn set_last_full_scan(&self, id: LibraryId, at_ms: i64) -> Result<()> {
         let now = now_ms();
@@ -179,6 +271,7 @@ mod tests {
             path: PathBuf::from(path),
             display_name: "Minis".into(),
             kind: LibraryKind::Local,
+            change_mode: crate::db::ChangeMode::Auto,
             sidecar_enabled: true,
             last_full_scan_at: Some(42),
         }
@@ -231,6 +324,48 @@ mod tests {
             db.rename_library(a.id, "x").await,
             Err(CoreError::LibraryNotFound(_))
         ));
+    }
+
+    #[test]
+    fn change_mode_round_trips_and_resolves() {
+        for m in [
+            ChangeMode::Auto,
+            ChangeMode::Watch,
+            ChangeMode::Every(5),
+            ChangeMode::Manual,
+        ] {
+            assert_eq!(ChangeMode::from_db(&m.to_db()), m);
+        }
+        assert_eq!(ChangeMode::from_db("every:0"), ChangeMode::Auto);
+        assert_eq!(ChangeMode::from_db("???"), ChangeMode::Auto);
+        assert_eq!(
+            ChangeMode::Auto.resolve(LibraryKind::Local),
+            ChangeMode::Watch
+        );
+        assert_eq!(
+            ChangeMode::Auto.resolve(LibraryKind::Network),
+            ChangeMode::Every(15)
+        );
+        assert_eq!(
+            ChangeMode::Manual.resolve(LibraryKind::Network),
+            ChangeMode::Manual
+        );
+    }
+
+    #[tokio::test]
+    async fn change_mode_is_stored() {
+        let (_d, db) = open().await;
+        let l = lib("/srv/minis");
+        db.insert_library(&l).await.unwrap();
+        db.set_change_mode(l.id, ChangeMode::Every(60))
+            .await
+            .unwrap();
+        db.set_library_kind(l.id, LibraryKind::Network)
+            .await
+            .unwrap();
+        let back = db.library(l.id).await.unwrap();
+        assert_eq!(back.change_mode, ChangeMode::Every(60));
+        assert_eq!(back.kind, LibraryKind::Network);
     }
 
     #[tokio::test]

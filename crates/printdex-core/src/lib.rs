@@ -14,17 +14,19 @@ pub mod grouping;
 pub mod identity;
 pub mod ids;
 pub mod model_data;
+pub mod monitor;
 pub mod photos;
 pub mod scan;
 pub mod sidecar;
 pub mod thumbs;
 pub mod time;
 mod user_data;
+pub mod volume;
 pub mod walk;
 
 pub use db::{
-    AssetInfo, Library, LibraryKind, ModelDetail, ModelHit, PartInfo, RecipeFacts, Scope,
-    SearchFilter, Smart, SmartCounts, SortOrder, Stats, format_number,
+    AssetInfo, ChangeMode, Library, LibraryKind, ModelDetail, ModelHit, PartInfo, RecipeFacts,
+    Scope, SearchFilter, Smart, SmartCounts, SortOrder, Stats, format_number,
 };
 pub use engine::{Engine, LibraryStatus};
 pub use error::{CoreError, Result};
@@ -35,6 +37,7 @@ pub use model_data::{
     Adhesion, Attempt, AttemptResult, CollectionInfo, LastPrint, Material, ModelData, NewAttempt,
     PartOverride, PhotoRef, PrintSettings, Recipe, RecipeNote, Supports, TagCount,
 };
+pub use monitor::{Monitor, MonitorConfig};
 pub use scan::ScanSummary;
 pub use thumbs::{
     DEFAULT_CACHE_LIMIT, Detail, Preview, THUMB_HEIGHT, THUMB_WIDTH, ThumbFailure, ThumbKind,

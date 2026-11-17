@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id as \"id!: LibraryId\", path, display_name, kind,\n                      sidecar_enabled as \"sidecar_enabled: bool\", last_full_scan_at\n               FROM libraries ORDER BY id",
+  "query": "SELECT id as \"id!: LibraryId\", path, display_name, kind, change_mode,\n                      sidecar_enabled as \"sidecar_enabled: bool\", last_full_scan_at\n               FROM libraries ORDER BY id",
   "describe": {
     "columns": [
       {
@@ -48,8 +48,19 @@
         }
       },
       {
-        "name": "sidecar_enabled: bool",
+        "name": "change_mode",
         "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "libraries",
+            "name": "change_mode"
+          }
+        }
+      },
+      {
+        "name": "sidecar_enabled: bool",
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "last_full_scan_at",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -79,8 +90,9 @@
       false,
       false,
       false,
+      false,
       true
     ]
   },
-  "hash": "174ae4c4538309e750f8449573b912f71418801e086ab367db91292e42da5319"
+  "hash": "3808271d47b88731d6132d835c43d719d36b3e3c79ea2608362935afd8bb918a"
 }

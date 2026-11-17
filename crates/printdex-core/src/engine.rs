@@ -8,14 +8,14 @@ use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
 use crate::db::{
-    Db, Library, LibraryKind, ModelDetail, ModelHit, Scope, SearchFilter, SmartCounts, SortOrder,
-    Stats,
+    ChangeMode, Db, Library, LibraryKind, ModelDetail, ModelHit, Scope, SearchFilter, SmartCounts,
+    SortOrder, Stats,
 };
 use crate::error::{CoreError, Result};
 use crate::events::EngineEvent;
 use crate::fs::{Fs, RealFs};
 use crate::ids::{LibraryId, ModelId};
-use crate::scan::{ScanSummary, SidecarCtx, scan_library};
+use crate::scan::{ScanSummary, SidecarCtx, scan_library, scan_subtrees};
 use crate::sidecar::SidecarWriter;
 use crate::thumbs::ThumbnailService;
 
@@ -32,7 +32,7 @@ pub enum LibraryStatus {
     Offline,
 }
 
-async fn folder_status(fs: Arc<dyn Fs>, path: PathBuf) -> LibraryStatus {
+pub(crate) async fn folder_status(fs: Arc<dyn Fs>, path: PathBuf) -> LibraryStatus {
     let check = tokio::task::spawn_blocking(move || fs.read_dir(&path).is_ok());
     match tokio::time::timeout(STATUS_TIMEOUT, check).await {
         Ok(Ok(true)) => LibraryStatus::Online,
@@ -185,11 +185,16 @@ impl Engine {
             .filter(|n| !n.trim().is_empty())
             .or_else(|| path.file_name().and_then(|n| n.to_str()).map(str::to_owned))
             .unwrap_or_else(|| path.to_string_lossy().into_owned());
+        let probe = path.clone();
+        let kind = tokio::task::spawn_blocking(move || crate::volume::detect(&probe))
+            .await
+            .unwrap_or(LibraryKind::Local);
         let lib = Library {
             id: LibraryId::new(),
             path,
             display_name,
-            kind: LibraryKind::Local,
+            kind,
+            change_mode: ChangeMode::Auto,
             sidecar_enabled: true,
             last_full_scan_at: None,
         };
@@ -216,6 +221,33 @@ impl Engine {
 
     /// Scans library `id`. Only one scan per library runs at a time.
     pub async fn rescan(&self, id: LibraryId, cancel: CancellationToken) -> Result<ScanSummary> {
+        self.scan(id, cancel, None).await
+    }
+
+    /// Scans only `paths` (folders or files relative to library `id`'s
+    /// root) of library `id`; the rest of the library keeps what the
+    /// database knows. Used after the watcher saw changes.
+    pub async fn rescan_paths(
+        &self,
+        id: LibraryId,
+        paths: Vec<String>,
+        cancel: CancellationToken,
+    ) -> Result<ScanSummary> {
+        if paths.is_empty() {
+            return Ok(ScanSummary {
+                partial: true,
+                ..ScanSummary::default()
+            });
+        }
+        self.scan(id, cancel, Some(paths)).await
+    }
+
+    async fn scan(
+        &self,
+        id: LibraryId,
+        cancel: CancellationToken,
+        subtrees: Option<Vec<String>>,
+    ) -> Result<ScanSummary> {
         if !lock(&self.scanning).insert(id) {
             return Err(CoreError::AlreadyScanning(id));
         }
@@ -236,15 +268,40 @@ impl Engine {
             writer: &self.sidecars,
             install: self.install,
         };
-        scan_library(
-            self.fs.clone(),
-            &self.db,
-            &lib,
-            &self.events,
-            cancel,
-            Some(ctx),
-        )
-        .await
+        match subtrees {
+            None => {
+                scan_library(
+                    self.fs.clone(),
+                    &self.db,
+                    &lib,
+                    &self.events,
+                    cancel,
+                    Some(ctx),
+                )
+                .await
+            }
+            Some(paths) => {
+                scan_subtrees(
+                    self.fs.clone(),
+                    &self.db,
+                    &lib,
+                    &self.events,
+                    cancel,
+                    Some(ctx),
+                    &paths,
+                )
+                .await
+            }
+        }
+    }
+
+    /// Sets how library `id` notices changes; a running monitor picks it
+    /// up at once.
+    pub async fn set_change_mode(&self, id: LibraryId, mode: ChangeMode) -> Result<Library> {
+        self.db.set_change_mode(id, mode).await?;
+        let lib = self.db.library(id).await?;
+        let _ = self.events.send(EngineEvent::LibraryChanged(lib.clone()));
+        Ok(lib)
     }
 
     /// Searches models; see [`Db::search_models`].

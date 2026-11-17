@@ -579,6 +579,7 @@ mod tests {
             path: PathBuf::from("/lib"),
             display_name: "lib".into(),
             kind: LibraryKind::Local,
+            change_mode: crate::db::ChangeMode::Auto,
             sidecar_enabled: true,
             last_full_scan_at: None,
         };

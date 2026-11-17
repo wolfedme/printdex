@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT rel_path, size, mtime_ns, fp_hash FROM parts WHERE library_id = ?",
+  "query": "SELECT rel_path, size, mtime_ns, fp_hash, missing_since FROM parts WHERE library_id = ?",
   "describe": {
     "columns": [
       {
@@ -46,6 +46,17 @@
             "name": "fp_hash"
           }
         }
+      },
+      {
+        "name": "missing_since",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "missing_since"
+          }
+        }
       }
     ],
     "parameters": {
@@ -55,8 +66,9 @@
       false,
       false,
       false,
+      true,
       true
     ]
   },
-  "hash": "6bcfec3c19ec616552bc3718869df1813ed0bbffbd4749b2dde9b424a4deee0f"
+  "hash": "f59b92dcbd207a5dedc10bb2683a8df1fec4c26fc58ff2e767c7a1319c2776b3"
 }

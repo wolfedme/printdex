@@ -18,7 +18,7 @@ use crate::fingerprint::{Fingerprint, fingerprint_with};
 use crate::fs::Fs;
 use crate::grouping::{ModelGroup, Opaque, group_models_with};
 use crate::time::now_ms;
-use crate::walk::{FileEntry, FileKind, SkipReason, root_readable, walk_library};
+use crate::walk::{FileEntry, FileKind, SkipReason, classify, root_readable, walk_from};
 
 /// Files fingerprinted per CPU-pool job (one progress event each).
 const FINGERPRINT_CHUNK: usize = 256;
@@ -67,6 +67,8 @@ pub struct ScanSummary {
     /// Sidecars read back into the database.
     pub sidecars_imported: u64,
     pub duration_ms: u64,
+    /// Only some folders were walked (a watcher-triggered rescan).
+    pub partial: bool,
 }
 
 /// What a scan needs to read sidecars back: the writer (to rewrite merged
@@ -148,8 +150,35 @@ pub async fn scan_library(
     cancel: CancellationToken,
     sidecars: Option<SidecarCtx<'_>>,
 ) -> Result<ScanSummary> {
+    scan_with_events(fs, db, lib, events, cancel, sidecars, None).await
+}
+
+/// Like [`scan_library`], walking only `subtrees` (folders or files,
+/// relative to the library root). Everything else keeps what the database
+/// knows, so nothing outside them is marked missing or re-read.
+pub async fn scan_subtrees(
+    fs: Arc<dyn Fs>,
+    db: &Db,
+    lib: &Library,
+    events: &broadcast::Sender<EngineEvent>,
+    cancel: CancellationToken,
+    sidecars: Option<SidecarCtx<'_>>,
+    subtrees: &[String],
+) -> Result<ScanSummary> {
+    scan_with_events(fs, db, lib, events, cancel, sidecars, Some(subtrees)).await
+}
+
+async fn scan_with_events(
+    fs: Arc<dyn Fs>,
+    db: &Db,
+    lib: &Library,
+    events: &broadcast::Sender<EngineEvent>,
+    cancel: CancellationToken,
+    sidecars: Option<SidecarCtx<'_>>,
+    subtrees: Option<&[String]>,
+) -> Result<ScanSummary> {
     let _ = events.send(EngineEvent::ScanStarted { library: lib.id });
-    match run_scan_with(fs, db, lib, events, cancel, sidecars, |_| {}).await {
+    match run_scan_with(fs, db, lib, events, cancel, sidecars, subtrees, |_| {}).await {
         Ok(summary) => {
             let _ = events.send(EngineEvent::ScanFinished {
                 library: lib.id,
@@ -204,8 +233,9 @@ fn clone_error(e: &CoreError) -> CoreError {
     }
 }
 
-/// The scan, with `after_walk` called between the walk and fingerprinting so
+/// The scan (of `subtrees` only when given), with `after_walk` called between the walk and fingerprinting so
 /// tests can change the tree mid-scan.
+#[allow(clippy::too_many_arguments)] // private; the test hook is the eighth
 async fn run_scan_with(
     fs: Arc<dyn Fs>,
     db: &Db,
@@ -213,6 +243,7 @@ async fn run_scan_with(
     events: &broadcast::Sender<EngineEvent>,
     cancel: CancellationToken,
     sidecar_ctx: Option<SidecarCtx<'_>>,
+    subtrees: Option<&[String]>,
     after_walk: impl FnOnce(&[FileEntry]),
 ) -> Result<ScanSummary> {
     let started = Instant::now();
@@ -231,18 +262,50 @@ async fn run_scan_with(
     let walk_cancel = cancel.child_token();
     let _stop_walk = walk_cancel.clone().drop_guard();
     let walk_fs = fs.clone();
-    let walked = tokio::task::spawn_blocking(move || walk_library(&*walk_fs, &root, &walk_cancel))
-        .await
-        .map_err(|e| CoreError::Io {
-            path: lib.path.clone(),
-            source: std::io::Error::other(e.to_string()),
-        })??;
+    let walk_subtrees: Vec<String> =
+        subtrees.map_or_else(|| vec![String::new()], <[String]>::to_vec);
+    let walked = tokio::task::spawn_blocking(move || {
+        walk_from(&*walk_fs, &root, &walk_subtrees, &walk_cancel)
+    })
+    .await
+    .map_err(|e| CoreError::Io {
+        path: lib.path.clone(),
+        source: std::io::Error::other(e.to_string()),
+    })??;
     let mut files = walked.files;
     let files_seen = files.len();
     after_walk(&files);
     progress(ScanPhase::Walking, files_seen, files_seen);
 
     let known = db.known_files(lib.id).await?;
+    // Outside the walked subtrees, the library is what the database says:
+    // the present files go in unchanged, so the diff leaves them alone.
+    let walked_sidecars: Vec<(String, i64)> = files
+        .iter()
+        .filter(|f| f.kind == FileKind::Sidecar)
+        .map(|f| (f.rel_path.clone(), f.mtime_ns))
+        .collect();
+    if let Some(subtrees) = subtrees {
+        let inside = |p: &str| {
+            subtrees.iter().any(|s| {
+                s.is_empty()
+                    || p == s
+                    || (p.starts_with(s.as_str()) && p[s.len()..].starts_with('/'))
+            })
+        };
+        files.extend(
+            known
+                .iter()
+                .filter(|k| k.present && !inside(&k.rel_path))
+                .map(|k| FileEntry {
+                    rel_path: k.rel_path.clone(),
+                    size: k.size,
+                    mtime_ns: k.mtime_ns,
+                    kind: classify(k.rel_path.rsplit('/').next().unwrap_or_default()),
+                }),
+        );
+        files.sort_unstable_by(|a, b| a.rel_path.cmp(&b.rel_path));
+    }
     // A library that had files and now yields none is far more likely an
     // unmounted share (empty mount point) or a share failing mid-walk than a
     // deliberately emptied folder. Refuse instead of marking it all missing.
@@ -329,11 +392,7 @@ async fn run_scan_with(
         })
         .collect();
     let groups = group_models_with(&files, &opaque);
-    let sidecar_files: Vec<(String, i64)> = files
-        .iter()
-        .filter(|f| f.kind == FileKind::Sidecar)
-        .map(|f| (f.rel_path.clone(), f.mtime_ns))
-        .collect();
+    let sidecar_files = walked_sidecars;
     progress(ScanPhase::Writing, 0, groups.len());
     let stats = db
         .apply_scan(
@@ -346,13 +405,15 @@ async fn run_scan_with(
             },
         )
         .await?;
-    db.set_last_full_scan(lib.id, now_ms()).await?;
-    // The scan reached the folder: rows missing longer than the grace
-    // period can go. (An offline library never gets here, so its rows
-    // never age out.)
-    let purged = db.purge_missing(lib.id, now_ms()).await?;
-    if purged != crate::db::Purged::default() {
-        tracing::info!(?purged, "forgot rows missing for over 30 days");
+    if subtrees.is_none() {
+        db.set_last_full_scan(lib.id, now_ms()).await?;
+        // The scan reached the folder: rows missing longer than the grace
+        // period can go. (An offline library never gets here, so its rows
+        // never age out.)
+        let purged = db.purge_missing(lib.id, now_ms()).await?;
+        if purged != crate::db::Purged::default() {
+            tracing::info!(?purged, "forgot rows missing for over 30 days");
+        }
     }
     for m in &stats.moved {
         tracing::info!(from = %m.from, to = %m.to, "model moved; keeping its data");
@@ -403,6 +464,7 @@ async fn run_scan_with(
         models_moved: stats.moved.len() as u64,
         sidecars_imported,
         duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        partial: subtrees.is_some(),
     })
 }
 
@@ -415,6 +477,7 @@ fn rel_string(rel: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::walk::walk_library;
 
     fn real() -> Arc<dyn Fs> {
         Arc::new(crate::fs::RealFs)
@@ -445,6 +508,7 @@ mod tests {
                 path: root.clone(),
                 display_name: "lib".into(),
                 kind: LibraryKind::Local,
+                change_mode: crate::db::ChangeMode::Auto,
                 sidecar_enabled: true,
                 last_full_scan_at: None,
             };
@@ -698,6 +762,7 @@ mod tests {
             &f.tx,
             CancellationToken::new(),
             None,
+            None,
             after_walk,
         )
         .await
@@ -837,6 +902,7 @@ mod tests {
             mtime_ns: 1,
             fp_hash: Some(7),
             is_part: true,
+            present: true,
         };
         let mut known = HashMap::new();
         assert!(needs_fingerprint(&known, &e));

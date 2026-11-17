@@ -22,6 +22,8 @@ pub struct KnownFile {
     pub mtime_ns: i64,
     pub fp_hash: Option<u64>,
     pub is_part: bool,
+    /// Seen by the last scan that reached it (`missing_since IS NULL`).
+    pub present: bool,
 }
 
 struct ModelRow {
@@ -116,13 +118,13 @@ impl Db {
     /// Every part and asset of `lib` recorded so far, missing or not.
     pub async fn known_files(&self, lib: LibraryId) -> Result<Vec<KnownFile>> {
         let parts = sqlx::query!(
-            r#"SELECT rel_path, size, mtime_ns, fp_hash FROM parts WHERE library_id = ?"#,
+            r#"SELECT rel_path, size, mtime_ns, fp_hash, missing_since FROM parts WHERE library_id = ?"#,
             lib
         )
         .fetch_all(self.writer())
         .await?;
         let assets = sqlx::query!(
-            r#"SELECT rel_path, size, mtime_ns FROM assets WHERE library_id = ?"#,
+            r#"SELECT rel_path, size, mtime_ns, missing_since FROM assets WHERE library_id = ?"#,
             lib
         )
         .fetch_all(self.writer())
@@ -134,6 +136,7 @@ impl Db {
             mtime_ns: r.mtime_ns,
             fp_hash: r.fp_hash.map(|h| h as u64),
             is_part: true,
+            present: r.missing_since.is_none(),
         }));
         out.extend(assets.into_iter().map(|r| KnownFile {
             rel_path: r.rel_path,
@@ -141,6 +144,7 @@ impl Db {
             mtime_ns: r.mtime_ns,
             fp_hash: None,
             is_part: false,
+            present: r.missing_since.is_none(),
         }));
         Ok(out)
     }

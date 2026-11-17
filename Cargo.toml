@@ -15,6 +15,8 @@ printdex-mesh = { path = "crates/printdex-mesh" }
 printdex-render = { path = "crates/printdex-render" }
 tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "sync", "signal", "fs", "time"] }
 tokio-util = "0.7"
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
+sysinfo = { version = "0.40", default-features = false, features = ["disk"] }
 rayon = "1.12"
 sqlx = { version = "0.9", default-features = false, features = ["sqlite", "runtime-tokio", "macros", "migrate", "uuid"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
