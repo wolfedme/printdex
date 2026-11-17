@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT settings, required, notes, parts, from_attempt as \"from_attempt: AttemptId\",\n                  updated_at FROM recipes WHERE model_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "settings",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recipes",
+            "name": "settings"
+          }
+        }
+      },
+      {
+        "name": "required",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recipes",
+            "name": "required"
+          }
+        }
+      },
+      {
+        "name": "notes",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recipes",
+            "name": "notes"
+          }
+        }
+      },
+      {
+        "name": "parts",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recipes",
+            "name": "parts"
+          }
+        }
+      },
+      {
+        "name": "from_attempt: AttemptId",
+        "ordinal": 4,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "recipes",
+            "name": "from_attempt"
+          }
+        }
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "recipes",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "bd785b1501afde91bd94da5b1862bfa94a0d26c1b3809513f3432204c545ea88"
+}

@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT notes, source_url, data_updated_at FROM models WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "notes",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "notes"
+          }
+        }
+      },
+      {
+        "name": "source_url",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "source_url"
+          }
+        }
+      },
+      {
+        "name": "data_updated_at",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "data_updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "d47c5a4678d633bcfee4909d0ce23d27921c556c522dd3397431c76216a0a28d"
+}

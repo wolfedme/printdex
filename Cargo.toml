@@ -29,11 +29,13 @@ clap = { version = "4", features = ["derive"] }
 fastrand = "2"
 dunce = "1"
 tempfile = "3"
-iced = { version = "0.14", features = ["tokio", "svg", "image-without-codecs", "advanced"] }
+iced = { version = "0.14", features = ["tokio", "svg", "image-without-codecs", "advanced", "markdown"] }
 fluent-bundle = "0.16"
 unic-langid = { version = "0.9", features = ["macros"] }
 rfd = "0.15"
 toml = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 jiff = "1"
 opener = { version = "0.9", features = ["reveal"] }
 zip = { version = "9", default-features = false, features = ["deflate"] }

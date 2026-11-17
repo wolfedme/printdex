@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!: TagId\" FROM tags WHERE name_key = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: TagId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "tags",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "d77bb0d80f2a80b0b31ac410826ff246196fb79b7447915e18797d5f92877f81"
+}

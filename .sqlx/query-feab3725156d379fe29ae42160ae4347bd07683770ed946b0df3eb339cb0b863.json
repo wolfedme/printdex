@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM collection_models WHERE collection_id = ? AND model_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "feab3725156d379fe29ae42160ae4347bd07683770ed946b0df3eb339cb0b863"
+}

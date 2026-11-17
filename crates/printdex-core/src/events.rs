@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::db::Library;
 use crate::error::CoreError;
-use crate::ids::LibraryId;
+use crate::ids::{LibraryId, ModelId};
 use crate::scan::ScanSummary;
 use crate::thumbs::{ThumbFailure, ThumbKind, ThumbTarget};
 
@@ -50,6 +50,17 @@ pub enum EngineEvent {
         /// top edge is, as a fraction of the image height from the top.
         print_in: Option<f32>,
     },
+    /// What the user wrote about a model changed (tags, notes, recipe,
+    /// print log…).
+    ModelDataChanged(ModelId),
+    /// The list of tags or collections changed (names or counts).
+    OrganizeChanged,
+    /// A scan found sidecars written by another Printdex install.
+    SidecarForeign {
+        library: LibraryId,
+    },
+    /// A library's settings changed (sidecars on or off).
+    LibraryChanged(Library),
     /// No thumbnail for `target`.
     ThumbnailFailed {
         target: ThumbTarget,

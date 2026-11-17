@@ -1,7 +1,7 @@
 //! Search sequencing: every keystroke starts a query, and results of an
 //! older query never replace those of a newer one.
 
-use printdex_core::{LibraryId, ModelHit, SearchFilter, SortOrder};
+use printdex_core::{ModelHit, Scope, SearchFilter, SortOrder};
 
 /// Maximum results per query; the status bar says when a result is capped.
 pub const SEARCH_LIMIT: u32 = 5_000;
@@ -10,7 +10,7 @@ pub const SEARCH_LIMIT: u32 = 5_000;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Query {
     pub text: String,
-    pub scope: Option<LibraryId>,
+    pub scope: Scope,
     pub filter: SearchFilter,
     pub sort: SortOrder,
 }
@@ -83,7 +83,7 @@ impl SearchState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use printdex_core::{ModelId, ModelKind};
+    use printdex_core::{LibraryId, ModelId, ModelKind};
 
     fn hit(name: &str) -> ModelHit {
         ModelHit {
@@ -95,6 +95,9 @@ mod tests {
             part_count: 1,
             missing: false,
             created_at: 0,
+            material: None,
+            recipe: None,
+            last_print: None,
         }
     }
 
@@ -117,7 +120,10 @@ mod tests {
         let t = s.update(|q| q.text = "dragon".into()).unwrap();
         s.accept(&t, vec![], 0);
         assert_eq!(s.update(|q| q.text = "dragon".into()), None);
-        assert!(s.update(|q| q.scope = Some(LibraryId::new())).is_some());
+        assert!(
+            s.update(|q| q.scope = Scope::Library(LibraryId::new()))
+                .is_some()
+        );
         assert!(s.update(|q| q.sort = SortOrder::RecentlyAdded).is_some());
     }
 
@@ -128,11 +134,14 @@ mod tests {
         let t1 = s
             .update(|q| {
                 q.text = "orc".into();
-                q.scope = Some(lib);
+                q.scope = Scope::Library(lib);
             })
             .unwrap();
         let t2 = s.refresh();
-        assert_eq!((t2.query.text.as_str(), t2.query.scope), ("orc", Some(lib)));
+        assert_eq!(
+            (t2.query.text.as_str(), &t2.query.scope),
+            ("orc", &Scope::Library(lib))
+        );
         assert!(t2.generation > t1.generation);
     }
 

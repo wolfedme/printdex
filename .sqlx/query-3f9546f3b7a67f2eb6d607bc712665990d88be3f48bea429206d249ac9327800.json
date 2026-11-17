@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT model_id as \"m!: ModelId\" FROM attempts WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "m!: ModelId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "attempts",
+            "name": "model_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3f9546f3b7a67f2eb6d607bc712665990d88be3f48bea429206d249ac9327800"
+}

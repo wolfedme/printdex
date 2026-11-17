@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE models_fts SET tags = ?, notes = (SELECT notes FROM models WHERE id = ?), recipe = ?\n         WHERE rowid = (SELECT rowid FROM models WHERE id = ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "500f43ecf3e665d773083801ec71feb7a1f359779a1019ed8aa8182414639ebb"
+}

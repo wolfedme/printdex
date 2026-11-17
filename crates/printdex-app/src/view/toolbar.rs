@@ -5,7 +5,7 @@ use std::fmt;
 
 use iced::widget::{Space, button, container, pick_list, row, stack, text, text_input};
 use iced::{Alignment, Element, Length, Padding};
-use printdex_core::{PrintableFormat, SortOrder};
+use printdex_core::{PrintableFormat, Scope, Smart, SortOrder};
 
 use super::widgets;
 use crate::app::{App, Message, TOOLBAR_HEIGHT, search_id};
@@ -13,6 +13,7 @@ use crate::filters::{self, Chip};
 use crate::format::group;
 use crate::i18n::{Arg, t, t_args};
 use crate::icons::{self, Icon};
+use crate::org::{CollectionEdit, Org, collection_input_id};
 use crate::settings::{Settings, ViewMode};
 use crate::theme::{self, Palette};
 
@@ -27,11 +28,19 @@ impl fmt::Display for SortChoice {
         f.write_str(&match self.0 {
             SortOrder::Name => t("sort-name"),
             SortOrder::RecentlyAdded => t("sort-recent"),
+            SortOrder::Collection => t("sort-collection"),
         })
     }
 }
 
 const SORTS: [SortChoice; 2] = [
+    SortChoice(SortOrder::Name),
+    SortChoice(SortOrder::RecentlyAdded),
+];
+
+/// Inside a collection its own order comes first.
+const COLLECTION_SORTS: [SortChoice; 3] = [
+    SortChoice(SortOrder::Collection),
     SortChoice(SortOrder::Name),
     SortChoice(SortOrder::RecentlyAdded),
 ];
@@ -105,14 +114,26 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
         .on_press(Message::ToggleFilterMenu),
     );
 
+    let in_collection = matches!(app.search.query.scope, Scope::Collection(_));
+    let sorts: &'static [SortChoice] = if in_collection {
+        &COLLECTION_SORTS
+    } else {
+        &SORTS
+    };
     let sort = row![
         text(t("sort-label"))
             .size(theme::SIZE_CAPTION)
             .color(p.n.ink_3),
         pick_list(
-            SORTS,
-            Some(SortChoice(settings.sort)),
-            move |SortChoice(sort)| Message::SettingsChanged(Settings { sort, ..settings }),
+            sorts,
+            Some(SortChoice(app.search.query.sort)),
+            move |SortChoice(sort)| {
+                if in_collection {
+                    Message::QuerySort(sort)
+                } else {
+                    Message::SettingsChanged(Settings { sort, ..settings })
+                }
+            },
         )
         .text_size(theme::SIZE_BODY)
         .padding([7.0, theme::S4])
@@ -122,11 +143,10 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     .spacing(theme::S3)
     .align_y(Alignment::Center);
 
-    let retry = app
-        .search
-        .query
-        .scope
-        .is_some_and(|id| app.offline.contains_key(&id));
+    let retry = matches!(
+        app.search.query.scope,
+        Scope::Library(id) if app.offline.contains_key(&id)
+    );
     let mut rescan = button(
         row![
             icons::icon(Icon::Refresh, theme::ICON, p.n.ink_2),
@@ -241,16 +261,36 @@ pub fn filter_bar(app: &App, p: Palette) -> Element<'_, Message> {
         .into()
 }
 
-/// Scope title and how many models show.
+/// Scope title and how many models show; a collection also gets Rename
+/// and Delete.
 pub fn header(app: &App, p: Palette) -> Element<'_, Message> {
-    let scope = app.search.query.scope;
-    let title = match scope.and_then(|id| app.library(id)) {
-        Some(lib) => lib.display_name.clone(),
-        None => t("sidebar-all-models"),
-    };
-    let in_scope = match scope {
-        Some(id) => app.counts.get(&id).copied().unwrap_or(0),
-        None => app.total_models(),
+    let scope = &app.search.query.scope;
+    let lists = &app.org.lists;
+    let (title, in_scope) = match scope {
+        Scope::All => (t("sidebar-all-models"), app.total_models()),
+        Scope::Library(id) => (
+            app.library(*id)
+                .map(|l| l.display_name.clone())
+                .unwrap_or_default(),
+            app.counts.get(id).copied().unwrap_or(0),
+        ),
+        Scope::Collection(id) => lists
+            .collections
+            .iter()
+            .find(|c| c.id == *id)
+            .map(|c| (c.name.clone(), c.count))
+            .unwrap_or_default(),
+        Scope::Tag(name) => (
+            t_args("header-tag", &[("tag", Arg::str(name.clone()))]),
+            lists
+                .tags
+                .iter()
+                .find(|t| t.name.eq_ignore_ascii_case(name))
+                .map_or(0, |t| t.count),
+        ),
+        Scope::Smart(Smart::NeverPrinted) => (t("smart-never-printed"), lists.smart.never_printed),
+        Scope::Smart(Smart::FailedLast) => (t("smart-failed-last"), lists.smart.failed_last),
+        Scope::Smart(Smart::AddedThisWeek) => (t("smart-added-week"), lists.smart.added_this_week),
     };
     let filtered = !app.search.query.text.trim().is_empty() || !app.chips.is_empty();
     let caption = if filtered {
@@ -270,23 +310,102 @@ pub fn header(app: &App, p: Palette) -> Element<'_, Message> {
             ],
         )
     };
-    container(
-        row![
-            text(title)
+
+    let title: Element<'_, Message> = match (scope, &app.org.collection_edit) {
+        (Scope::Collection(id), Some(CollectionEdit::Renaming(edit, name))) if edit == id => {
+            text_input("", name)
+                .id(collection_input_id())
+                .on_input(|s| Message::Org(Org::RenameCollectionInput(s)))
+                .on_submit(Message::Org(Org::CommitRenameCollection))
                 .size(theme::SIZE_TITLE)
                 .font(theme::FONT_BOLD)
-                .color(p.n.ink)
-                .wrapping(text::Wrapping::None),
-            text(caption).size(theme::SIZE_CAPTION).color(p.n.ink_2),
-        ]
-        .spacing(theme::S5)
-        .align_y(Alignment::Center),
-    )
-    .padding(Padding {
-        top: theme::S7,
-        bottom: 0.0,
-        left: theme::S7,
-        right: theme::S7,
-    })
-    .into()
+                .width(320)
+                .padding([2.0, theme::S4])
+                .style(move |_, status| p.search_field(status))
+                .into()
+        }
+        _ => text(title)
+            .size(theme::SIZE_TITLE)
+            .font(theme::FONT_BOLD)
+            .color(p.n.ink)
+            .wrapping(text::Wrapping::None)
+            .into(),
+    };
+    let mut r = row![
+        title,
+        text(caption).size(theme::SIZE_CAPTION).color(p.n.ink_2),
+    ]
+    .spacing(theme::S5)
+    .align_y(Alignment::Center);
+
+    if let Scope::Collection(id) = scope {
+        let id = *id;
+        r = r.push(Space::new().width(Length::Fill));
+        match &app.org.collection_edit {
+            Some(CollectionEdit::ConfirmDelete(c)) if *c == id => {
+                r = r.push(
+                    text(t("collection-delete-confirm"))
+                        .size(theme::SIZE_CAPTION)
+                        .color(p.n.ink_2),
+                );
+                r = r.push(
+                    button(text(t("action-cancel")).size(theme::SIZE_CAPTION))
+                        .padding([4.0, theme::S4])
+                        .style(move |_, status| p.button_secondary(status))
+                        .on_press(Message::Org(Org::Cancel)),
+                );
+                r = r.push(
+                    button(text(t("collection-delete")).size(theme::SIZE_CAPTION))
+                        .padding([4.0, theme::S4])
+                        .style(move |_, status| p.button_danger(status))
+                        .on_press(Message::Org(Org::ConfirmDeleteCollection(id))),
+                );
+            }
+            Some(CollectionEdit::Renaming(..)) => {}
+            _ => {
+                r = r.push(widgets::ghost_icon(
+                    p,
+                    Icon::Rename,
+                    t("collection-rename"),
+                    Message::Org(Org::StartRenameCollection(id)),
+                ));
+                r = r.push(widgets::ghost_icon(
+                    p,
+                    Icon::Remove,
+                    t("collection-delete"),
+                    Message::Org(Org::AskDeleteCollection(id)),
+                ));
+            }
+        }
+    }
+
+    let mut col = iced::widget::column![r].spacing(theme::S4);
+    if let Some(notice) = &app.org.notice {
+        col = col.push(
+            container(
+                row![
+                    icons::icon(Icon::Info, theme::ICON, p.n.ink_2),
+                    text(notice.clone())
+                        .size(theme::SIZE_CAPTION)
+                        .width(Length::Fill),
+                    button(icons::icon(Icon::Close, theme::ICON_DENSE, p.n.ink_3))
+                        .padding(2)
+                        .style(move |_, status| p.button_ghost(status))
+                        .on_press(Message::Org(Org::DismissNotice)),
+                ]
+                .spacing(theme::S4)
+                .align_y(Alignment::Center),
+            )
+            .padding([theme::S3, theme::S5])
+            .style(move |_| p.well()),
+        );
+    }
+    container(col)
+        .padding(Padding {
+            top: theme::S7,
+            bottom: 0.0,
+            left: theme::S7,
+            right: theme::S7,
+        })
+        .into()
 }

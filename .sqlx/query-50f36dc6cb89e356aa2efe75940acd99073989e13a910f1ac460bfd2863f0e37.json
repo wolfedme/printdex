@@ -1,11 +1,22 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT l.path as lib_path, p.rel_path, p.format, p.size, p.mtime_ns, p.fp_hash\n               FROM parts p JOIN libraries l ON l.id = p.library_id\n               WHERE p.id = ? AND p.missing_since IS NULL",
+  "query": "SELECT l.id as \"library!: LibraryId\", l.path, m.rel_path, m.kind,\n                      l.sidecar_enabled as \"enabled: bool\", m.sidecar_mtime_ns\n               FROM models m JOIN libraries l ON l.id = m.library_id WHERE m.id = ?",
   "describe": {
     "columns": [
       {
-        "name": "lib_path",
+        "name": "library!: LibraryId",
         "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "libraries",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "path",
+        "ordinal": 1,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -16,56 +27,45 @@
       },
       {
         "name": "rel_path",
-        "ordinal": 1,
+        "ordinal": 2,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "parts",
+            "table": "models",
             "name": "rel_path"
           }
         }
       },
       {
-        "name": "format",
-        "ordinal": 2,
+        "name": "kind",
+        "ordinal": 3,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "parts",
-            "name": "format"
+            "table": "models",
+            "name": "kind"
           }
         }
       },
       {
-        "name": "size",
-        "ordinal": 3,
-        "type_info": "Integer",
-        "origin": {
-          "Table": {
-            "table": "parts",
-            "name": "size"
-          }
-        }
-      },
-      {
-        "name": "mtime_ns",
+        "name": "enabled: bool",
         "ordinal": 4,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "parts",
-            "name": "mtime_ns"
+            "table": "libraries",
+            "name": "sidecar_enabled"
           }
         }
       },
       {
-        "name": "fp_hash",
+        "name": "sidecar_mtime_ns",
         "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "parts",
-            "name": "fp_hash"
+            "table": "models",
+            "name": "sidecar_mtime_ns"
           }
         }
       }
@@ -74,7 +74,7 @@
       "Right": 1
     },
     "nullable": [
-      false,
+      true,
       false,
       false,
       false,
@@ -82,5 +82,5 @@
       true
     ]
   },
-  "hash": "428916746aa85d7cf432ddf532b7980c0f0564c00aa55bec72318e057555f703"
+  "hash": "50f36dc6cb89e356aa2efe75940acd99073989e13a910f1ac460bfd2863f0e37"
 }

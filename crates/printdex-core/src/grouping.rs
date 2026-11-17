@@ -32,7 +32,7 @@ use std::collections::BTreeMap;
 use crate::walk::{FileEntry, FileKind};
 
 /// How a model maps onto the file system.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ModelKind {
     Folder,
     SingleFile,
@@ -92,6 +92,9 @@ pub const PART_FOLDER_NAMES: &[&str] = &[
 pub fn group_models(files: &[FileEntry]) -> Vec<ModelGroup> {
     let mut root = DirNode::default();
     for (i, f) in files.iter().enumerate() {
+        if f.kind == FileKind::Sidecar {
+            continue;
+        }
         let (dirs, _file) = match f.rel_path.rsplit_once('/') {
             Some((dirs, file)) => (Some(dirs), file),
             None => (None, f.rel_path.as_str()),

@@ -4,6 +4,7 @@ mod empty;
 mod grid;
 mod list;
 mod model;
+mod organize;
 mod preview;
 mod settings;
 mod sidebar;
@@ -11,6 +12,8 @@ mod statusbar;
 mod toolbar;
 mod viewer;
 mod widgets;
+
+pub use organize::notes_editor_id;
 
 use iced::widget::{Space, button, column, container, row, text};
 use iced::{Alignment, Element, Length};

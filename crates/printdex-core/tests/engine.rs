@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use printdex_core::{
-    CoreError, Engine, EngineEvent, LibraryStatus, PrintableFormat, SearchFilter, SortOrder,
+    CoreError, Engine, EngineEvent, LibraryStatus, PrintableFormat, Scope, SearchFilter, SortOrder,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -188,6 +188,7 @@ async fn events_reach_subscribers() {
             EngineEvent::LibraryRemoved(_) => "removed",
             EngineEvent::LibraryRenamed(_) => "renamed",
             EngineEvent::ThumbnailReady { .. } | EngineEvent::ThumbnailFailed { .. } => "thumb",
+            _ => "other",
         });
     }
     assert_eq!(seen, ["added", "started", "finished"]);
@@ -234,13 +235,22 @@ async fn search_in_scopes_to_library() {
     let none = SearchFilter::default();
     let hits = f
         .engine
-        .search_in(Some(lb.id), "dragon", &none, SortOrder::Name, 10)
+        .search_in(&Scope::Library(lb.id), "dragon", &none, SortOrder::Name, 10)
         .await
         .unwrap();
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].library_id, lb.id);
-    assert_eq!(f.engine.count(None, "dragon", &none).await.unwrap(), 2);
-    assert_eq!(f.engine.count(Some(la.id), "", &none).await.unwrap(), 2);
+    assert_eq!(
+        f.engine.count(&Scope::All, "dragon", &none).await.unwrap(),
+        2
+    );
+    assert_eq!(
+        f.engine
+            .count(&Scope::Library(la.id), "", &none)
+            .await
+            .unwrap(),
+        2
+    );
     let counts = f.engine.library_counts().await.unwrap();
     assert_eq!((counts[&la.id], counts[&lb.id]), (2, 1));
 }

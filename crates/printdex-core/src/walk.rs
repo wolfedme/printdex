@@ -32,7 +32,17 @@ impl PrintableFormat {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileKind {
     Printable(PrintableFormat),
+    /// A Printdex sidecar (`.printdex.toml` or `.<file>.printdex.toml`).
+    Sidecar,
     Other,
+}
+
+/// Whether `file_name` is a Printdex sidecar.
+pub fn is_sidecar_name(file_name: &str) -> bool {
+    file_name == crate::sidecar::FOLDER_SIDECAR
+        || (file_name.starts_with('.')
+            && file_name.len() > crate::sidecar::FOLDER_SIDECAR.len() + 1
+            && file_name.ends_with(crate::sidecar::FOLDER_SIDECAR))
 }
 
 /// One file found in a library.
@@ -81,6 +91,9 @@ pub const IGNORED_DIR_NAMES: &[&str] = &[
 
 /// Classifies a file by its extension, ignoring ASCII case.
 pub fn classify(file_name: &str) -> FileKind {
+    if is_sidecar_name(file_name) {
+        return FileKind::Sidecar;
+    }
     let Some((stem, ext)) = file_name.rsplit_once('.') else {
         return FileKind::Other;
     };
@@ -114,11 +127,16 @@ pub fn walk_library(root: &Path, cancel: &CancellationToken) -> Result<WalkOutpu
     let output = Mutex::new(WalkOutput::default());
     WalkBuilder::new(root)
         .standard_filters(false)
-        .hidden(true)
+        // Hidden entries are skipped by hand below, so sidecars get through.
+        .hidden(false)
         .follow_links(false)
         .filter_entry(|e| {
             let is_dir = e.file_type().is_some_and(|t| t.is_dir());
-            !(is_dir && e.file_name().to_str().is_some_and(|n| IGNORED_DIR_NAMES.contains(&n)))
+            let name = e.file_name().to_str();
+            if e.depth() > 0 && name.is_some_and(|n| n.starts_with('.')) {
+                return !is_dir && name.is_some_and(is_sidecar_name);
+            }
+            !(is_dir && name.is_some_and(|n| IGNORED_DIR_NAMES.contains(&n)))
         })
         .build_parallel()
         .run(|| {
@@ -267,12 +285,20 @@ mod tests {
     }
 
     #[test]
-    fn skips_hidden_entries_and_sidecars() {
+    fn skips_hidden_entries_but_not_sidecars() {
         let d = tempfile::tempdir().unwrap();
         touch(d.path(), ".hidden/a.stl", b"x");
+        touch(d.path(), ".hidden/.printdex.toml", b"x");
         touch(d.path(), "m/.printdex.toml", b"x");
+        touch(d.path(), "m/.hook.stl.printdex.toml", b"x");
         touch(d.path(), "m/.DS_Store", b"x");
-        assert!(walk(d.path()).files.is_empty());
+        touch(d.path(), "m/.printdex.toml.tmp", b"x");
+        let out = walk(d.path());
+        assert_eq!(
+            paths(&out),
+            ["m/.hook.stl.printdex.toml", "m/.printdex.toml"]
+        );
+        assert!(out.files.iter().all(|f| f.kind == FileKind::Sidecar));
     }
 
     #[test]

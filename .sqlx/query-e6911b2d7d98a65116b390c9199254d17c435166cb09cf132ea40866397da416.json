@@ -1,0 +1,33 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT l.path as lib_path,\n                      coalesce((SELECT r.material FROM recipes r WHERE r.model_id = m.id),\n                               (SELECT a.material FROM attempts a WHERE a.model_id = m.id\n                                  AND a.material IS NOT NULL ORDER BY a.printed_at DESC, a.id DESC LIMIT 1))\n                        as \"material?: String\"\n               FROM models m JOIN libraries l ON l.id = m.library_id\n               WHERE m.id = ? AND m.missing_since IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "name": "lib_path",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "libraries",
+            "name": "path"
+          }
+        }
+      },
+      {
+        "name": "material?: String",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "e6911b2d7d98a65116b390c9199254d17c435166cb09cf132ea40866397da416"
+}

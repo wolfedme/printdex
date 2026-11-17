@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT model_id as \"m!: ModelId\" FROM collection_models WHERE collection_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "m!: ModelId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "collection_models",
+            "name": "model_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "afc6140c1e3724d1e09dfe0db9fe05ffd021923b8294f540560f094821e93933"
+}

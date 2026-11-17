@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT c.name FROM collection_models cm JOIN collections c ON c.id = cm.collection_id\n             WHERE cm.model_id = ? ORDER BY c.name COLLATE NOCASE",
+  "describe": {
+    "columns": [
+      {
+        "name": "name",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "collections",
+            "name": "name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a0c2307cb45b60befeb2f416d104555e4a1d2bf1995cd332cd5788d81d0385d2"
+}

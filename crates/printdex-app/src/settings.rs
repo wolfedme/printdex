@@ -101,7 +101,8 @@ fn view_key(v: ViewMode) -> &'static str {
 
 fn sort_key(s: SortOrder) -> &'static str {
     match s {
-        SortOrder::Name => "name",
+        // Collection order applies only inside a collection, never saved.
+        SortOrder::Name | SortOrder::Collection => "name",
         SortOrder::RecentlyAdded => "recently-added",
     }
 }

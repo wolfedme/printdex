@@ -28,6 +28,7 @@ const PIXELS_PER_LINE: f32 = 40.0;
 #[derive(Clone)]
 pub struct Scene {
     pub id: u64,
+    pub material: Material,
     pub mesh: Arc<Mesh>,
     pub sphere: Sphere,
     pub view: View,
@@ -44,9 +45,10 @@ impl std::fmt::Debug for Scene {
 }
 
 impl Scene {
-    pub fn new(loaded: &Loaded, view: View) -> Scene {
+    pub fn new(loaded: &Loaded, view: View, material: Material) -> Scene {
         Scene {
             id: loaded.id,
+            material,
             mesh: loaded.mesh.clone(),
             sphere: loaded.sphere,
             view,
@@ -226,7 +228,7 @@ impl shader::Primitive for Primitive {
             queue,
             scene.sphere,
             &scene.view,
-            Material::Unknown,
+            scene.material,
             place,
         );
         pipeline.ready = true;

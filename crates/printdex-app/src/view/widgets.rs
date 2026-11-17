@@ -119,3 +119,18 @@ pub fn segmented<'a, T: Copy + PartialEq + 'a>(
         .style(move |_| p.segmented())
         .into()
 }
+
+/// An icon-only ghost button with its label as a tooltip.
+pub fn ghost_icon<'a>(p: Palette, icon: Icon, label: String, msg: Message) -> Element<'a, Message> {
+    iced::widget::tooltip(
+        button(icons::icon(icon, theme::ICON_DENSE, p.n.ink_2))
+            .padding([5.0, theme::S3])
+            .style(move |_, status| p.button_ghost(status))
+            .on_press(msg),
+        container(text(label).size(theme::SIZE_CAPTION))
+            .padding([3.0, theme::S3])
+            .style(move |_| p.tooltip()),
+        iced::widget::tooltip::Position::Top,
+    )
+    .into()
+}
