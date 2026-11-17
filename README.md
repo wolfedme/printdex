@@ -5,6 +5,9 @@ Your STL library, organized. Local-first, blazing fast, built in Rust.
 
 Early development. The desktop app shows your libraries as a searchable grid; previews, the model view, tags and the print log come in later milestones (see the issues).
 
+> [!NOTE]
+> **AI-engineered.** Printdex is built largely by AI (Claude), directed and reviewed by [@wolfedme](https://github.com/wolfedme).
+
 ## Run it
 
 Needs Rust (stable, 1.94 or newer).
