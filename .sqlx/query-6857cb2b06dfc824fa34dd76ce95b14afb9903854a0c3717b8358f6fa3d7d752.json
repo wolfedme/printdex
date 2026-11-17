@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE parts SET model_id = ?, rel_path = ?, format = ?, size = ?, mtime_ns = ?,\n                                              fp_hash = ?, missing_since = NULL, updated_at = ?\n                             WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "6857cb2b06dfc824fa34dd76ce95b14afb9903854a0c3717b8358f6fa3d7d752"
+}

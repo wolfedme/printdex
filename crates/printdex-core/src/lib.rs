@@ -11,6 +11,7 @@ pub mod events;
 pub mod fingerprint;
 pub mod fs;
 pub mod grouping;
+pub mod identity;
 pub mod ids;
 pub mod model_data;
 pub mod photos;

@@ -183,10 +183,11 @@ async fn scan(engine: &Engine, path: &Path, name: Option<String>) -> anyhow::Res
     progress.abort();
     let s = result?;
     println!(
-        "models: +{} missing {} returned {} · files {} · fingerprinted {} · skipped {} · {} ms",
+        "models: +{} missing {} returned {} moved {} · files {} · fingerprinted {} · skipped {} · {} ms",
         s.models_added,
         s.models_missing,
         s.models_returned,
+        s.models_moved,
         s.files_seen,
         s.fingerprinted,
         s.skipped,

@@ -40,6 +40,17 @@ pub struct ApplyStats {
     pub models_added: u64,
     pub models_missing: u64,
     pub models_returned: u64,
+    /// Models found at a new path, keeping their identity.
+    pub moved: Vec<Moved>,
+}
+
+/// A model that moved or was renamed since the last scan.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Moved {
+    pub model: crate::ids::ModelId,
+    pub kind: crate::grouping::ModelKind,
+    pub from: String,
+    pub to: String,
 }
 
 /// Result of a finished scan.
@@ -51,6 +62,8 @@ pub struct ScanSummary {
     pub models_added: u64,
     pub models_missing: u64,
     pub models_returned: u64,
+    /// Models that moved or were renamed and kept their identity.
+    pub models_moved: u64,
     /// Sidecars read back into the database.
     pub sidecars_imported: u64,
     pub duration_ms: u64,
@@ -319,6 +332,24 @@ async fn run_scan_with(
         )
         .await?;
     db.set_last_full_scan(lib.id, now_ms()).await?;
+    for m in &stats.moved {
+        tracing::info!(from = %m.from, to = %m.to, "model moved; keeping its data");
+    }
+    // A moved single-file model's sidecar is named after its file: write
+    // it again under the new name.
+    if let Some(ctx) = sidecar_ctx
+        && lib.sidecar_enabled
+    {
+        for m in &stats.moved {
+            ctx.writer.queue(m.model);
+            if m.kind == crate::grouping::ModelKind::SingleFile {
+                // Printdex's own file under the old name; the writer makes
+                // the new one.
+                let old = crate::sidecar::path_for(&lib.path, &m.from, m.kind);
+                let _ = std::fs::remove_file(old);
+            }
+        }
+    }
 
     let mut sidecars_imported = 0;
     if let Some(ctx) = sidecar_ctx
@@ -347,6 +378,7 @@ async fn run_scan_with(
         models_added: stats.models_added,
         models_missing: stats.models_missing,
         models_returned: stats.models_returned,
+        models_moved: stats.moved.len() as u64,
         sidecars_imported,
         duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
     })
