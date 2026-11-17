@@ -8,7 +8,9 @@
 
 use std::time::{Duration, Instant};
 
-use printdex_core::ModelId;
+use std::collections::HashMap;
+
+use printdex_core::{ModelId, ThumbTarget};
 
 use crate::filters::Chip;
 use crate::theme::Palette;
@@ -20,13 +22,39 @@ pub const QUICK: Duration = Duration::from_millis(160);
 /// Panels and sliding indicators (the log form, milestone 3).
 #[allow(dead_code)]
 pub const MOVE: Duration = Duration::from_millis(260);
-/// The print-in (milestone 2).
-#[allow(dead_code)]
+/// The print-in.
 pub const FOCAL: Duration = Duration::from_millis(720);
 /// Filter chips scaling in.
 pub const CHIP: Duration = Duration::from_millis(180);
 /// Colour theme and light/dark changes.
 pub const THEME: Duration = Duration::from_millis(240);
+
+/// Print-in: layers, delay between items, longest delay, the fade that
+/// replaces it under Reduce motion, and the "Rendering preview" label's
+/// fade-out.
+pub const PRINT_LAYERS: u32 = 16;
+pub const PRINT_STAGGER: Duration = Duration::from_millis(30);
+pub const PRINT_STAGGER_CAP: Duration = Duration::from_millis(330);
+pub const PRINT_FADE: Duration = Duration::from_millis(150);
+pub const LABEL_FADE: Duration = Duration::from_millis(120);
+/// Where rendered thumbnails stand: the bed line, as a fraction of the
+/// image height from the top (printdex-render's thumbnail margins).
+pub const BED_LINE: f32 = 0.8;
+
+/// How a thumbnail shows right now.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Reveal {
+    Shown,
+    /// Printing in: rows above `clip` (a fraction of the image height
+    /// from the top) are hidden; `label` is the fading "Rendering
+    /// preview" note's opacity.
+    Build {
+        clip: f32,
+        label: f32,
+    },
+    /// Reduce motion: fading in.
+    Fade(f32),
+}
 
 /// Hover lift of the placeholder model, in px.
 pub const LIFT: f32 = 4.0;
@@ -99,6 +127,11 @@ pub struct Motion {
     part: Option<(usize, usize, Instant)>,
     /// The palette before a theme change, and when it started.
     palette: Option<(Palette, Instant)>,
+    /// Running print-ins: start and the model's top edge (a fraction of
+    /// the image height).
+    print_ins: HashMap<ThumbTarget, (Instant, f32)>,
+    /// Start of the latest print-in, for the stagger.
+    last_print_in: Option<Instant>,
 }
 
 impl Motion {
@@ -113,6 +146,70 @@ impl Motion {
             chip: None,
             part: None,
             palette: None,
+            print_ins: HashMap::new(),
+            last_print_in: None,
+        }
+    }
+
+    /// A thumbnail was just rendered: it prints in once, starting
+    /// [`PRINT_STAGGER`] after the previous one (at most
+    /// [`PRINT_STAGGER_CAP`] from now).
+    pub fn print_in(&mut self, target: ThumbTarget, top: f32, now: Instant) {
+        self.now = now;
+        let start = match self.last_print_in {
+            Some(prev) if prev + PRINT_STAGGER > now => {
+                (prev + PRINT_STAGGER).min(now + PRINT_STAGGER_CAP)
+            }
+            _ => now,
+        };
+        self.last_print_in = Some(start);
+        let total = self.print_duration();
+        self.print_ins
+            .retain(|_, (s, _)| running(*s, total + PRINT_STAGGER_CAP, now));
+        self.print_ins
+            .insert(target, (start, top.clamp(0.0, BED_LINE)));
+    }
+
+    fn print_duration(&self) -> Duration {
+        if self.reduce { PRINT_FADE } else { FOCAL }
+    }
+
+    /// How `target`'s thumbnail shows now.
+    pub fn reveal(&self, target: ThumbTarget) -> Reveal {
+        let Some(&(start, top)) = self.print_ins.get(&target) else {
+            return Reveal::Shown;
+        };
+        let elapsed = self.now.saturating_duration_since(start);
+        let before = self.now < start;
+        if self.reduce {
+            if !before && elapsed >= PRINT_FADE {
+                return Reveal::Shown;
+            }
+            let t = if before {
+                0.0
+            } else {
+                elapsed.as_secs_f32() / PRINT_FADE.as_secs_f32()
+            };
+            return Reveal::Fade(ease_out(t));
+        }
+        if !before && elapsed >= FOCAL {
+            return Reveal::Shown;
+        }
+        // Even steps in time, so every layer shows.
+        let layers = if before {
+            0
+        } else {
+            let t = elapsed.as_secs_f32() / FOCAL.as_secs_f32();
+            ((t * PRINT_LAYERS as f32).floor() as u32 + 1).min(PRINT_LAYERS)
+        };
+        let label = if before {
+            1.0
+        } else {
+            1.0 - progress(start, LABEL_FADE, self.now)
+        };
+        Reveal::Build {
+            clip: BED_LINE - (BED_LINE - top) * layers as f32 / PRINT_LAYERS as f32,
+            label,
         }
     }
 
@@ -263,6 +360,9 @@ impl Motion {
             || self.press.is_some_and(|(_, s)| running(s, INSTANT, now))
             || self.chip.is_some_and(|(_, s)| running(s, CHIP, now))
             || self.palette.is_some_and(|(_, s)| running(s, THEME, now))
+            || self
+                .last_print_in
+                .is_some_and(|s| now < s || running(s, self.print_duration(), now))
     }
 }
 
@@ -357,6 +457,70 @@ mod tests {
         m.now = t0 + QUICK;
         assert_eq!(m.selection(a, Some(b)), 0.0);
         assert_eq!(m.selection(b, Some(b)), 1.0);
+    }
+
+    fn part(n: u128) -> ThumbTarget {
+        ThumbTarget::Part(printdex_core::PartId(printdex_core::ids::Uuid::from_u128(
+            n,
+        )))
+    }
+
+    #[test]
+    fn print_in_builds_in_sixteen_layers() {
+        let t0 = Instant::now();
+        let mut m = Motion::new(t0);
+        assert_eq!(
+            m.reveal(part(1)),
+            Reveal::Shown,
+            "cached thumbnails just show"
+        );
+        m.print_in(part(1), 0.1, t0);
+        let mut clips = Vec::new();
+        for i in 0..=72 {
+            m.now = t0 + ms(i * 10);
+            if let Reveal::Build { clip, .. } = m.reveal(part(1)) {
+                clips.push(clip);
+            }
+        }
+        clips.dedup();
+        assert_eq!(clips.len(), PRINT_LAYERS as usize, "{clips:?}");
+        assert!(clips.windows(2).all(|w| w[1] < w[0]), "grows upwards");
+        assert!(
+            (clips[clips.len() - 1] - 0.1).abs() < 1e-4,
+            "reaches the top"
+        );
+        assert!(m.animating(t0 + ms(700)));
+        m.now = t0 + FOCAL;
+        assert_eq!(m.reveal(part(1)), Reveal::Shown);
+        assert!(!m.animating(t0 + FOCAL));
+    }
+
+    #[test]
+    fn print_in_staggers_and_caps() {
+        let t0 = Instant::now();
+        let mut m = Motion::new(t0);
+        for i in 0..20 {
+            m.print_in(part(i), 0.1, t0);
+        }
+        m.now = t0 + ms(15);
+        // The first has started, the second waits 30 ms.
+        assert!(matches!(m.reveal(part(0)), Reveal::Build { clip, .. } if clip < BED_LINE));
+        assert!(matches!(m.reveal(part(1)), Reveal::Build { clip, .. } if clip == BED_LINE));
+        // The twentieth waits no more than 330 ms.
+        m.now = t0 + PRINT_STAGGER_CAP + ms(1);
+        assert!(matches!(m.reveal(part(19)), Reveal::Build { clip, .. } if clip < BED_LINE));
+    }
+
+    #[test]
+    fn reduce_motion_fades_print_in() {
+        let t0 = Instant::now();
+        let mut m = Motion::new(t0);
+        m.reduce = true;
+        m.print_in(part(1), 0.1, t0);
+        m.now = t0 + ms(50);
+        assert!(matches!(m.reveal(part(1)), Reveal::Fade(a) if a > 0.0 && a < 1.0));
+        m.now = t0 + PRINT_FADE;
+        assert_eq!(m.reveal(part(1)), Reveal::Shown);
     }
 
     #[test]

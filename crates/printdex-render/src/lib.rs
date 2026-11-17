@@ -5,8 +5,10 @@ pub mod camera;
 pub mod gpu;
 pub mod material;
 pub mod raster;
+pub mod viewer;
 
-pub use camera::Camera;
+pub use camera::{Camera, Framing, View};
 pub use gpu::{GpuError, GpuRenderer};
 pub use material::{Material, Ramp};
-pub use raster::{Image, RenderOptions, render};
+pub use raster::{Image, RenderOptions, Sphere, render};
+pub use viewer::{GpuViewer, Placement, home_view};

@@ -8,7 +8,7 @@
 use glam::{Vec2, Vec3};
 use printdex_mesh::Mesh;
 
-use crate::camera::{Camera, Fit, Margins};
+use crate::camera::{Camera, Fit, Framing, Margins};
 use crate::material::{Material, Rgb, shade};
 
 /// Supersampling factor per axis.
@@ -52,9 +52,8 @@ pub struct RenderOptions {
     pub height: u32,
     pub material: Material,
     pub camera: Camera,
-    /// Empty space around the model; its lowest point sits on the bottom
-    /// margin line.
-    pub margins: Margins,
+    /// Where the model sits in the image.
+    pub framing: Framing,
 }
 
 impl Default for RenderOptions {
@@ -64,7 +63,7 @@ impl Default for RenderOptions {
             height: 288,
             material: Material::Unknown,
             camera: Camera::default(),
-            margins: Margins::THUMBNAIL,
+            framing: Framing::OnBed(Margins::THUMBNAIL),
         }
     }
 }
@@ -235,7 +234,16 @@ pub(crate) fn prepare(
         dmin = dmin.min(*d);
         dmax = dmax.max(*d);
     }
-    let fit = Fit::on_bed(min, max, w, h, opts.margins);
+    let fit = match opts.framing {
+        Framing::OnBed(margins) => Fit::on_bed(min, max, w, h, margins),
+        Framing::Orbit { zoom, pan } => {
+            let sphere = Sphere::of(mesh)?;
+            let (c, d) = basis.project(sphere.center);
+            dmin = d - sphere.radius;
+            dmax = d + sphere.radius;
+            Fit::orbit(c, sphere.radius, w, h, zoom, pan)
+        }
+    };
     let ramp = opts.material.ramp();
     for (tri, proj) in mesh
         .positions
@@ -271,18 +279,37 @@ pub(crate) fn prepare(
     })
 }
 
+/// A sphere around the whole mesh: the centre of its bounding box and
+/// half its diagonal.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sphere {
+    pub center: Vec3,
+    pub radius: f32,
+}
+
+impl Sphere {
+    pub fn of(mesh: &Mesh) -> Option<Sphere> {
+        let b = mesh.bounds()?;
+        let (min, max) = (Vec3::from_array(b.min), Vec3::from_array(b.max));
+        Some(Sphere {
+            center: (min + max) / 2.0,
+            radius: ((max - min).length() / 2.0).max(1e-3),
+        })
+    }
+}
+
+/// Depth difference between neighbouring supersampled pixels that marks
+/// an edge: a few pixels' worth, or 1.5% of the model's depth.
+pub fn edge_step(scale: f32, dmin: f32, dmax: f32) -> f32 {
+    let px_mm = if scale > 0.0 { 1.0 / scale } else { 0.0 };
+    (4.0 * px_mm).max(0.015 * (dmax - dmin))
+}
+
 /// Edge lines and downsampling: the same for both paths.
 pub(crate) fn finish(mut target: Target, frame: &Frame, opts: &RenderOptions) -> Image {
-    // A depth jump of more than a few pixels' worth (or 1.5% of the
-    // model's depth) between neighbours marks an edge.
-    let px_mm = if frame.fit.scale > 0.0 {
-        1.0 / frame.fit.scale
-    } else {
-        0.0
-    };
     target.edges(
         frame.edge,
-        (4.0 * px_mm).max(0.015 * (frame.dmax - frame.dmin)),
+        edge_step(frame.fit.scale, frame.dmin, frame.dmax),
     );
     target.resolve(opts.width, opts.height)
 }

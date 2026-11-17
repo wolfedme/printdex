@@ -45,6 +45,10 @@ pub enum EngineEvent {
         target: ThumbTarget,
         path: PathBuf,
         kind: ThumbKind,
+        /// Set when the thumbnail was just rendered rather than found in
+        /// the cache (the app plays the print-in then): where the model's
+        /// top edge is, as a fraction of the image height from the top.
+        print_in: Option<f32>,
     },
     /// No thumbnail for `target`.
     ThumbnailFailed {

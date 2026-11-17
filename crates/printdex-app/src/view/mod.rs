@@ -9,6 +9,7 @@ mod settings;
 mod sidebar;
 mod statusbar;
 mod toolbar;
+mod viewer;
 mod widgets;
 
 use iced::widget::{Space, button, column, container, row, text};
@@ -48,12 +49,18 @@ fn shell(app: &App, p: Palette) -> Element<'_, Message> {
         Screen::Settings => settings::view(app, p),
         Screen::Library => library(app, p),
     };
-    row![
+    let mut r = row![
         sidebar::view(app, p),
         container(Space::new().width(1).height(Length::Fill)).style(move |_| p.hairline()),
         main,
-    ]
-    .into()
+    ];
+    if !app.viewer.software {
+        // Finds out on the first frame whether shaders can draw.
+        r = r.push(viewer::software_probe(Message::Viewer(
+            crate::viewer::Msg::Software,
+        )));
+    }
+    r.into()
 }
 
 fn library(app: &App, p: Palette) -> Element<'_, Message> {

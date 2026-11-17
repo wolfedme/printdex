@@ -8,10 +8,10 @@ use printdex_core::{Library, ScanPhase};
 
 use super::widgets::{self, icon_button, segmented};
 use crate::app::{App, Message, SettingsSection, rename_id};
-use crate::format::group;
+use crate::format::{group, size};
 use crate::i18n::{Arg, t, t_args};
 use crate::icons::{self, Icon};
-use crate::settings::{Settings, ThemeMode, Translucency};
+use crate::settings::{CACHE_LIMITS_MB, Settings, ThemeMode, Translucency};
 use crate::theme::{self, Badge, ColorTheme, Palette, Surface};
 
 const SECTION_LIST_WIDTH: f32 = 200.0;
@@ -54,6 +54,11 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
             Icon::Settings,
             t("settings-appearance"),
         ),
+        (
+            SettingsSection::Storage,
+            Icon::Layers,
+            t("settings-storage"),
+        ),
         (SettingsSection::About, Icon::FileText, t("settings-about")),
     ] {
         let active = app.settings_section == section;
@@ -85,6 +90,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     let content = match app.settings_section {
         SettingsSection::Libraries => libraries(app, p),
         SettingsSection::Appearance => appearance(app, p),
+        SettingsSection::Storage => storage(app, p),
         SettingsSection::About => about(app, p),
     };
 
@@ -554,6 +560,72 @@ fn appearance(app: &App, p: Palette) -> Element<'_, Message> {
             t("settings-reduce-motion-body"),
             motion.into()
         ),
+    ]
+    .spacing(theme::S6)
+    .into()
+}
+
+/// "250 MB", "1 GB": round limits without decimals.
+fn limit_label(mb: u32) -> String {
+    if mb >= 1000 && mb.is_multiple_of(1000) {
+        format!("{} GB", mb / 1000)
+    } else {
+        format!("{mb} MB")
+    }
+}
+
+fn storage(app: &App, p: Palette) -> Element<'_, Message> {
+    let s = app.settings;
+    let limits = segmented(
+        p,
+        &CACHE_LIMITS_MB.map(|mb| (mb, None, Some(limit_label(mb)))),
+        s.cache_mb,
+        move |cache_mb| Message::SettingsChanged(Settings { cache_mb, ..s }),
+    );
+    let usage = match app.cache_usage {
+        Some(bytes) => t_args(
+            "settings-cache-usage",
+            &[
+                ("used", Arg::str(size(bytes))),
+                ("limit", Arg::str(limit_label(s.cache_mb))),
+            ],
+        ),
+        None => t("settings-cache-measuring"),
+    };
+    let folder = app
+        .engine
+        .as_ref()
+        .and_then(|e| {
+            e.thumbnails()
+                .cache_dir()
+                .parent()
+                .map(|d| d.display().to_string())
+        })
+        .unwrap_or_default();
+    let clear = button(text(t("settings-cache-clear")).size(theme::SIZE_BODY))
+        .height(theme::CONTROL_HEIGHT)
+        .padding([8.0, theme::S5])
+        .style(move |_, status| p.button_secondary(status))
+        .on_press_maybe(
+            (!app.clearing_cache && app.cache_usage.is_some_and(|b| b > 0))
+                .then_some(Message::ClearCache),
+        );
+    column![
+        text(t("settings-storage"))
+            .size(theme::SIZE_TITLE)
+            .font(theme::FONT_BOLD)
+            .color(p.n.ink),
+        setting(
+            p,
+            t("settings-cache-limit"),
+            t("settings-cache-limit-body"),
+            limits
+        ),
+        setting(p, t("settings-cache"), usage, clear.into()),
+        text(folder)
+            .size(theme::SIZE_DATA)
+            .font(theme::FONT_DATA)
+            .color(p.n.ink_3),
     ]
     .spacing(theme::S6)
     .into()

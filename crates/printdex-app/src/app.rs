@@ -25,6 +25,7 @@ use crate::search::{SEARCH_LIMIT, SearchState, Ticket};
 use crate::settings::{Settings, ThemeMode, Translucency, ViewMode};
 use crate::theme::{self, ColorTheme, Mode, Palette, Surface};
 use crate::thumbs::Thumbs;
+use crate::viewer::{self, Viewer};
 
 /// Widget ids the update logic talks to.
 pub fn search_id() -> Id {
@@ -107,6 +108,7 @@ pub enum SettingsSection {
     #[default]
     Libraries,
     Appearance,
+    Storage,
     About,
 }
 
@@ -173,6 +175,11 @@ pub struct App {
     pub window: Size,
     pub viewport: Option<GridViewport>,
     pub thumbs: Thumbs,
+    /// The model view's 3D preview.
+    pub viewer: Viewer,
+    /// Thumbnail cache size on disk, when last measured.
+    pub cache_usage: Option<u64>,
+    pub clearing_cache: bool,
     cancel: CancellationToken,
     started: std::time::Instant,
 }
@@ -235,6 +242,11 @@ pub enum Message {
     /// A window frame while something animates.
     Frame(std::time::Instant),
     SettingsSaved(Result<(), Arc<std::io::Error>>),
+    Viewer(viewer::Msg),
+    /// Bytes the thumbnail cache uses.
+    CacheUsage(u64),
+    ClearCache,
+    CacheCleared(Result<(), Arc<std::io::Error>>),
 }
 
 impl App {
@@ -272,6 +284,9 @@ impl App {
             window: INITIAL_WINDOW,
             viewport: None,
             thumbs: Thumbs::default(),
+            viewer: Viewer::default(),
+            cache_usage: None,
+            clearing_cache: false,
             cancel: CancellationToken::new(),
             started: std::time::Instant::now(),
         }
@@ -382,7 +397,29 @@ impl App {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let task = self.handle(message);
         self.request_thumbnails();
-        task
+        let viewer = self.sync_viewer();
+        Task::batch([task, viewer])
+    }
+
+    /// Loads the selected part into the 3D preview, or closes the preview
+    /// when no model is open.
+    fn sync_viewer(&mut self) -> Task<Message> {
+        let part = match self.screen {
+            Screen::Model(_) => self.current_part().map(|p| p.id),
+            _ => None,
+        };
+        match part {
+            Some(id) => self
+                .viewer
+                .open(self.engine.as_ref(), id)
+                .map(Message::Viewer),
+            None => {
+                if self.viewer.part.is_some() {
+                    self.viewer.close();
+                }
+                Task::none()
+            }
+        }
     }
 
     /// Items on screen that show a thumbnail, most important first: the
@@ -440,7 +477,11 @@ impl App {
                 self.engine = Some(engine);
                 self.boot = Boot::Ready;
                 let ticket = self.search.refresh();
-                Task::batch([self.load_libraries(), self.run_search(ticket)])
+                Task::batch([
+                    self.load_libraries(),
+                    self.run_search(ticket),
+                    self.apply_cache_limit(),
+                ])
             }
             Message::Booted(Err(e)) => {
                 tracing::error!(error = %e, "could not open engine");
@@ -618,7 +659,34 @@ impl App {
             }
             Message::ShowSection(section) => {
                 self.settings_section = section;
+                if section == SettingsSection::Storage {
+                    return self.measure_cache();
+                }
                 Task::none()
+            }
+            Message::CacheUsage(bytes) => {
+                self.cache_usage = Some(bytes);
+                Task::none()
+            }
+            Message::ClearCache => {
+                let Some(engine) = self.engine.clone() else {
+                    return Task::none();
+                };
+                self.clearing_cache = true;
+                Task::perform(
+                    async move { engine.thumbnails().clear_cache().await.map_err(Arc::new) },
+                    Message::CacheCleared,
+                )
+            }
+            Message::CacheCleared(result) => {
+                self.clearing_cache = false;
+                if let Err(e) = result {
+                    tracing::warn!(error = %e, "could not clear the thumbnail cache");
+                    self.error = Some(t("error-cache-clear"));
+                }
+                // Thumbnails are rendered again as they come on screen.
+                self.thumbs.clear();
+                self.measure_cache()
             }
             Message::AskRemove(id) => {
                 self.confirm_remove = Some(id);
@@ -811,8 +879,17 @@ impl App {
                         None => Task::none(),
                     }
                 };
-                Task::batch([search, self.save_settings()])
+                let cache = if old.cache_mb == settings.cache_mb {
+                    Task::none()
+                } else {
+                    self.apply_cache_limit()
+                };
+                Task::batch([search, cache, self.save_settings()])
             }
+            Message::Viewer(msg) => self
+                .viewer
+                .update(self.engine.as_ref(), msg)
+                .map(Message::Viewer),
             Message::SettingsSaved(Ok(())) => Task::none(),
             Message::SettingsSaved(Err(e)) => {
                 tracing::warn!(error = %e, "could not save settings");
@@ -884,6 +961,33 @@ impl App {
         )
     }
 
+    /// Hands the cache limit to the engine, which trims the cache to it,
+    /// then measures the cache.
+    fn apply_cache_limit(&self) -> Task<Message> {
+        let Some(engine) = self.engine.clone() else {
+            return Task::none();
+        };
+        let limit = self.settings.cache_bytes();
+        Task::perform(
+            async move {
+                let thumbs = engine.thumbnails();
+                thumbs.set_cache_limit(limit).await;
+                thumbs.cache_usage().await
+            },
+            Message::CacheUsage,
+        )
+    }
+
+    fn measure_cache(&self) -> Task<Message> {
+        let Some(engine) = self.engine.clone() else {
+            return Task::none();
+        };
+        Task::perform(
+            async move { engine.thumbnails().cache_usage().await },
+            Message::CacheUsage,
+        )
+    }
+
     /// Writes the settings file off the UI thread.
     fn save_settings(&self) -> Task<Message> {
         let Some(dir) = self.options.config_dir.clone() else {
@@ -943,7 +1047,15 @@ impl App {
                 };
                 Task::batch([self.load_libraries(), self.run_search(ticket), model])
             }
-            EngineEvent::ThumbnailReady { target, path, kind } => {
+            EngineEvent::ThumbnailReady {
+                target,
+                path,
+                kind,
+                print_in,
+            } => {
+                if let Some(top) = print_in {
+                    self.motion.print_in(target, top, std::time::Instant::now());
+                }
                 self.thumbs.ready(target, path, kind);
                 Task::none()
             }
@@ -1660,6 +1772,7 @@ mod tests {
             target: t,
             path: "/cache/p00.png".into(),
             kind: printdex_core::ThumbKind::Render,
+            print_in: None,
         }));
         assert!(matches!(
             a.thumbs.get(t),

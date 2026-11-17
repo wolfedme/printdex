@@ -292,3 +292,102 @@ fn walk(dir: &Path) -> Vec<PathBuf> {
     }
     out
 }
+
+#[tokio::test]
+async fn preview_loads_mesh_with_measurements() {
+    let fx = Fx::new().await;
+    fx.write("box/box.stl", &cuboid_stl(10.0, 20.0, 5.0));
+    fx.scan().await;
+    let id = fx.model("box").await;
+    let part = fx.engine.model(id).await.unwrap().unwrap().parts[0].id;
+    let p = fx
+        .engine
+        .thumbnails()
+        .load_preview(part, printdex_core::Detail::Preview)
+        .await
+        .unwrap();
+    assert_eq!(p.triangles, 12);
+    assert_eq!(p.mesh.triangles(), 12);
+    assert!(!p.decimated);
+    assert_eq!(p.dims, [10.0, 20.0, 5.0]);
+    // Unknown part.
+    let gone = printdex_core::PartId(printdex_core::ids::Uuid::nil());
+    assert_eq!(
+        fx.engine
+            .thumbnails()
+            .load_preview(gone, printdex_core::Detail::Full)
+            .await
+            .unwrap_err(),
+        ThumbFailure::NoSource
+    );
+}
+
+#[tokio::test]
+async fn cache_usage_limit_and_clear() {
+    let mut fx = Fx::new().await;
+    fx.write("a/a.stl", &cuboid_stl(10.0, 10.0, 10.0));
+    fx.write("b/b.stl", &cuboid_stl(20.0, 5.0, 5.0));
+    fx.scan().await;
+    let (a, b) = (fx.model("a").await, fx.model("b").await);
+    fx.thumb(ThumbTarget::Model(a)).await.unwrap();
+    let pb = fx.thumb(ThumbTarget::Model(b)).await.unwrap();
+    let thumbs = fx.engine.thumbnails().clone();
+    let used = thumbs.cache_usage().await;
+    assert!(used > 0);
+    // A limit below one file trims the older ones first.
+    let older = walk(&fx.dir.path().join("cache"))
+        .into_iter()
+        .find(|p| p != &pb)
+        .unwrap();
+    let past = std::time::SystemTime::now() - Duration::from_secs(86_400);
+    fs::File::options()
+        .append(true)
+        .open(&older)
+        .unwrap()
+        .set_modified(past)
+        .unwrap();
+    // Just over the limit: trimming to 90% takes the older file only
+    // (two similar thumbnails).
+    thumbs.set_cache_limit(used - 1).await;
+    assert!(!older.exists(), "least recently used goes first");
+    assert!(pb.exists());
+    assert_eq!(thumbs.cache_limit(), used - 1);
+    // Clearing empties it; thumbnails come back on request.
+    thumbs.clear_cache().await.unwrap();
+    assert_eq!(thumbs.cache_usage().await, 0);
+    thumbs
+        .set_cache_limit(printdex_core::DEFAULT_CACHE_LIMIT)
+        .await;
+    assert!(fx.thumb(ThumbTarget::Model(b)).await.unwrap().exists());
+}
+
+#[tokio::test]
+async fn fresh_renders_ask_for_print_in() {
+    let mut fx = Fx::new().await;
+    fx.write("box/box.stl", &cuboid_stl(10.0, 20.0, 5.0));
+    fx.scan().await;
+    let target = ThumbTarget::Model(fx.model("box").await);
+    let mut first_and_again = Vec::new();
+    for _ in 0..2 {
+        fx.engine.thumbnails().request_visible([target]);
+        let print_in = tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                if let EngineEvent::ThumbnailReady {
+                    target: t,
+                    print_in,
+                    ..
+                } = fx.events.recv().await.unwrap()
+                    && t == target
+                {
+                    return print_in;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        first_and_again.push(print_in);
+    }
+    let top = first_and_again[0].expect("just rendered");
+    assert!(top > 0.0 && top < 0.5, "{top}");
+    assert_eq!(first_and_again[1], None, "from the cache");
+}

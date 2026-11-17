@@ -38,7 +38,12 @@ pub enum Translucency {
     Off,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Thumbnail cache size limits on offer, in megabytes (1,000,000 bytes).
+pub const CACHE_LIMITS_MB: [u32; 5] = [250, 500, 1000, 2000, 5000];
+/// The default cache limit, 1 GB.
+pub const DEFAULT_CACHE_MB: u32 = 1000;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
     pub color_theme: ColorTheme,
     pub mode: ThemeMode,
@@ -46,6 +51,29 @@ pub struct Settings {
     pub sort: SortOrder,
     pub translucency: Translucency,
     pub reduce_motion: bool,
+    /// Thumbnail cache size limit, one of [`CACHE_LIMITS_MB`].
+    pub cache_mb: u32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            color_theme: ColorTheme::default(),
+            mode: ThemeMode::default(),
+            view: ViewMode::default(),
+            sort: SortOrder::default(),
+            translucency: Translucency::default(),
+            reduce_motion: false,
+            cache_mb: DEFAULT_CACHE_MB,
+        }
+    }
+}
+
+impl Settings {
+    /// The cache limit in bytes.
+    pub fn cache_bytes(&self) -> u64 {
+        u64::from(self.cache_mb) * 1_000_000
+    }
 }
 
 impl ThemeMode {
@@ -133,6 +161,14 @@ impl Settings {
         if let Some(v) = table.get("reduce-motion").and_then(toml::Value::as_bool) {
             s.reduce_motion = v;
         }
+        if let Some(v) = table
+            .get("cache-limit-mb")
+            .and_then(toml::Value::as_integer)
+            .and_then(|v| u32::try_from(v).ok())
+            .filter(|v| CACHE_LIMITS_MB.contains(v))
+        {
+            s.cache_mb = v;
+        }
         s
     }
 
@@ -148,6 +184,7 @@ impl Settings {
             translucency_key(self.translucency).into(),
         );
         t.insert("reduce-motion".into(), self.reduce_motion.into());
+        t.insert("cache-limit-mb".into(), i64::from(self.cache_mb).into());
         t.to_string()
     }
 
@@ -185,6 +222,7 @@ mod tests {
             sort: SortOrder::RecentlyAdded,
             translucency: Translucency::Off,
             reduce_motion: true,
+            cache_mb: 5000,
         }
     }
 
@@ -211,6 +249,7 @@ mod tests {
             view = "list"
             reduce-motion = "yes"
             sort = "recently-added"
+            cache-limit-mb = 777
         "#;
         let s = Settings::parse(text);
         assert_eq!(s.color_theme, ColorTheme::GraphiteSignal);
@@ -218,6 +257,7 @@ mod tests {
         assert_eq!(s.view, ViewMode::List);
         assert!(!s.reduce_motion);
         assert_eq!(s.sort, SortOrder::RecentlyAdded);
+        assert_eq!(s.cache_mb, DEFAULT_CACHE_MB, "only offered limits");
         // Truncated file: defaults.
         assert_eq!(Settings::parse("color-theme = \"sea"), Settings::default());
     }

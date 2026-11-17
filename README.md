@@ -5,7 +5,7 @@ Your STL library, organized. Local-first, blazing fast, built in Rust.
 
 ## Status
 
-Early development. The desktop app shows your libraries as a searchable grid or list, opens a model to show its parts and other files, filters by format and part count, and has Settings for libraries and appearance (seven colour themes, light/dark/system, translucency, reduce motion). Every model and part shows a preview: a 3MF's embedded picture, an image from the model folder, or a render in the material colour, cached so it is drawn once. The interactive 3D view, tags, collections and the print log come in later milestones (see the issues).
+Early development. The desktop app shows your libraries as a searchable grid or list, opens a model to show its parts and other files, filters by format and part count, and has Settings for libraries, appearance (seven colour themes, light/dark/system, translucency, reduce motion) and storage (preview cache size). Every model and part shows a preview: a 3MF's embedded picture, an image from the model folder, or a render in the material colour, cached so it is drawn once; new renders print themselves in from the bed. The model view has an interactive 3D preview (drag to turn, Shift-drag or right-drag to move, scroll to zoom, double-click to reset), drawn on the GPU with a CPU fallback; very large files are simplified for smooth turning, with full detail on request. Tags, collections and the print log come in later milestones (see the issues).
 
 > [!NOTE]
 > **AI-engineered.** Printdex is built largely by AI (Claude), directed and reviewed by [@wolfedme](https://github.com/wolfedme).
