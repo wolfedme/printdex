@@ -6,9 +6,11 @@
 pub mod cpu;
 pub mod db;
 pub mod error;
+pub mod events;
 pub mod fingerprint;
 pub mod grouping;
 pub mod ids;
+pub mod scan;
 pub mod time;
 pub mod walk;
 

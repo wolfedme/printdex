@@ -1,5 +1,6 @@
 //! SQLite store: one writer connection, a small pool of readers, WAL mode.
 
+mod files;
 mod libraries;
 
 use std::path::Path;
@@ -11,6 +12,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, S
 
 use crate::error::Result;
 
+pub use files::KnownFile;
 pub use libraries::{Library, LibraryKind};
 
 /// Handle to the Printdex database. Cheap to clone.

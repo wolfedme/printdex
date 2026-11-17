@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO assets (id, model_id, library_id, rel_path, size, mtime_ns,\n                                                 created_at, updated_at)\n                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "c7b941f71f5ea86451436c65b07e61d44c7190ada88c04fff38cb8609ee1900c"
+}
