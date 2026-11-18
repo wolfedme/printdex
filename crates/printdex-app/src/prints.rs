@@ -103,6 +103,12 @@ pub enum Pr {
     OpenLog,
     OpenEdit(AttemptId),
     OpenRecipe,
+    /// The recipe editor, showing one part's settings.
+    OpenRecipePart(String),
+    /// Recipe editor: show the whole model (`None`) or one part.
+    Scope(Option<String>),
+    /// Recipe editor: the shown part prints like the rest of the model.
+    ClearPart,
     Close,
     Outcome(AttemptResult),
     Input(Input, String),
@@ -170,6 +176,24 @@ impl App {
         }
     }
 
+    /// File names of the open model's parts, in the model view's order.
+    fn part_names(&self, id: ModelId) -> Vec<String> {
+        let Some(crate::app::ModelView::Loaded { detail, .. }) = &self.model else {
+            return Vec::new();
+        };
+        if detail.id != id {
+            return Vec::new();
+        }
+        let mut names: Vec<String> = Vec::new();
+        for p in &detail.parts {
+            let name = p.rel_path.rsplit('/').next().unwrap_or(&p.rel_path);
+            if !names.iter().any(|n| n == name) {
+                names.push(name.to_owned());
+            }
+        }
+        names
+    }
+
     /// Loads printer names for suggestions.
     pub fn load_printers(&self) -> Task<Message> {
         let Some(engine) = self.engine.clone() else {
@@ -184,7 +208,7 @@ impl App {
     pub fn handle_prints(&mut self, msg: Pr) -> Task<Message> {
         let engine = self.engine.as_ref();
         match msg {
-            Pr::OpenLog | Pr::OpenEdit(_) | Pr::OpenRecipe => {
+            Pr::OpenLog | Pr::OpenEdit(_) | Pr::OpenRecipe | Pr::OpenRecipePart(_) => {
                 let Some(id) = self.open_model_id() else {
                     return Task::none();
                 };
@@ -204,7 +228,13 @@ impl App {
                         };
                         LogForm::edit(a)
                     }
-                    _ => LogForm::recipe(recipe),
+                    Pr::OpenRecipePart(part) => {
+                        let mut f = LogForm::recipe(recipe, &self.part_names(id));
+                        // Nothing is typed yet, so this cannot fail.
+                        let _ = f.select_scope(Some(part));
+                        f
+                    }
+                    _ => LogForm::recipe(recipe, &self.part_names(id)),
                 };
                 self.org.cancel_edits();
                 self.prints.confirm_delete = None;
@@ -216,6 +246,20 @@ impl App {
             Pr::Close => {
                 self.prints.form = None;
                 self.prints.saving = false;
+                Task::none()
+            }
+            Pr::Scope(scope) => {
+                if let Some(f) = &mut self.prints.form
+                    && let Err(e) = f.select_scope(scope)
+                {
+                    f.error = Some(e);
+                }
+                Task::none()
+            }
+            Pr::ClearPart => {
+                if let Some(f) = &mut self.prints.form {
+                    f.clear_part();
+                }
                 Task::none()
             }
             Pr::Outcome(o) => {

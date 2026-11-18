@@ -19,7 +19,7 @@ notify = { version = "8", default-features = false, features = ["macos_fsevent"]
 trash = "5"
 sysinfo = { version = "0.40", default-features = false, features = ["disk"] }
 rayon = "1.12"
-sqlx = { version = "0.9", default-features = false, features = ["sqlite", "runtime-tokio", "macros", "migrate", "uuid"] }
+sqlx = { version = "0.9.1", default-features = false, features = ["sqlite", "runtime-tokio", "macros", "migrate", "uuid"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 uuid = { version = "1", features = ["v7"] }
 thiserror = "2"
