@@ -25,3 +25,14 @@ sqlx database create
 sqlx migrate run --source crates/printdex-core/migrations
 cargo sqlx prepare --workspace
 ```
+
+### Tests
+
+printdex-core's integration tests build as one binary: add a new file under
+`crates/printdex-core/tests/it/` and a `mod` line in `tests/it/main.rs`
+rather than a new top-level file in `tests/`. Each top-level file links the
+whole engine (rustic, OpenDAL, sqlx) again, which costs CI time and disk.
+
+If a backup test is slow, check whether the crate doing the work is in the
+`[profile.dev.package]` list in `Cargo.toml`: unoptimised crypto and
+compression run several times slower.

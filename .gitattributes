@@ -1,0 +1,3 @@
+# Signed fixtures must keep their exact bytes. Git for Windows checks text out
+# with CRLF by default, which broke the minisign signature check (#104).
+crates/printdex-app/src/updates_fixtures/** -text

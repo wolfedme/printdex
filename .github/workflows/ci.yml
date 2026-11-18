@@ -41,11 +41,12 @@ concurrency:
 env:
   SQLX_OFFLINE: "true"
   CARGO_TERM_COLOR: always
-  # Full debug info for ~30 test binaries (iced, wgpu, rustic, OpenDAL)
-  # filled the runner's disk and crashed the linker. Line tables keep
-  # useful backtraces; incremental builds don't help a fresh runner.
-  CARGO_PROFILE_DEV_DEBUG: line-tables-only
-  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  # No debug info: each test binary links iced, wgpu, rustic and OpenDAL,
+  # and debug info doubled target/ (7 GB to 3.5 GB), the cache we save and
+  # restore, and once filled the runner's disk. Panics still print file and
+  # line. Incremental builds don't help a fresh runner.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
   CARGO_INCREMENTAL: "0"
 
 jobs:
@@ -63,6 +64,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          # A failing job would otherwise never save, and every later run
+          # compiles from scratch (Windows did, 14 min at 2x, see #104).
+          cache-on-failure: true
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
@@ -81,6 +85,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          # A failing job would otherwise never save, and every later run
+          # compiles from scratch (Windows did, 14 min at 2x, see #104).
+          cache-on-failure: true
       - run: cargo test --workspace
 
   test-macos:
@@ -99,6 +106,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.event_name != 'pull_request' }}
+          cache-on-failure: true
       - run: cargo test --workspace
 
   msrv:
@@ -115,6 +123,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          # A failing job would otherwise never save, and every later run
+          # compiles from scratch (Windows did, 14 min at 2x, see #104).
+          cache-on-failure: true
       - run: cargo check --workspace --all-targets
 
   bench-smoke:
@@ -131,6 +142,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          # A failing job would otherwise never save, and every later run
+          # compiles from scratch (Windows did, 14 min at 2x, see #104).
+          cache-on-failure: true
       - name: Generate library
         run: cargo run --release -p printdex-cli -- bench gen "$RUNNER_TEMP/lib" --parts 20000
       - name: Benchmark

@@ -64,7 +64,9 @@ unsafe_code = "forbid"
 all = { level = "warn", priority = -1 }
 
 # Backup crypto and compression are unbearably slow unoptimised (opening a
-# repository runs scrypt), so tests and dev builds optimise them.
+# repository runs scrypt), so tests and dev builds optimise them. rustic's
+# AES-CTR/Poly1305 and pack code took the backup tests from 3.6 s to 11.5 s
+# when left unoptimised, at no measurable cost to a cold build (#104).
 [profile.dev.package]
 scrypt = { opt-level = 3 }
 salsa20 = { opt-level = 3 }
@@ -74,3 +76,12 @@ aes = { opt-level = 3 }
 poly1305 = { opt-level = 3 }
 zstd-sys = { opt-level = 3 }
 rustic_cdc = { opt-level = 3 }
+aes256ctr_poly1305aes = { opt-level = 3 }
+ctr = { opt-level = 3 }
+cipher = { opt-level = 3 }
+generic-array = { opt-level = 3 }
+aead = { opt-level = 3 }
+zstd = { opt-level = 3 }
+zstd-safe = { opt-level = 3 }
+rustic_core = { opt-level = 3 }
+binrw = { opt-level = 3 }

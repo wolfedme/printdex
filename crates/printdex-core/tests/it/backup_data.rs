@@ -252,11 +252,9 @@ async fn interrupted_backup_retries_cleanly() {
     // A big settings file so the backup takes a moment.
     let big = fx.dir.path().join("config/big.bin");
     let mut rng = fastrand::Rng::with_seed(3);
-    std::fs::write(
-        &big,
-        (0..30_000_000).map(|_| rng.u8(..)).collect::<Vec<u8>>(),
-    )
-    .unwrap();
+    let mut data = vec![0u8; 30_000_000];
+    rng.fill(&mut data);
+    std::fs::write(&big, data).unwrap();
     fx.engine.set_backup_files(vec![big]);
     let mut events = fx.engine.subscribe();
     let engine = fx.engine.clone();
