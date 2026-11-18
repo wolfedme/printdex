@@ -193,9 +193,14 @@ async fn duplicate_copies_are_not_merged() {
     write(f.root(), "Dragon B/wing.stl", "wing");
     let s = f.scan().await;
     assert_eq!(s.models_moved, 0);
-    assert_eq!(
-        f.engine.model(id).await.unwrap(),
-        None,
+    assert!(
+        f.engine
+            .model(id)
+            .await
+            .unwrap()
+            .unwrap()
+            .missing_since
+            .is_some(),
         "original is missing"
     );
     let a = f.find("Dragon A").await.unwrap();
@@ -221,7 +226,15 @@ async fn missing_model_comes_back_at_a_new_path() {
     let outside = f._dir.path().join("vase-backup");
     fs::rename(f.root().join("Vase"), &outside).unwrap();
     f.scan().await;
-    assert_eq!(f.engine.model(id).await.unwrap(), None);
+    assert!(
+        f.engine
+            .model(id)
+            .await
+            .unwrap()
+            .unwrap()
+            .missing_since
+            .is_some()
+    );
     // ...then back under another name.
     fs::rename(&outside, f.root().join("Twisted vase")).unwrap();
     f.scan().await;

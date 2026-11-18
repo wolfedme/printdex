@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id as \"id!: ModelId\", library_id as \"library_id!: LibraryId\",\n                      name, rel_path, kind, created_at, number\n               FROM models WHERE id = ? AND missing_since IS NULL",
+  "query": "SELECT id as \"id!: ModelId\", library_id as \"library_id!: LibraryId\",\n                      name, rel_path, kind, created_at, number, missing_since\n               FROM models WHERE id = ?",
   "describe": {
     "columns": [
       {
@@ -79,6 +79,17 @@
             "name": "number"
           }
         }
+      },
+      {
+        "name": "missing_since",
+        "ordinal": 7,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "missing_since"
+          }
+        }
       }
     ],
     "parameters": {
@@ -91,8 +102,9 @@
       false,
       false,
       false,
+      true,
       true
     ]
   },
-  "hash": "bc3edbabd35ef0bf3c85c8b1e610b8a964a029c06ce455485c2f97f11a09f0d9"
+  "hash": "13c6b9171f16eab7d3bcff0a915c243b615c35637f07dcec8904892c4fe2452b"
 }

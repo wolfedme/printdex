@@ -14,9 +14,11 @@ use super::statusbar::hint;
 use super::viewer::{self, Scene};
 use super::widgets::{self, date, icon_button};
 use crate::app::{App, Message, ModelView};
+use crate::files::Fx;
 use crate::format::{file_name, group, parent_path, size};
 use crate::i18n::{Arg, t, t_args};
 use crate::icons::{self, Icon};
+use crate::org::Org;
 use crate::theme::{self, Palette};
 use crate::viewer::Load;
 
@@ -72,6 +74,18 @@ fn preview_well<'a>(app: &'a App, p: Palette, pt: &PartInfo) -> (Element<'a, Mes
             None => picture,
         }
     };
+    // A missing model's files are gone: its last thumbnail, if cached, and
+    // no 3D view.
+    if matches!(&app.model, Some(ModelView::Loaded { detail, .. }) if detail.missing_since.is_some())
+    {
+        let picture = preview::preview(
+            app,
+            p,
+            ThumbTarget::Part(pt.id),
+            Look::still(PREVIEW_WIDTH, PREVIEW_HEIGHT - 2.0 * theme::S9),
+        );
+        return (picture, false);
+    }
     let v = &app.viewer;
     let loaded = match &v.load {
         Load::Ready(l) => l,
@@ -181,10 +195,14 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
             .push(text(seg.to_owned()).size(theme::SIZE_CAPTION));
     }
     let current = d.parts.get(part);
-    let reveal = app.model_path(&d.rel_path).map(Message::ShowInFolder);
+    let gone = d.missing_since.is_some();
+    let reveal = app
+        .model_path(&d.rel_path)
+        .filter(|_| !gone)
+        .map(Message::ShowInFolder);
     let open = current
-        .and_then(|pt| app.model_path(&pt.rel_path))
-        .map(Message::OpenFile);
+        .filter(|_| !gone && app.model_path(&d.rel_path).is_some())
+        .map(|_| Message::OpenPart);
     let header = container(
         column![
             crumbs,
@@ -206,13 +224,8 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
                     Palette::button_ghost,
                     reveal
                 ),
-                icon_button(
-                    p,
-                    Icon::ExternalLink,
-                    t("model-open"),
-                    Palette::button_secondary,
-                    open
-                ),
+                file_actions(p, gone),
+                open_button(app, p, open),
                 log_button(p, app.prints.form.is_none()),
             ]
             .spacing(theme::S4)
@@ -223,6 +236,10 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
     .padding([theme::S5, theme::S8])
     .width(Length::Fill)
     .style(move |_| p.bar());
+    let header: Element<'a, Message> = match d.missing_since {
+        Some(since) => column![header, missing_banner(app, p, d, since)].into(),
+        None => header.into(),
+    };
 
     // Main column: preview, parts, other files.
     let caption = current.map_or_else(String::new, |pt| {
@@ -536,6 +553,176 @@ fn detail_row<'a>(p: Palette, label: String, value: String, mono: bool) -> Eleme
     .spacing(theme::S4)
     .align_y(Alignment::Center)
     .into()
+}
+
+/// Rename, Move to…, Move to trash: icon buttons with tooltips.
+fn file_actions<'a>(p: Palette, gone: bool) -> Element<'a, Message> {
+    let msg = |f: Fx| (!gone).then_some(Message::Files(f));
+    row![
+        tip(p, Icon::Rename, t("files-rename"), msg(Fx::AskRename)),
+        tip(p, Icon::Move, t("files-move"), msg(Fx::AskMove)),
+        tip(p, Icon::Remove, t("files-trash"), msg(Fx::AskTrash)),
+    ]
+    .spacing(theme::S1)
+    .into()
+}
+
+fn tip<'a>(p: Palette, icon: Icon, label: String, msg: Option<Message>) -> Element<'a, Message> {
+    let fg = if msg.is_some() { p.n.ink_2 } else { p.n.ink_3 };
+    iced::widget::tooltip(
+        button(icons::icon(icon, theme::ICON, fg))
+            .height(theme::CONTROL_HEIGHT)
+            .padding([8.0, theme::S3])
+            .style(move |_, status| p.button_ghost(status))
+            .on_press_maybe(msg),
+        container(text(label).size(theme::SIZE_CAPTION))
+            .padding([3.0, theme::S3])
+            .style(move |_| p.tooltip()),
+        iced::widget::tooltip::Position::Bottom,
+    )
+    .into()
+}
+
+/// Open (in the chosen app: "Open in PrusaSlicer"), with a menu for the
+/// default app and choosing one.
+fn open_button<'a>(app: &'a App, p: Palette, open: Option<Message>) -> Element<'a, Message> {
+    let label = match app.open_with() {
+        Some(a) => t_args(
+            "model-open-in",
+            &[("app", Arg::str(crate::apps::app_name(a)))],
+        ),
+        None => t("model-open"),
+    };
+    let enabled = open.is_some();
+    let main = icon_button(
+        p,
+        Icon::ExternalLink,
+        label,
+        Palette::button_secondary,
+        open,
+    );
+    let chevron = button(icons::icon(
+        Icon::ChevronDown,
+        theme::ICON_DENSE,
+        if enabled { p.n.ink_2 } else { p.n.ink_3 },
+    ))
+    .height(theme::CONTROL_HEIGHT)
+    .padding([8.0, theme::S2])
+    .style(move |_, status| p.button_secondary(status))
+    .on_press_maybe(enabled.then_some(Message::Files(Fx::ToggleOpenMenu)));
+    let r = row![main, chevron].spacing(1);
+    let menu = app.files.open_menu.then(|| {
+        let format = app.current_part().map(|pt| pt.format);
+        let mut menu = column![].spacing(theme::S1);
+        if app.open_with().is_some() {
+            menu = menu.push(menu_item(
+                p,
+                Icon::ExternalLink,
+                t("model-open-default"),
+                Message::Files(Fx::OpenDefault),
+            ));
+        }
+        if let Some(f) = format {
+            menu = menu.push(menu_item(
+                p,
+                Icon::App,
+                t_args(
+                    "model-open-choose",
+                    &[("format", Arg::str(format_label(f).to_owned()))],
+                ),
+                Message::Files(Fx::ChooseApp(f)),
+            ));
+        }
+        container(menu)
+            .padding(theme::S2)
+            .width(Length::Fill)
+            .style(move |_| p.dialog())
+            .into()
+    });
+    super::dropdown::dropdown(r, menu, OPEN_MENU_WIDTH)
+        .on_dismiss(Message::Files(Fx::CloseOpenMenu))
+        .into()
+}
+
+/// Width of the Open menu.
+const OPEN_MENU_WIDTH: f32 = 280.0;
+
+fn menu_item<'a>(p: Palette, icon: Icon, label: String, msg: Message) -> Element<'a, Message> {
+    button(
+        row![
+            icons::icon(icon, theme::ICON_DENSE, p.n.ink_2),
+            text(label).size(theme::SIZE_CAPTION),
+        ]
+        .spacing(theme::S3)
+        .align_y(Alignment::Center),
+    )
+    .width(Length::Fill)
+    .padding([5.0, theme::S4])
+    .style(move |_, status| p.button_ghost(status))
+    .on_press(msg)
+    .into()
+}
+
+/// Under the header of a missing model: since when, where it was, and
+/// Forget (asks first).
+fn missing_banner<'a>(
+    app: &'a App,
+    p: Palette,
+    d: &'a ModelDetail,
+    since: i64,
+) -> Element<'a, Message> {
+    let where_it_was = app.model_path(&d.rel_path).map(Message::ShowWhereItWas);
+    let content: Element<'a, Message> = if app.org.confirm_forget {
+        row![
+            icons::icon(Icon::Alert, theme::ICON, p.status.fail),
+            text(t_args(
+                "model-forget-confirm",
+                &[("name", Arg::str(d.name.clone()))]
+            ))
+            .size(theme::SIZE_BODY)
+            .color(p.n.ink)
+            .width(Length::Fill),
+            small_button(p, t("settings-cancel"), Message::Org(Org::Cancel)),
+            button(
+                text(t("model-forget-yes"))
+                    .size(theme::SIZE_CAPTION)
+                    .font(theme::FONT_STRONG)
+            )
+            .padding([5.0, theme::S4])
+            .style(move |_, status| p.button_danger(status))
+            .on_press(Message::Org(Org::ConfirmForget(d.id))),
+        ]
+        .spacing(theme::S4)
+        .align_y(Alignment::Center)
+        .into()
+    } else {
+        let mut r = row![
+            icons::icon(Icon::Offline, theme::ICON, p.status.offline),
+            text(t_args(
+                "model-missing-since",
+                &[("date", Arg::str(date(since)))]
+            ))
+            .size(theme::SIZE_BODY)
+            .color(p.n.ink)
+            .width(Length::Fill),
+        ]
+        .spacing(theme::S4)
+        .align_y(Alignment::Center);
+        if let Some(msg) = where_it_was {
+            r = r.push(small_button(p, t("model-where-it-was"), msg));
+        }
+        r.push(small_button(
+            p,
+            t("model-forget"),
+            Message::Org(Org::AskForget),
+        ))
+        .into()
+    };
+    container(content)
+        .padding([theme::S4, theme::S8])
+        .width(Length::Fill)
+        .style(move |_| p.error_line())
+        .into()
 }
 
 fn missing<'a>(p: Palette) -> Element<'a, Message> {

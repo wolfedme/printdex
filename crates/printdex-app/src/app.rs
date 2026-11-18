@@ -110,6 +110,7 @@ pub enum SettingsSection {
     #[default]
     Libraries,
     Appearance,
+    Apps,
     Storage,
     About,
 }
@@ -149,6 +150,8 @@ pub struct GridViewport {
 pub struct App {
     pub options: Options,
     pub engine: Option<Engine>,
+    /// Multi-select, file action dialogs, undo toast, Open with.
+    pub files: crate::files::FilesUi,
     /// Watches libraries for changes and offline shares while the app runs.
     pub monitor: Option<Arc<printdex_core::Monitor>>,
     pub boot: Boot,
@@ -199,6 +202,7 @@ pub type LibrarySnapshot = (Vec<Library>, HashMap<LibraryId, u64>);
 pub enum Message {
     Booted(Result<Engine, Arc<CoreError>>),
     MonitorStarted(Arc<printdex_core::Monitor>),
+    Files(crate::files::Fx),
     Libraries(Result<LibrarySnapshot, Arc<CoreError>>),
     Engine(EngineEvent),
     SearchChanged(String),
@@ -252,6 +256,8 @@ pub enum Message {
     OpenFile(PathBuf),
     /// Show a file or folder in the OS file manager.
     ShowInFolder(PathBuf),
+    /// Opens the folder a missing model was in (or its closest parent).
+    ShowWhereItWas(PathBuf),
     Launched(Result<(), Arc<std::io::Error>>),
     SettingsChanged(Settings),
     /// A window frame while something animates.
@@ -267,6 +273,11 @@ pub enum Message {
 impl App {
     /// State before the engine is open.
     pub fn new(options: Options) -> App {
+        let apps = options
+            .config_dir
+            .as_deref()
+            .map(crate::apps::Apps::load)
+            .unwrap_or_default();
         let settings = options.settings;
         let mut search = SearchState::default();
         search.query.sort = settings.sort;
@@ -274,6 +285,10 @@ impl App {
             options,
             engine: None,
             monitor: None,
+            files: crate::files::FilesUi {
+                apps,
+                ..Default::default()
+            },
             boot: Boot::Opening,
             libraries: Vec::new(),
             counts: HashMap::new(),
@@ -511,6 +526,7 @@ impl App {
                     self.load_lists(),
                 ])
             }
+            Message::Files(f) => self.on_files(f),
             Message::MonitorStarted(monitor) => {
                 self.monitor = Some(monitor);
                 Task::none()
@@ -656,6 +672,7 @@ impl App {
             }
             Message::Select(id) => {
                 self.motion.pressed(id, std::time::Instant::now());
+                self.click_select(id);
                 self.set_selected(Some(id));
                 Task::none()
             }
@@ -675,6 +692,12 @@ impl App {
                 operation::focus(search_id()),
                 operation::select_all(search_id()),
             ]),
+            Message::Escape if self.files.dialog.is_some() || self.files.open_menu => {
+                self.update(Message::Files(crate::files::Fx::Cancel))
+            }
+            Message::Escape if !self.files.picked.is_empty() && self.screen == Screen::Library => {
+                self.update(Message::Files(crate::files::Fx::ClearSelection))
+            }
             Message::Escape if self.prints.open() => {
                 if self.prints.form.is_some() {
                     self.prints.form = None;
@@ -859,6 +882,11 @@ impl App {
                     None => Task::none(),
                 }
             }
+            Message::OpenSelected if self.files.dialog.is_some() => {
+                self.update(Message::Files(crate::files::Fx::Confirm))
+            }
+            // Enter opens only a single selection.
+            Message::OpenSelected if self.files.picked.len() > 1 => Task::none(),
             Message::OpenSelected => match (self.screen, self.selected) {
                 (Screen::Library, Some(id)) => self.update(Message::OpenModel(id)),
                 _ => Task::none(),
@@ -907,17 +935,11 @@ impl App {
                 }
                 Task::none()
             }
-            Message::OpenPart => match self.current_part().map(|p| p.rel_path.clone()) {
-                Some(rel) if matches!(self.screen, Screen::Model(_)) => {
-                    match self.model_path(&rel) {
-                        Some(path) => self.update(Message::OpenFile(path)),
-                        None => Task::none(),
-                    }
-                }
-                _ => Task::none(),
-            },
+            Message::OpenPart if matches!(self.screen, Screen::Model(_)) => self.open_part(),
+            Message::OpenPart => Task::none(),
             Message::OpenFile(path) => launch(move || opener::open(&path)),
             Message::ShowInFolder(path) => launch(move || opener::reveal(&path)),
+            Message::ShowWhereItWas(path) => launch(move || opener::open(nearest_existing(&path))),
             Message::Launched(Ok(())) => Task::none(),
             Message::Launched(Err(e)) => {
                 tracing::warn!(error = %e, "could not hand the file to the OS");
@@ -988,6 +1010,12 @@ impl App {
     }
 
     /// The part selected in the model view.
+    /// Absolute path of the open model's current part.
+    pub fn current_part_path(&self) -> Option<PathBuf> {
+        let rel = self.current_part()?.rel_path.clone();
+        self.model_path(&rel)
+    }
+
     pub fn current_part(&self) -> Option<&PartInfo> {
         match &self.model {
             Some(ModelView::Loaded { detail, part }) => detail.parts.get(*part),
@@ -1145,6 +1173,22 @@ impl App {
                 };
                 // Smart filter counts follow the print log.
                 Task::batch([self.run_search(ticket), data, self.load_lists()])
+            }
+            EngineEvent::FileOpDone(op) => {
+                let toast = self.file_op_done(op);
+                // Names and paths changed: reload what shows them.
+                let ticket = self.search.refresh();
+                let model = match &self.model {
+                    Some(m) => Task::batch([self.load_model(m.id()), self.load_data(m.id())]),
+                    None => Task::none(),
+                };
+                Task::batch([
+                    toast,
+                    self.load_libraries(),
+                    self.run_search(ticket),
+                    model,
+                    self.load_lists(),
+                ])
             }
             EngineEvent::LibraryOffline(id) => {
                 self.mark_offline(id);
@@ -1346,6 +1390,14 @@ impl App {
     }
 }
 
+/// `path`, or its closest ancestor that still exists (a missing model's
+/// folder is gone; its parent usually is not).
+fn nearest_existing(path: &std::path::Path) -> PathBuf {
+    let mut p = path.to_path_buf();
+    while !p.exists() && p.pop() {}
+    p
+}
+
 /// Runs an OS hand-off (open, reveal) off the UI thread.
 pub(crate) fn launch(
     f: impl FnOnce() -> Result<(), opener::OpenError> + Send + 'static,
@@ -1398,10 +1450,25 @@ fn on_event(event: Event, status: event::Status, _window: window::Id) -> Option<
         Event::Window(window::Event::FileDropped(path)) => {
             Some(Message::Prints(Pr::FileDropped(path)))
         }
+        Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
+            Some(Message::Files(crate::files::Fx::Modifiers(m)))
+        }
         Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
             let free = status == event::Status::Ignored;
+            use crate::files::Fx;
             match key.as_ref() {
                 keyboard::Key::Named(key::Named::Escape) => Some(Message::Escape),
+                keyboard::Key::Named(key::Named::F2) if free => Some(Message::Files(Fx::AskRename)),
+                keyboard::Key::Named(key::Named::Delete) if free => {
+                    Some(Message::Files(Fx::AskTrash))
+                }
+                keyboard::Key::Character("a") if free && modifiers.command() => {
+                    Some(Message::Files(Fx::SelectAll))
+                }
+                keyboard::Key::Character("z") if free && modifiers.command() => {
+                    Some(Message::Files(Fx::UndoLast))
+                }
+
                 keyboard::Key::Character(",") if modifiers.command() => Some(Message::OpenSettings),
                 keyboard::Key::Named(key::Named::Enter) if modifiers.command() => {
                     Some(Message::SaveShortcut)
@@ -1492,6 +1559,153 @@ mod tests {
         let ticket = app.search.refresh();
         let total = hits.len() as u64;
         let _ = app.update(Message::Results(ticket, Ok((hits, total))));
+    }
+
+    fn four(a: &mut App) -> Vec<ModelId> {
+        let hits: Vec<ModelHit> = ["a", "b", "c", "d"].into_iter().map(hit).collect();
+        let ids = hits.iter().map(|h| h.id).collect();
+        deliver(a, hits);
+        ids
+    }
+
+    fn with_mods(a: &mut App, m: keyboard::Modifiers) {
+        let _ = a.update(Message::Files(crate::files::Fx::Modifiers(m)));
+    }
+
+    #[test]
+    fn ctrl_click_toggles_selection() {
+        let mut a = app();
+        let ids = four(&mut a);
+        let _ = a.update(Message::Select(ids[0]));
+        assert!(a.files.picked.is_empty(), "a plain click picks one");
+        with_mods(&mut a, keyboard::Modifiers::COMMAND);
+        let _ = a.update(Message::Select(ids[2]));
+        assert_eq!(a.files.picked, [ids[0], ids[2]]);
+        let _ = a.update(Message::Select(ids[0]));
+        assert_eq!(a.files.picked, [ids[2]]);
+        with_mods(&mut a, keyboard::Modifiers::empty());
+        let _ = a.update(Message::Select(ids[3]));
+        assert!(a.files.picked.is_empty());
+        assert_eq!(a.action_targets(), [ids[3]]);
+    }
+
+    #[test]
+    fn shift_click_extends_selection() {
+        let mut a = app();
+        let ids = four(&mut a);
+        let _ = a.update(Message::Select(ids[1]));
+        with_mods(&mut a, keyboard::Modifiers::SHIFT);
+        let _ = a.update(Message::Select(ids[3]));
+        assert_eq!(a.files.picked, &ids[1..=3]);
+        // Back past the anchor.
+        let _ = a.update(Message::Select(ids[0]));
+        assert_eq!(a.files.picked, &ids[0..=1]);
+        // Enter does not open a multi-selection; Esc clears it.
+        let _ = a.update(Message::OpenSelected);
+        assert_eq!(a.screen, Screen::Library);
+        let _ = a.update(Message::Escape);
+        assert!(a.files.picked.is_empty());
+        let _ = a.update(Message::Files(crate::files::Fx::SelectAll));
+        assert_eq!(a.files.picked, ids);
+    }
+
+    #[test]
+    fn delete_key_asks_before_trashing() {
+        let event = Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(key::Named::Delete),
+            modified_key: keyboard::Key::Named(key::Named::Delete),
+            physical_key: key::Physical::Code(key::Code::Delete),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::empty(),
+            text: None,
+            repeat: false,
+        });
+        let msg = on_event(event, event::Status::Ignored, window::Id::unique()).unwrap();
+        let mut a = app();
+        let ids = four(&mut a);
+        let _ = a.update(Message::Select(ids[1]));
+        let _ = a.update(msg);
+        assert!(matches!(
+            &a.files.dialog,
+            Some(crate::files::Dialog::Trash { ids: t, names, .. }) if *t == [ids[1]] && names[0] == "b"
+        ));
+        // Esc cancels without touching anything.
+        let _ = a.update(Message::Escape);
+        assert!(a.files.dialog.is_none());
+    }
+
+    fn done_op(id: i64) -> printdex_core::OpSummary {
+        printdex_core::OpSummary {
+            id,
+            kind: printdex_core::OpKind::Rename,
+            state: printdex_core::OpState::Done,
+            names: vec!["Wall hook".into()],
+            undoable: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn undo_toast_undoes_last_action() {
+        let mut a = app();
+        let _ = a.update(Message::Engine(EngineEvent::FileOpDone(done_op(7))));
+        let (op, seq) = a.files.toast.clone().unwrap();
+        assert_eq!(crate::files::toast_text(&op), "Renamed to Wall hook");
+        let _ = a.update(Message::Files(crate::files::Fx::Undo(7)));
+        assert!(a.files.toast.is_none(), "the toast goes once undo starts");
+        // An old timer does not hide a newer toast.
+        let _ = a.update(Message::Engine(EngineEvent::FileOpDone(done_op(8))));
+        let _ = a.update(Message::Files(crate::files::Fx::HideToast(seq)));
+        assert!(a.files.toast.is_some());
+    }
+
+    #[tokio::test]
+    async fn ctrl_z_undoes_last_file_action() {
+        let event = Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Character("z".into()),
+            modified_key: keyboard::Key::Character("z".into()),
+            physical_key: key::Physical::Code(key::Code::KeyZ),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::COMMAND,
+            text: None,
+            repeat: false,
+        });
+        let msg = on_event(event, event::Status::Ignored, window::Id::unique());
+        assert!(matches!(
+            msg,
+            Some(Message::Files(crate::files::Fx::UndoLast))
+        ));
+        let mut a = app();
+        let _ = a.update(Message::Engine(EngineEvent::FileOpDone(done_op(3))));
+        let _ = a.update(msg.unwrap());
+        assert!(a.files.toast.is_none(), "undid the toast's action");
+    }
+
+    #[test]
+    fn rename_dialog_shows_name_taken_error() {
+        let mut a = app();
+        let ids = four(&mut a);
+        let _ = a.update(Message::Select(ids[0]));
+        let _ = a.update(Message::Files(crate::files::Fx::AskRename));
+        let _ = a.update(Message::Files(crate::files::Fx::RenameInput("b".into())));
+        let _ = a.update(Message::Files(crate::files::Fx::Done(Err(Arc::new(
+            CoreError::NameTaken("b".into()),
+        )))));
+        match &a.files.dialog {
+            Some(crate::files::Dialog::Rename { name, error, .. }) => {
+                assert_eq!(name, "b");
+                assert_eq!(
+                    error.as_deref(),
+                    Some("Something named b is already there.")
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        // Typing clears the error.
+        let _ = a.update(Message::Files(crate::files::Fx::RenameInput("b2".into())));
+        assert!(matches!(
+            &a.files.dialog,
+            Some(crate::files::Dialog::Rename { error: None, .. })
+        ));
     }
 
     #[tokio::test]
@@ -1874,6 +2088,7 @@ mod tests {
             kind: ModelKind::Folder,
             number: Some(1),
             created_at: 0,
+            missing_since: None,
             parts: parts
                 .iter()
                 .map(|p| PartInfo {
@@ -2187,6 +2402,77 @@ mod tests {
         for p in &parts {
             assert!(seen.contains(p));
         }
+    }
+
+    #[test]
+    fn forget_requires_confirmation() {
+        let mut a = app();
+        let id = ModelId::new();
+        let _ = a.update(Message::OpenModel(id));
+        let d = ModelDetail {
+            missing_since: Some(1),
+            ..detail(id, &["a.stl"])
+        };
+        let _ = a.update(Message::ModelLoaded(id, Ok(Some(d))));
+        // Without asking first, Forget does nothing.
+        let _ = a.update(Message::Org(Org::ConfirmForget(id)));
+        assert!(!a.org.confirm_forget);
+        let _ = a.update(Message::Org(Org::AskForget));
+        assert!(a.org.confirm_forget);
+        // Esc backs out of the question, not out of the model.
+        let _ = a.update(Message::Escape);
+        assert!(!a.org.confirm_forget);
+        assert!(matches!(a.model, Some(ModelView::Loaded { .. })));
+        let _ = a.update(Message::Org(Org::AskForget));
+        let _ = a.update(Message::Org(Org::ConfirmForget(id)));
+        assert!(!a.org.confirm_forget, "asked once, done");
+    }
+
+    #[test]
+    fn forgotten_model_closes_its_view() {
+        let mut a = app();
+        let id = ModelId::new();
+        let _ = a.update(Message::OpenModel(id));
+        let _ = a.update(Message::ModelLoaded(id, Ok(Some(detail(id, &["a.stl"])))));
+        let _ = a.update(Message::Engine(EngineEvent::ModelForgotten(id)));
+        assert!(a.model.is_none());
+    }
+
+    #[test]
+    fn change_mode_saved_per_library() {
+        let mut a = app();
+        let lib = library("NAS");
+        let other = library("Desk");
+        a.libraries.push(lib.clone());
+        a.libraries.push(other.clone());
+        let changed = Library {
+            change_mode: printdex_core::ChangeMode::Every(60),
+            kind: printdex_core::LibraryKind::Network,
+            ..lib.clone()
+        };
+        let _ = a.update(Message::Engine(EngineEvent::LibraryChanged(changed)));
+        assert_eq!(
+            a.libraries[0].change_mode,
+            printdex_core::ChangeMode::Every(60)
+        );
+        assert_eq!(a.libraries[1].change_mode, printdex_core::ChangeMode::Auto);
+        assert_eq!(
+            crate::view::settings::change_summary(&a.libraries[0]),
+            "Network share, checked every 60 minutes"
+        );
+        assert_eq!(
+            crate::view::settings::change_summary(&a.libraries[1]),
+            "Local folder, watched for changes"
+        );
+        let shares = Library {
+            kind: printdex_core::LibraryKind::Network,
+            ..other
+        };
+        assert_eq!(
+            crate::view::settings::change_summary(&shares),
+            "Network share, checked every 15 minutes"
+        );
+        assert_eq!(crate::view::settings::mode_choices().len(), 6);
     }
 
     #[test]

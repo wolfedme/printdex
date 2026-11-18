@@ -51,13 +51,15 @@ pub struct Engine {
     pub(crate) install: crate::ids::Uuid,
     pub(crate) fs: Arc<dyn Fs>,
     data_dir: PathBuf,
+    /// Models whose file action a crash interrupted and opening finished.
+    recovered: Arc<Mutex<Vec<String>>>,
 }
 
 /// Removes a library from the "scanning" set on every exit path. Holds the
 /// library's lock file, so another Printdex process (the CLI next to the
 /// app) cannot scan it at the same time; the OS drops the lock if the
 /// process dies.
-struct ScanGuard<'a> {
+pub(crate) struct ScanGuard<'a> {
     scanning: &'a Mutex<HashSet<LibraryId>>,
     id: LibraryId,
     _lock: std::fs::File,
@@ -127,7 +129,7 @@ impl Engine {
         let thumbs = ThumbnailService::start(db.clone(), events.clone(), cache_dir);
         let install = db.install_id().await?;
         let sidecars = SidecarWriter::start(db.clone(), install, crate::sidecar::DEBOUNCE);
-        Ok(Engine {
+        let engine = Engine {
             db,
             events,
             scanning: Arc::new(Mutex::new(HashSet::new())),
@@ -136,7 +138,19 @@ impl Engine {
             install,
             fs,
             data_dir: data_dir.to_path_buf(),
-        })
+            recovered: Arc::new(Mutex::new(Vec::new())),
+        };
+        match engine.reconcile_ops().await {
+            Ok(names) => *engine.recovered.lock().unwrap_or_else(|p| p.into_inner()) = names,
+            Err(e) => tracing::warn!(error = %e, "could not check interrupted file actions"),
+        }
+        Ok(engine)
+    }
+
+    /// Names of models whose rename, move or trash a crash interrupted and
+    /// opening finished. Returns them once.
+    pub fn take_recovered(&self) -> Vec<String> {
+        std::mem::take(&mut *self.recovered.lock().unwrap_or_else(|p| p.into_inner()))
     }
 
     /// The per-user data folder for Printdex on this OS.
@@ -248,21 +262,7 @@ impl Engine {
         cancel: CancellationToken,
         subtrees: Option<Vec<String>>,
     ) -> Result<ScanSummary> {
-        if !lock(&self.scanning).insert(id) {
-            return Err(CoreError::AlreadyScanning(id));
-        }
-        let file_lock = match scan_lock(&self.data_dir, id) {
-            Ok(f) => f,
-            Err(e) => {
-                lock(&self.scanning).remove(&id);
-                return Err(e);
-            }
-        };
-        let _guard = ScanGuard {
-            scanning: &self.scanning,
-            id,
-            _lock: file_lock,
-        };
+        let _guard = self.claim(id)?;
         let lib = self.db.library(id).await?;
         let ctx = SidecarCtx {
             writer: &self.sidecars,
@@ -293,6 +293,27 @@ impl Engine {
                 .await
             }
         }
+    }
+
+    /// Takes library `id` for a scan or a file action: no other scan or
+    /// file action of it runs, in this process or another, until the
+    /// guard drops.
+    pub(crate) fn claim(&self, id: LibraryId) -> Result<ScanGuard<'_>> {
+        if !lock(&self.scanning).insert(id) {
+            return Err(CoreError::AlreadyScanning(id));
+        }
+        let file_lock = match scan_lock(&self.data_dir, id) {
+            Ok(f) => f,
+            Err(e) => {
+                lock(&self.scanning).remove(&id);
+                return Err(e);
+            }
+        };
+        Ok(ScanGuard {
+            scanning: &self.scanning,
+            id,
+            _lock: file_lock,
+        })
     }
 
     /// Sets how library `id` notices changes; a running monitor picks it
@@ -328,7 +349,8 @@ impl Engine {
         self.db.count_models(scope, query, filter).await
     }
 
-    /// Model `id` with its present files; `None` when it is gone.
+    /// Model `id` with its present files (a missing model: the files it
+    /// last had, and `missing_since` set); `None` when it was forgotten.
     pub async fn model(&self, id: ModelId) -> Result<Option<ModelDetail>> {
         self.db.model_detail(id).await
     }

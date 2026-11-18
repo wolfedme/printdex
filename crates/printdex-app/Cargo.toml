@@ -13,6 +13,7 @@ name = "printdex-app"
 path = "src/main.rs"
 
 [dependencies]
+dunce.workspace = true
 printdex-core.workspace = true
 printdex-mesh.workspace = true
 printdex-render.workspace = true

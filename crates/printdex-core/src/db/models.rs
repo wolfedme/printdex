@@ -40,6 +40,9 @@ pub struct ModelDetail {
     pub number: Option<u32>,
     /// When Printdex first saw the model, unix milliseconds.
     pub created_at: i64,
+    /// When a scan first did not find the model (unix ms); `None` while it
+    /// is present. A missing model lists the parts it last had.
+    pub missing_since: Option<i64>,
     pub parts: Vec<PartInfo>,
     pub assets: Vec<AssetInfo>,
 }
@@ -69,8 +72,8 @@ impl Db {
     pub async fn model_detail(&self, id: ModelId) -> Result<Option<ModelDetail>> {
         let Some(m) = sqlx::query!(
             r#"SELECT id as "id!: ModelId", library_id as "library_id!: LibraryId",
-                      name, rel_path, kind, created_at, number
-               FROM models WHERE id = ? AND missing_since IS NULL"#,
+                      name, rel_path, kind, created_at, number, missing_since
+               FROM models WHERE id = ?"#,
             id
         )
         .fetch_optional(self.reader())
@@ -78,6 +81,8 @@ impl Db {
         else {
             return Ok(None);
         };
+        // A missing model shows what it had when it was last seen.
+        let gone = m.missing_since.is_some();
         let parts = sqlx::query!(
             r#"SELECT id as "id!: PartId", rel_path, format, size,
                       CASE WHEN measured_fp IS fp_hash THEN dim_x END as "dim_x?: f64",
@@ -85,8 +90,9 @@ impl Db {
                       CASE WHEN measured_fp IS fp_hash THEN dim_z END as "dim_z?: f64",
                       CASE WHEN measured_fp IS fp_hash THEN triangles END as "triangles?: i64"
                FROM parts
-               WHERE model_id = ? AND missing_since IS NULL ORDER BY rel_path"#,
-            id
+               WHERE model_id = ? AND (missing_since IS NULL OR ?) ORDER BY rel_path"#,
+            id,
+            gone
         )
         .fetch_all(self.reader())
         .await?
@@ -105,8 +111,9 @@ impl Db {
         .collect();
         let assets = sqlx::query!(
             r#"SELECT id as "id!: AssetId", rel_path, size FROM assets
-               WHERE model_id = ? AND missing_since IS NULL ORDER BY rel_path"#,
-            id
+               WHERE model_id = ? AND (missing_since IS NULL OR ?) ORDER BY rel_path"#,
+            id,
+            gone
         )
         .fetch_all(self.reader())
         .await?
@@ -125,6 +132,7 @@ impl Db {
             kind: ModelKind::from_db(&m.kind).unwrap_or(ModelKind::Folder),
             number: m.number.and_then(|n| u32::try_from(n).ok()),
             created_at: m.created_at,
+            missing_since: m.missing_since,
             parts,
             assets,
         }))

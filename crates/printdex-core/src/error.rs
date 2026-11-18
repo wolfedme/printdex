@@ -48,6 +48,16 @@ pub enum CoreError {
     PhotoInvalid,
     #[error("cancelled")]
     Cancelled,
+    #[error("not a usable file or folder name")]
+    NameInvalid,
+    #[error("something named {0} is already there")]
+    NameTaken(String),
+    #[error("the destination folder is offline or unreadable")]
+    TargetOffline,
+    #[error("the system trash cannot be used here")]
+    TrashUnavailable,
+    #[error("this action can no longer be undone")]
+    UndoUnavailable,
     #[error("i/o error at {}: {source}", path.display())]
     Io {
         path: PathBuf,

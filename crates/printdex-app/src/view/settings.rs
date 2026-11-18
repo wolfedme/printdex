@@ -1,10 +1,11 @@
 //! Settings: libraries, appearance, about.
 
 use iced::widget::{
-    Space, button, column, container, row, scrollable, text, text_input, toggler, tooltip,
+    Space, button, column, container, pick_list, row, scrollable, text, text_input, toggler,
+    tooltip,
 };
 use iced::{Alignment, Element, Length};
-use printdex_core::{Library, ScanPhase};
+use printdex_core::{ChangeMode, Library, LibraryKind, ScanPhase};
 
 use super::widgets::{self, icon_button, segmented};
 use crate::app::{App, Message, SettingsSection, rename_id};
@@ -55,6 +56,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
             Icon::Settings,
             t("settings-appearance"),
         ),
+        (SettingsSection::Apps, Icon::App, t("settings-apps")),
         (
             SettingsSection::Storage,
             Icon::Layers,
@@ -91,6 +93,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     let content = match app.settings_section {
         SettingsSection::Libraries => libraries(app, p),
         SettingsSection::Appearance => appearance(app, p),
+        SettingsSection::Apps => apps(app, p),
         SettingsSection::Storage => storage(app, p),
         SettingsSection::About => about(app, p),
     };
@@ -175,6 +178,7 @@ fn libraries(app: &App, p: Palette) -> Element<'_, Message> {
             Some(Message::PickLibrary)
         ),
         sidecars(app, p),
+        change_detection(app, p),
     ]
     .spacing(theme::S6)
     .into()
@@ -210,6 +214,90 @@ fn sidecars(app: &App, p: Palette) -> Element<'_, Message> {
             } else {
                 t("settings-sidecars-off")
             },
+            control.into(),
+        ));
+    }
+    col.into()
+}
+
+/// A change mode as shown in the picker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ModeChoice(pub ChangeMode);
+
+impl std::fmt::Display for ModeChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self.0 {
+            ChangeMode::Auto => t("change-auto"),
+            ChangeMode::Watch => t("change-watch"),
+            ChangeMode::Every(m) => {
+                t_args("change-every", &[("minutes", Arg::count(u64::from(m)))])
+            }
+            ChangeMode::Manual => t("change-manual"),
+        };
+        f.write_str(&s)
+    }
+}
+
+/// Every choice, in picker order.
+pub fn mode_choices() -> Vec<ModeChoice> {
+    let mut v = vec![ModeChoice(ChangeMode::Auto), ModeChoice(ChangeMode::Watch)];
+    v.extend(ChangeMode::INTERVALS.map(|m| ModeChoice(ChangeMode::Every(m))));
+    v.push(ModeChoice(ChangeMode::Manual));
+    v
+}
+
+/// What Printdex does for `lib` right now ("Network share, checked every
+/// 15 minutes").
+pub fn change_summary(lib: &Library) -> String {
+    let kind = match lib.kind {
+        LibraryKind::Local => t("kind-local"),
+        LibraryKind::Network => t("kind-network"),
+        LibraryKind::Removable => t("kind-removable"),
+    };
+    match lib.change_mode.resolve(lib.kind) {
+        ChangeMode::Every(m) => t_args(
+            "change-now-every",
+            &[
+                ("kind", Arg::str(kind)),
+                ("minutes", Arg::count(u64::from(m))),
+            ],
+        ),
+        ChangeMode::Manual => t_args("change-now-manual", &[("kind", Arg::str(kind))]),
+        _ => t_args("change-now-watch", &[("kind", Arg::str(kind))]),
+    }
+}
+
+/// Per library: how changes outside the app are noticed.
+fn change_detection(app: &App, p: Palette) -> Element<'_, Message> {
+    let mut col = column![
+        column![
+            text(t("settings-changes"))
+                .size(theme::SIZE_SECTION)
+                .font(theme::FONT_BOLD)
+                .color(p.n.ink),
+            text(t("settings-changes-body"))
+                .size(theme::SIZE_CAPTION)
+                .color(p.n.ink_2),
+        ]
+        .spacing(theme::S2),
+        widgets::hairline(p),
+    ]
+    .spacing(theme::S5);
+    for lib in &app.libraries {
+        let id = lib.id;
+        let control = pick_list(
+            mode_choices(),
+            Some(ModeChoice(lib.change_mode)),
+            move |c| Message::Org(Org::SetChangeMode(id, c.0)),
+        )
+        .text_size(theme::SIZE_BODY)
+        .padding([7.0, theme::S4])
+        .style(move |_, status| p.pick(status))
+        .menu_style(move |_| p.pick_menu());
+        col = col.push(setting(
+            p,
+            lib.display_name.clone(),
+            change_summary(lib),
             control.into(),
         ));
     }
@@ -610,6 +698,51 @@ fn limit_label(mb: u32) -> String {
     } else {
         format!("{mb} MB")
     }
+}
+
+/// Settings › Apps: which app opens each printable format.
+fn apps(app: &App, p: Palette) -> Element<'_, Message> {
+    use crate::files::Fx;
+    let mut col =
+        column![heading(p, t("settings-apps"), t("settings-apps-body"))].spacing(theme::S5);
+    for f in crate::apps::FORMATS {
+        let chosen = app.files.apps.get(f);
+        let body = match chosen {
+            Some(a) => t_args(
+                "settings-apps-chosen",
+                &[
+                    ("app", Arg::str(crate::apps::app_name(a))),
+                    ("path", Arg::str(a.display().to_string())),
+                ],
+            ),
+            None => t("settings-apps-default"),
+        };
+        let mut controls = row![small_button(
+            p,
+            t("settings-apps-choose"),
+            Message::Files(Fx::ChooseApp(f))
+        )]
+        .spacing(theme::S2);
+        if chosen.is_some() {
+            controls = controls.push(small_button(
+                p,
+                t("settings-apps-reset"),
+                Message::Files(Fx::ResetApp(f)),
+            ));
+        }
+        let label = match f {
+            printdex_core::PrintableFormat::Stl => "STL",
+            printdex_core::PrintableFormat::ThreeMf => "3MF",
+            printdex_core::PrintableFormat::Obj => "OBJ",
+        };
+        col = col.push(widgets::hairline(p)).push(setting(
+            p,
+            t_args("settings-apps-format", &[("format", Arg::str(label))]),
+            body,
+            controls.into(),
+        ));
+    }
+    col.into()
 }
 
 fn storage(app: &App, p: Palette) -> Element<'_, Message> {

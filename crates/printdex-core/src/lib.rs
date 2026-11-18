@@ -8,6 +8,7 @@ pub mod db;
 pub mod engine;
 pub mod error;
 pub mod events;
+pub mod file_ops;
 pub mod fingerprint;
 pub mod fs;
 pub mod grouping;
@@ -31,6 +32,7 @@ pub use db::{
 pub use engine::{Engine, LibraryStatus};
 pub use error::{CoreError, Result};
 pub use events::{EngineEvent, ScanPhase};
+pub use file_ops::{OpKind, OpState, OpSummary};
 pub use grouping::ModelKind;
 pub use ids::{AssetId, AttemptId, CollectionId, LibraryId, ModelId, PartId, PhotoId, TagId};
 pub use model_data::{

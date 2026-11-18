@@ -56,6 +56,10 @@ icon_files! {
     Link => "link.svg",
     Notes => "notebook-pen.svg",
     Info => "info.svg",
+    Move => "folder-input.svg",
+    Undo => "undo-2.svg",
+    App => "app-window.svg",
+    ChevronDown => "chevron-down.svg",
 }
 
 /// `icon` at `size` px, tinted `color`.

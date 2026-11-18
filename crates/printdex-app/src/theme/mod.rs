@@ -569,6 +569,39 @@ impl Palette {
         }
     }
 
+    /// The dimmed layer behind a dialog.
+    pub fn scrim(&self) -> container::Style {
+        container::Style {
+            background: Some(Color::from_rgba(0.0, 0.0, 0.0, 0.32).into()),
+            ..container::Style::default()
+        }
+    }
+
+    /// A dialog or floating toast: opaque surface, soft shadow.
+    pub fn dialog(&self) -> container::Style {
+        container::Style {
+            background: Some(
+                Color {
+                    a: 1.0,
+                    ..self.t.surface
+                }
+                .into(),
+            ),
+            text_color: Some(self.n.ink),
+            border: Border {
+                color: self.n.edge,
+                width: 1.0,
+                radius: RADIUS_PANE.into(),
+            },
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.24),
+                offset: iced::Vector::new(0.0, 8.0),
+                blur_radius: 28.0,
+            },
+            snap: true,
+        }
+    }
+
     /// A small filled square, for colour swatches.
     pub fn swatch(&self, color: Color) -> container::Style {
         container::Style {
