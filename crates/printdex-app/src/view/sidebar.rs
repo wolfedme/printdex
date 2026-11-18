@@ -215,6 +215,9 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     for (id, scan) in &app.scans {
         foot = foot.push(scan_block(app, p, *id, scan));
     }
+    if let Some(line) = super::backup::status(&app.backup, p) {
+        foot = foot.push(line);
+    }
 
     let on_settings = app.screen == Screen::Settings;
     let settings = button(

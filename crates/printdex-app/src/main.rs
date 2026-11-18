@@ -2,6 +2,7 @@
 
 mod app;
 mod apps;
+mod backup_ui;
 mod files;
 mod filters;
 mod format;

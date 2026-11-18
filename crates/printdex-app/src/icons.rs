@@ -60,6 +60,7 @@ icon_files! {
     Undo => "undo-2.svg",
     App => "app-window.svg",
     ChevronDown => "chevron-down.svg",
+    Backup => "archive.svg",
 }
 
 /// `icon` at `size` px, tinted `color`.

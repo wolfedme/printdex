@@ -1,5 +1,6 @@
 //! Views: turn [`App`] state into widgets. No logic beyond layout.
 
+mod backup;
 mod dropdown;
 mod empty;
 mod files;

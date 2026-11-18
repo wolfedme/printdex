@@ -345,3 +345,11 @@ async fn no_target_means_no_backup() {
         "{err:?}"
     );
 }
+
+#[tokio::test]
+async fn repository_size_after_first_backup() {
+    let fx = Fx::new().await;
+    assert_eq!(fx.engine.backup_size().await.unwrap(), None);
+    fx.engine.backup_now(BackupScope::Data).await.unwrap();
+    assert!(fx.engine.backup_size().await.unwrap().unwrap() > 0);
+}

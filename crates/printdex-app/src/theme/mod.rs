@@ -10,7 +10,7 @@
 //! status colours never change with the colour theme.
 
 use iced::overlay::menu;
-use iced::widget::{button, container, pick_list, scrollable, text_input, toggler};
+use iced::widget::{button, checkbox, container, pick_list, scrollable, text_input, toggler};
 use iced::{Background, Border, Color, Font, Shadow, font};
 
 mod presets;
@@ -670,13 +670,16 @@ impl Palette {
     // ---------- buttons ----------
 
     pub fn button_primary(&self, status: button::Status) -> button::Style {
-        let bg = match status {
-            button::Status::Hovered | button::Status::Pressed => self.t.primary_hi,
-            _ => self.t.primary,
+        let (bg, fg) = match status {
+            button::Status::Hovered | button::Status::Pressed => {
+                (self.t.primary_hi, self.t.on_primary)
+            }
+            button::Status::Disabled => (self.n.rule_soft, self.n.ink_3),
+            button::Status::Active => (self.t.primary, self.t.on_primary),
         };
         button::Style {
             background: Some(bg.into()),
-            text_color: self.t.on_primary,
+            text_color: fg,
             border: Border {
                 radius: RADIUS_CONTROL.into(),
                 ..Border::default()
@@ -812,6 +815,29 @@ impl Palette {
             text_color: Some(self.n.ink),
             border_radius: None,
             padding_ratio: 0.1,
+        }
+    }
+
+    pub fn checkbox(&self, status: checkbox::Status) -> checkbox::Style {
+        let (checkbox::Status::Active { is_checked: on }
+        | checkbox::Status::Hovered { is_checked: on }
+        | checkbox::Status::Disabled { is_checked: on }) = status;
+        let hovered = matches!(status, checkbox::Status::Hovered { .. });
+        checkbox::Style {
+            background: Background::Color(if on { self.t.primary } else { self.t.ground }),
+            icon_color: self.t.on_primary,
+            border: Border {
+                color: if on {
+                    self.t.primary
+                } else if hovered {
+                    self.n.ink_3
+                } else {
+                    self.n.rule
+                },
+                width: 1.0,
+                radius: RADIUS_CHIP.into(),
+            },
+            text_color: Some(self.n.ink),
         }
     }
 
