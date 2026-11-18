@@ -14,7 +14,7 @@ Sync is for Printdex's own data. Model files are never copied by Printdex.
   - *Shared library*: several machines open the same library folder (NAS share, or one folder reached over the network).
   - *Own copies*: each machine has its own copy of the model files, kept in step by Dropbox, Syncthing, Nextcloud or by hand. Printdex syncs only its data.
   - Copying model files between machines is out of scope.
-- **Transport (pending Max's pick on the decision card; recommended): a change log in a sync space.** See §4.
+- **Transport (Max, 2026-11-18): a change log in a sync space** (approach A). See §4.
 - Inherited: no self-hosted server (the gap Manyfold leaves), GPL-compatible deps, no `unsafe`, async (tokio) engine, model files are never modified, offline by default and network only for features the user sets up.
 
 ## 3. Goals, non-goals, anti-goals
@@ -41,7 +41,7 @@ Sync is for Printdex's own data. Model files are never copied by Printdex.
 
 | Approach | Trade-offs | Verdict |
 |---|---|---|
-| **A. Change log in a sync space.** Each install appends small, numbered change files to its own folder in a shared spot and reads the others' folders. | One mechanism for both setups. No locking, because every file has exactly one writer (also safe in Dropbox/Syncthing folders, which make conflict copies when two machines write one file). Syncs are small and incremental. Needs compaction so a new machine doesn't replay years of changes. | **Recommended.** |
+| **A. Change log in a sync space.** Each install appends small, numbered change files to its own folder in a shared spot and reads the others' folders. | One mechanism for both setups. No locking, because every file has exactly one writer (also safe in Dropbox/Syncthing folders, which make conflict copies when two machines write one file). Syncs are small and incremental. Needs compaction so a new machine doesn't replay years of changes. | **Chosen by Max.** |
 | B. Periodic full exports. Each install uploads a full copy of its data and merges the others' copies. | Simplest format. Every sync moves and parses the whole library's data (megabytes at 100k models), deletes need tombstones anyway, and merging whole exports is slower. | Not recommended. |
 | C. Sidecars only. Extend today's per-model `.printdex.toml` merge. | No new storage. Only covers shared libraries (own copies only if a file syncer copies sidecars too); sidecars can't hold tag/collection renames or deletes; many installs writing one sidecar race; read-only shares can't sync at all. | Not recommended. |
 
