@@ -3,6 +3,7 @@
 //! This crate has no UI dependencies. The desktop app and the `printdex` CLI
 //! both drive it through the [`Engine`] handle.
 
+pub mod backup;
 pub mod cpu;
 pub mod db;
 pub mod engine;
@@ -30,7 +31,7 @@ pub use db::{
     Scope, SearchFilter, Smart, SmartCounts, SortOrder, Stats, format_number,
 };
 pub use engine::{Engine, LibraryStatus};
-pub use error::{CoreError, Result};
+pub use error::{BackupError, CoreError, Result};
 pub use events::{EngineEvent, ScanPhase};
 pub use file_ops::{OpKind, OpState, OpSummary};
 pub use grouping::ModelKind;

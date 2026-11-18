@@ -29,6 +29,13 @@ tokio-util.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 xxhash-rust.workspace = true
+rustic_core.workspace = true
+rustic_backend.workspace = true
+opendal.workspace = true
+bytes.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+opendal = { workspace = true, features = ["services-sftp"] }
 
 [dev-dependencies]
 zip.workspace = true

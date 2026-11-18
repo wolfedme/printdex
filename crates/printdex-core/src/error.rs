@@ -68,6 +68,36 @@ pub enum CoreError {
     Db(#[from] sqlx::Error),
     #[error("database migration error: {0}")]
     Migrate(#[from] sqlx::migrate::MigrateError),
+    #[error("backup: {0}")]
+    Backup(#[from] BackupError),
+}
+
+/// Why a backup or restore could not run, grouped by what the user can do
+/// about it.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum BackupError {
+    #[error("wrong passphrase")]
+    WrongPassphrase,
+    #[error("the target rejected the credentials")]
+    Credentials,
+    #[error("the target cannot be reached: {0}")]
+    Unreachable(String),
+    #[error("the target is full")]
+    Full,
+    #[error("the target is read-only")]
+    ReadOnly,
+    #[error("the target settings are not valid")]
+    TargetInvalid,
+    #[error("this kind of target is not available on this system")]
+    Unsupported,
+    #[error("there is no backup at the target")]
+    NoRepository,
+    #[error("snapshot not found")]
+    SnapshotNotFound,
+    #[error("the backup check found problems: {0}")]
+    CheckFailed(String),
+    #[error("{0}")]
+    Repository(String),
 }
 
 /// Engine result type.

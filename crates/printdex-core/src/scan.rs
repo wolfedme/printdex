@@ -212,6 +212,7 @@ fn clone_error(e: &CoreError) -> CoreError {
         CoreError::LibraryOffline(p) => CoreError::LibraryOffline(p.clone()),
         CoreError::AlreadyScanning(id) => CoreError::AlreadyScanning(*id),
         CoreError::Cancelled => CoreError::Cancelled,
+        CoreError::Backup(b) => CoreError::Backup(b.clone()),
         CoreError::NameInvalid => CoreError::NameInvalid,
         CoreError::NameTaken(n) => CoreError::NameTaken(n.clone()),
         CoreError::TargetOffline => CoreError::TargetOffline,
