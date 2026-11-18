@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#34363c"/>
+      <stop offset="1" stop-color="#17181b"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="layer" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fde96a"/>
+      <stop offset="1" stop-color="#f2cf12"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#bg)"/>
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="url(#sheen)"/>
+  <rect x="65.5" y="65.5" width="893" height="893" rx="198.5" fill="none" stroke="#ffffff" stroke-opacity="0.12" stroke-width="3"/>
+  <!-- Print layers: a part growing up from the bed -->
+  <rect x="232" y="694" width="560" height="64" rx="32" fill="url(#layer)"/>
+  <rect x="272" y="604" width="480" height="64" rx="32" fill="url(#layer)" opacity="0.92"/>
+  <rect x="312" y="514" width="400" height="64" rx="32" fill="url(#layer)" opacity="0.84"/>
+  <rect x="352" y="424" width="320" height="64" rx="32" fill="url(#layer)" opacity="0.76"/>
+  <!-- Nozzle laying down the next layer -->
+  <path d="M452 236 h120 v76 l-36 52 h-48 l-36 -52 z" fill="#e9eaee"/>
+  <rect x="482" y="364" width="60" height="22" rx="8" fill="#e9eaee"/>
+  <rect x="392" y="214" width="240" height="36" rx="18" fill="#c9cbd1"/>
+</svg>

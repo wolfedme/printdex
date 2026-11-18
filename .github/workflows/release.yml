@@ -1,0 +1,266 @@
+name: release
+
+# Builds, packages and signs a release when a `vX.Y.Z` tag is pushed, and
+# uploads everything to a draft GitHub release for Max to publish.
+#
+# - Linux: AppImage (x86_64). Windows: Setup.exe + portable zip (x86_64).
+#   macOS: universal .app, ad-hoc signed, in a .dmg plus Velopack's zip.
+# - Velopack (`vpk pack`) makes the update packages and the
+#   `releases.<channel>.json` feeds the app's updater reads.
+# - Every file gets a minisign signature (`.minisig`), made with the
+#   MINISIGN_KEY / MINISIGN_PASSWORD secrets (see packaging/README.md).
+#
+# Changes to this file or to packaging/ run a dry run on the pull request:
+# everything is built and packaged, nothing is signed or released.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "packaging/**"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  SQLX_OFFLINE: "true"
+  CARGO_TERM_COLOR: always
+  # Keep in step with the `velopack` crate version in Cargo.toml.
+  VPK_VERSION: "1.3.39-g8d2844f"
+  PACK_ID: Printdex
+  PACK_TITLE: Printdex
+  PACK_AUTHORS: Printdex
+
+jobs:
+  version:
+    name: version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.v.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        shell: bash
+        run: |
+          cargo_version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+            # The tag may add a pre-release (v0.1.0-rc.1) but must match the crates.
+            if [[ "${version%%-*}" != "$cargo_version" ]]; then
+              echo "::error::tag v$version does not match Cargo.toml version $cargo_version"
+              exit 1
+            fi
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            version="$cargo_version-dryrun.$GITHUB_RUN_NUMBER"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version"
+
+  linux:
+    name: package (linux)
+    needs: version
+    # Oldest supported Ubuntu, so the AppImage runs on older glibc too.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - run: dotnet tool install -g vpk --version "$VPK_VERSION"
+      - run: cargo build --release -p printdex-app -p printdex-cli
+      - name: Stage files
+        run: |
+          mkdir -p stage
+          cp target/release/printdex-app target/release/printdex stage/
+          cp LICENSE stage/
+      - name: Pack
+        run: |
+          vpk pack --packId "$PACK_ID" --packTitle "$PACK_TITLE" --packAuthors "$PACK_AUTHORS" \
+            --packVersion "${{ needs.version.outputs.version }}" \
+            --packDir stage --mainExe printdex-app --runtime linux-x64 \
+            --icon packaging/icons/printdex-512.png \
+            --categories Graphics --outputDir out
+          ls -la out
+      - name: Smoke test the AppImage
+        run: |
+          app=$(ls out/*.AppImage | head -1)
+          chmod +x "$app"
+          # Extract instead of mounting (no FUSE on runners) and run the CLI.
+          (cd out && "./$(basename "$app")" --appimage-extract >/dev/null)
+          out/squashfs-root/usr/bin/printdex --version
+          rm -rf out/squashfs-root
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: out/*
+
+  windows:
+    name: package (windows)
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - run: dotnet tool install -g vpk --version "$env:VPK_VERSION"
+      - run: cargo build --release -p printdex-app -p printdex-cli
+      - name: Stage files
+        shell: bash
+        run: |
+          mkdir -p stage
+          cp target/release/printdex-app.exe target/release/printdex.exe stage/
+          cp LICENSE stage/
+      - name: Pack
+        shell: bash
+        run: |
+          vpk pack --packId "$PACK_ID" --packTitle "$PACK_TITLE" --packAuthors "$PACK_AUTHORS" \
+            --packVersion "${{ needs.version.outputs.version }}" \
+            --packDir stage --mainExe printdex-app.exe --runtime win-x64 \
+            --icon packaging/icons/printdex.ico --outputDir out
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: out/*
+
+  macos:
+    name: package (macos)
+    needs: version
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+      - run: dotnet tool install -g vpk --version "$VPK_VERSION"
+      - name: Build universal binaries
+        run: |
+          for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release -p printdex-app -p printdex-cli --target "$t"
+          done
+          mkdir -p stage
+          for b in printdex-app printdex; do
+            lipo -create -output "stage/$b" \
+              "target/aarch64-apple-darwin/release/$b" "target/x86_64-apple-darwin/release/$b"
+          done
+          cp LICENSE stage/
+          lipo -info stage/printdex-app
+      - name: Pack
+        run: |
+          version="${{ needs.version.outputs.version }}"
+          vpk pack --packId "$PACK_ID" --packTitle "$PACK_TITLE" --packAuthors "$PACK_AUTHORS" \
+            --packVersion "$version" --packDir stage --mainExe printdex-app \
+            --icon packaging/icons/printdex.icns --bundleId io.github.printdex \
+            --noInst --outputDir out
+          ls -la out
+      - name: Ad-hoc sign and make the .dmg
+        run: |
+          version="${{ needs.version.outputs.version }}"
+          mkdir -p dmg
+          ditto -x -k out/*-Portable.zip dmg/
+          app=$(ls -d dmg/*.app | head -1)
+          codesign --force --deep -s - "$app"
+          codesign --verify --deep "$app"
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname Printdex -srcfolder dmg -ov -format UDZO "out/Printdex-$version-osx.dmg"
+          "$app/Contents/MacOS/printdex" --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: out/*
+
+  publish:
+    name: sign and draft release
+    needs: [version, linux, windows, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - run: ls -la dist
+      - name: Release notes
+        id: notes
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: ${{ needs.version.outputs.release == 'true' && '--latest' || '--unreleased' }} --strip header
+        env:
+          OUTPUT: NOTES.md
+      - name: Sign every file
+        if: needs.version.outputs.release == 'true'
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          if [ -z "$MINISIGN_KEY" ]; then
+            echo "::error::MINISIGN_KEY is not set; see packaging/README.md"
+            exit 1
+          fi
+          sudo apt-get update -q && sudo apt-get install -y -q minisign
+          printf '%s\n' "$MINISIGN_KEY" > "$RUNNER_TEMP/minisign.key"
+          for f in dist/*; do
+            printf '%s\n' "$MINISIGN_PASSWORD" | minisign -S -s "$RUNNER_TEMP/minisign.key" -m "$f" \
+              -t "Printdex ${{ needs.version.outputs.version }} $(basename "$f")"
+          done
+          rm -f "$RUNNER_TEMP/minisign.key"
+          minisign -V -p packaging/minisign.pub -m "$(ls dist/*.nupkg | head -1)"
+      - name: Draft the GitHub release
+        if: needs.version.outputs.release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: ${{ contains(needs.version.outputs.version, '-') }}
+          name: Printdex ${{ needs.version.outputs.version }}
+          body_path: NOTES.md
+          files: dist/*
+          fail_on_unmatched_files: true
+      - name: Dry run summary
+        if: needs.version.outputs.release != 'true'
+        run: |
+          {
+            echo "### Release dry run ${{ needs.version.outputs.version }}"
+            echo '```'
+            ls -la dist
+            echo '```'
+            echo '#### Notes'
+            cat NOTES.md
+          } >> "$GITHUB_STEP_SUMMARY"
