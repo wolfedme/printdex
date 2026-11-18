@@ -26,6 +26,9 @@ use tokio_util::sync::CancellationToken;
 use super::remote::{RemoteBackend, Throttle};
 use crate::error::{BackupError, CoreError, Result};
 
+/// A file in a snapshot: path (relative to what was asked for) and size.
+pub type FileEntry = (String, u64);
+
 /// Where backups go. Holds no secrets (those are [`TargetSecrets`]).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
@@ -656,6 +659,75 @@ impl Repo {
             me.repo = Some(indexed.drop_index());
             out
         })
+    }
+
+    /// The files under `subpath` (relative to the backed-up folder) in each
+    /// snapshot matching `filter`, oldest snapshot first, as paths relative
+    /// to `subpath` ("" when `subpath` is a file) with sizes. Snapshots
+    /// without `subpath` are left out.
+    pub fn find(
+        &mut self,
+        filter: &SnapshotFilter,
+        subpath: &str,
+    ) -> Result<Vec<(SnapshotInfo, Vec<FileEntry>)>> {
+        let mut snaps: Vec<SnapshotFile> = self
+            .repo()?
+            .get_all_snapshots()
+            .map_err(classify)?
+            .into_iter()
+            .filter(|s| filter.matches(s))
+            .collect();
+        snaps.sort_by(|a, b| a.time.cmp(&b.time));
+        let repo = self.take().map_err(classify)?;
+        let indexed = match repo.to_indexed_ids() {
+            Ok(r) => r,
+            Err(e) => return Err(classify(e)),
+        };
+        let mut out = Vec::new();
+        let mut failed = None;
+        for snap in &snaps {
+            let Some(root) = snap.paths.iter().next() else {
+                continue;
+            };
+            let inner = Path::new(root).join(subpath);
+            let inner = inner.to_string_lossy().replace('\\', "/");
+            let Ok(node) = indexed.node_from_snapshot_and_path(snap, &inner) else {
+                continue;
+            };
+            if !node.is_dir() {
+                out.push((
+                    SnapshotInfo::from_file(snap),
+                    vec![(String::new(), node.meta.size)],
+                ));
+                continue;
+            }
+            let ls = LsOptions::default().recursive(true);
+            let listed = indexed.ls(&node, &ls).and_then(|it| {
+                it.filter_map(|r| match r {
+                    Ok((path, n)) if n.is_file() => {
+                        Some(Ok((path.to_string_lossy().replace('\\', "/"), n.meta.size)))
+                    }
+                    Ok(_) => None,
+                    Err(e) => Some(Err(e)),
+                })
+                .collect::<RusticResult<Vec<_>>>()
+            });
+            match listed {
+                Ok(mut files) => {
+                    files.sort();
+                    out.push((SnapshotInfo::from_file(snap), files));
+                }
+                Err(e) => {
+                    failed = Some(e);
+                    break;
+                }
+            }
+        }
+        self.repo = Some(indexed.drop_index());
+        match failed {
+            Some(e) => Err(classify(e)),
+            None => Ok(out),
+        }
     }
 
     /// Thins the snapshots of one `host` and `tag` to `keep`; other hosts'

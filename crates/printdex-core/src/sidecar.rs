@@ -318,7 +318,15 @@ pub struct Imported {
 }
 
 /// Imports `file` into model `id`, record by record (newest wins).
-pub async fn import(db: &Db, id: ModelId, file: &SidecarFile, install: Uuid) -> Result<Imported> {
+/// `predecessors` are earlier ids of this install (before a restore):
+/// files they wrote count as this install's own.
+pub async fn import(
+    db: &Db,
+    id: ModelId,
+    file: &SidecarFile,
+    install: Uuid,
+    predecessors: &[String],
+) -> Result<Imported> {
     let current = db.organize(id).await?.ok_or(CoreError::ModelNotFound)?;
     if let Some(n) = file.number.filter(|n| *n > 0) {
         // Only a model without a number takes it, and only when it is free.
@@ -377,7 +385,9 @@ pub async fn import(db: &Db, id: ModelId, file: &SidecarFile, install: Uuid) -> 
     }
     let merged = snapshot(db, id, install).await?.unwrap_or_default();
     Ok(Imported {
-        foreign: !file.writer.is_empty() && file.writer != install.hyphenated().to_string(),
+        foreign: !file.writer.is_empty()
+            && file.writer != install.hyphenated().to_string()
+            && !predecessors.contains(&file.writer),
         needs_write: !merged.same_data(file),
     })
 }
@@ -405,6 +415,7 @@ pub async fn import_library(
     if sidecars.is_empty() {
         return Ok(summary);
     }
+    let predecessors = db.install_predecessors().await?;
     let states: HashMap<(String, ModelKind), _> = db
         .sidecar_states(lib)
         .await?
@@ -438,7 +449,7 @@ pub async fn import_library(
                 continue;
             }
         };
-        let imported = import(db, state.id, &file, install).await?;
+        let imported = import(db, state.id, &file, install, &predecessors).await?;
         db.set_sidecar_mtime(state.id, Some(real_mtime)).await?;
         summary.imported += 1;
         summary.foreign |= imported.foreign;

@@ -292,6 +292,10 @@ impl Engine {
             Err(e) => Err(e),
         };
         let _ = std::fs::remove_dir_all(&staging);
+        if out.is_ok() {
+            // A new backup exists, so the data a restore replaced can go.
+            super::restore::remove_pre_restore(&self.data_dir);
+        }
         out
     }
 

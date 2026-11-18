@@ -37,6 +37,15 @@ pub fn when(ms: i64) -> String {
     }
 }
 
+/// "3 Oct 2026, 14:02" in the OS time zone.
+pub fn when_full(ms: i64) -> String {
+    let Ok(ts) = jiff::Timestamp::from_millisecond(ms) else {
+        return String::new();
+    };
+    let at = ts.to_zoned_datetime(jiff::tz::TimeZone::system());
+    format!("{}, {}", widgets::date(ms), at.strftime("%H:%M"))
+}
+
 /// The sidebar footer line, while backups are set up.
 pub fn status<'a>(b: &BackupUi, p: Palette) -> Option<Element<'a, Message>> {
     let line = b.status_line()?;
@@ -84,6 +93,9 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     if let Some(e) = &b.error {
         col = col.push(error_banner(p, e.clone()));
     }
+    if app.restore.wizard.is_some() {
+        return col.push(super::restore::wizard(app, p)).into();
+    }
     let body: Element<'_, Message> = match (&b.config, &b.form) {
         (_, Some(form)) if form.confirming => confirm_setup(app, p, form),
         (_, Some(form)) => setup(app, p, form),
@@ -97,7 +109,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     col.push(body).into()
 }
 
-fn error_banner<'a>(p: Palette, e: String) -> Element<'a, Message> {
+pub(super) fn error_banner<'a>(p: Palette, e: String) -> Element<'a, Message> {
     container(
         row![
             icons::icon(Icon::Alert, theme::ICON, p.status.fail),
@@ -116,7 +128,7 @@ fn error_banner<'a>(p: Palette, e: String) -> Element<'a, Message> {
     .into()
 }
 
-fn sub_heading<'a>(p: Palette, title: String, body: String) -> Element<'a, Message> {
+pub(super) fn sub_heading<'a>(p: Palette, title: String, body: String) -> Element<'a, Message> {
     column![
         text(title)
             .size(theme::SIZE_SECTION)
@@ -140,13 +152,23 @@ fn empty<'a>(p: Palette) -> Element<'a, Message> {
                 .size(theme::SIZE_BODY)
                 .color(p.n.ink_2),
             Space::new().height(theme::S2),
-            icon_button(
-                p,
-                Icon::Plus,
-                t("backup-set-up"),
-                Palette::button_primary,
-                Some(Message::Backup(Bx::StartSetup)),
-            ),
+            row![
+                icon_button(
+                    p,
+                    Icon::Plus,
+                    t("backup-set-up"),
+                    Palette::button_primary,
+                    Some(Message::Backup(Bx::StartSetup)),
+                ),
+                icon_button(
+                    p,
+                    Icon::Undo,
+                    t("restore-start"),
+                    Palette::button_secondary,
+                    Some(Message::Restore(crate::restore_ui::Rx::Start)),
+                ),
+            ]
+            .spacing(theme::S3),
         ]
         .spacing(theme::S3),
     )
@@ -156,7 +178,7 @@ fn empty<'a>(p: Palette) -> Element<'a, Message> {
     .into()
 }
 
-fn kind_label(k: Kind) -> String {
+pub(super) fn kind_label(k: Kind) -> String {
     match k {
         Kind::Folder => t("backup-kind-folder"),
         Kind::S3 => t("backup-kind-s3"),
@@ -165,7 +187,7 @@ fn kind_label(k: Kind) -> String {
     }
 }
 
-fn input<'a>(
+pub(super) fn input<'a>(
     p: Palette,
     label: String,
     placeholder: &str,
@@ -208,7 +230,7 @@ fn field<'a>(
     )
 }
 
-fn check<'a>(
+pub(super) fn check<'a>(
     p: Palette,
     label: String,
     on: bool,

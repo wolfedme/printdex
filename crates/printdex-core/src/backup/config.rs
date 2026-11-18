@@ -72,7 +72,7 @@ pub struct TargetCheck {
 
 const SCHEDULE_KEY: &str = "backup_schedule";
 
-fn kind(t: &Target) -> &'static str {
+pub(crate) fn kind(t: &Target) -> &'static str {
     match t {
         Target::Folder { .. } => "folder",
         Target::S3 { .. } => "s3",

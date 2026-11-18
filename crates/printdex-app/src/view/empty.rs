@@ -3,14 +3,14 @@
 use iced::widget::{button, column, container, row, text};
 use iced::{Alignment, Element, Length};
 
-use crate::app::Message;
+use crate::app::{App, Message};
 use crate::i18n::{Arg, t, t_args};
 use crate::icons::{self, Icon};
 use crate::theme::{self, Palette};
 
 const BODY_WIDTH: f32 = 360.0;
 
-pub fn no_library<'a>(p: Palette) -> Element<'a, Message> {
+pub fn no_library<'a>(app: &App, p: Palette) -> Element<'a, Message> {
     let add = button(
         row![
             icons::icon(Icon::FolderPlus, theme::ICON, p.t.on_primary),
@@ -37,7 +37,20 @@ pub fn no_library<'a>(p: Palette) -> Element<'a, Message> {
             .color(p.n.ink_2)
             .width(BODY_WIDTH)
             .align_x(Alignment::Center),
-        add,
+        if app.offers_restore() {
+            row![
+                add,
+                button(text(t("restore-start")).size(theme::SIZE_BODY))
+                    .height(theme::CONTROL_HEIGHT)
+                    .padding([8.0, theme::S5])
+                    .style(move |_, status| p.button_secondary(status))
+                    .on_press(Message::Restore(crate::restore_ui::Rx::Start)),
+            ]
+            .spacing(theme::S3)
+            .into()
+        } else {
+            Element::from(add)
+        },
     ])
 }
 

@@ -550,3 +550,53 @@ backup-error-secrets = Enter the backup passphrase first.
 backup-error-no-repository = There is no Printdex backup at that target.
 backup-error-snapshot = That snapshot no longer exists.
 backup-error-check = The check found problems in the backup.
+
+## Restore
+restore-start = Restore from backup
+restore-title = Restore from backup
+restore-body = Where are your backups? Printdex lists the points in time it finds there.
+restore-encrypted = The backup is encrypted
+restore-encrypted-body = Turn on if you set a passphrase when you set up backups.
+restore-find = Find backups
+restore-finding = Looking…
+restore-none-found = No Printdex backups were found there.
+restore-pick-title = Pick a point in time
+restore-pick-body = Newest first. Your tags, collections, recipes, print log, photos and settings come back as they were then.
+restore-this-computer = This computer
+restore-other-computer = Another computer
+restore-snapshot-size = { $files ->
+    [one] one file
+   *[other] { $files } files
+} · { $size }
+restore-replaces = This replaces Printdex’s data on this computer. The current data is kept aside until the next backup.
+restore-other-warning = This backup came from another computer.
+restore-go = Restore
+restore-restoring = Restoring…
+restore-done-title = Restored
+restore-done-body = Printdex restarts to finish. Afterwards it asks where each library lives now.
+restore-restart = Restart Printdex
+restore-where = Where is { $library } now?
+restore-where-body = It was at { $path }.
+restore-where-pick = Where is { $library } now?
+restore-relinking = Scanning…
+restore-here = It’s already here
+restore-files = Restore files from backup
+restore-files-pick = Restore the files of { $library } into…
+restore-skip = Skip for now
+restore-model = Restore from backup…
+restore-model-title = Restore from backup
+restore-close = Close
+restore-model-loading = Looking for backups of this model…
+restore-model-none = No backup holds this model yet.
+restore-model-comparing = Comparing with the files here…
+restore-model-same = The files here match this backup.
+restore-file-changed = Changed
+restore-file-missing = Missing
+restore-model-trash = Files that differ go to the trash first; nothing is overwritten.
+restore-model-done = { $count ->
+    [one] Restored one file.
+   *[other] Restored { $count } files.
+}
+restore-model-here = Restore here
+restore-model-elsewhere = Restore to another folder…
+restore-model-pick = Restore a copy into…

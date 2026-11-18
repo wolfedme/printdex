@@ -156,6 +156,8 @@ pub struct App {
     pub updates: crate::updates::Updates,
     /// Settings › Backup and the sidebar status line.
     pub backup: crate::backup_ui::BackupUi,
+    /// Restore wizard, library relinks and single-model restore.
+    pub restore: crate::restore_ui::RestoreUi,
     /// Watches libraries for changes and offline shares while the app runs.
     pub monitor: Option<Arc<printdex_core::Monitor>>,
     pub boot: Boot,
@@ -209,6 +211,7 @@ pub enum Message {
     Files(crate::files::Fx),
     Updates(crate::updates::Ux),
     Backup(crate::backup_ui::Bx),
+    Restore(crate::restore_ui::Rx),
     Libraries(Result<LibrarySnapshot, Arc<CoreError>>),
     Engine(EngineEvent),
     SearchChanged(String),
@@ -293,6 +296,7 @@ impl App {
             monitor: None,
             updates: crate::updates::Updates::default(),
             backup: crate::backup_ui::BackupUi::default(),
+            restore: crate::restore_ui::RestoreUi::default(),
             files: crate::files::FilesUi {
                 apps,
                 ..Default::default()
@@ -536,11 +540,13 @@ impl App {
                     self.apply_cache_limit(),
                     self.load_lists(),
                     self.start_backups(),
+                    self.load_pending(),
                 ])
             }
             Message::Files(f) => self.on_files(f),
             Message::Updates(u) => self.on_updates(u),
             Message::Backup(b) => self.on_backup(b),
+            Message::Restore(r) => self.on_restore(r),
             Message::MonitorStarted(monitor) => {
                 self.monitor = Some(monitor);
                 Task::none()
@@ -916,6 +922,9 @@ impl App {
                     self.org.data = None;
                     self.org.notes_md.clear();
                 }
+                if self.restore.model.model != Some(id) {
+                    self.restore.model = crate::restore_ui::ModelRestore::default();
+                }
                 Task::batch([self.load_model(id), self.load_data(id)])
             }
             Message::ModelLoaded(id, result) => {
@@ -1066,7 +1075,7 @@ impl App {
         }
     }
 
-    fn load_model(&self, id: ModelId) -> Task<Message> {
+    pub(crate) fn load_model(&self, id: ModelId) -> Task<Message> {
         let Some(engine) = self.engine.clone() else {
             return Task::none();
         };
@@ -1342,7 +1351,7 @@ impl App {
         self.error = Some(error_text(e));
     }
 
-    fn load_libraries(&self) -> Task<Message> {
+    pub(crate) fn load_libraries(&self) -> Task<Message> {
         let Some(engine) = self.engine.clone() else {
             return Task::none();
         };
