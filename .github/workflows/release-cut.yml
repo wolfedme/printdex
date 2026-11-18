@@ -1,6 +1,6 @@
 name: release cut
 
-# Every merge into main is a release (#109). This works out the next version
+# Every merge of dev (or a hotfix/* branch) into main is a release (#109). This works out the next version
 # from the conventional commits since the last tag (git-cliff), bumps
 # Cargo.toml, rewrites CHANGELOG.md, tags vX.Y.Z, starts release.yml for the
 # tag (installers, signed update feeds, draft GitHub release with the notes)
@@ -35,10 +35,25 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+      - name: Release only merges from dev or hotfix/*
+        id: gate
+        env:
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          first="${MESSAGE%%$'\n'*}"
+          branch=$(sed -n 's|^Merge pull request #[0-9]* from [^/]*/||p' <<< "$first")
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch || "$branch" == dev || "$branch" == hotfix/* ]]; then
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Not a release: '$first'" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: taiki-e/install-action@v2
+        if: steps.gate.outputs.go == 'true'
         with:
           tool: git-cliff
       - name: Commit and tag the release
+        if: steps.gate.outputs.go == 'true'
         id: cut
         run: |
           git config user.name "github-actions[bot]"
@@ -53,6 +68,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run release.yml --ref "${{ steps.cut.outputs.tag }}"
       - name: Merge main back into dev
+        if: steps.gate.outputs.go == 'true'
         run: |
           git fetch origin dev
           git checkout -B dev origin/dev
