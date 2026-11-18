@@ -328,7 +328,8 @@ impl Engine {
         self.db.count_models(scope, query, filter).await
     }
 
-    /// Model `id` with its present files; `None` when it is gone.
+    /// Model `id` with its present files (a missing model: the files it
+    /// last had, and `missing_since` set); `None` when it was forgotten.
     pub async fn model(&self, id: ModelId) -> Result<Option<ModelDetail>> {
         self.db.model_detail(id).await
     }

@@ -7,7 +7,7 @@ mod model;
 mod organize;
 mod preview;
 mod prints;
-mod settings;
+pub mod settings;
 mod sidebar;
 mod statusbar;
 mod toolbar;

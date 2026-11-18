@@ -252,6 +252,8 @@ pub enum Message {
     OpenFile(PathBuf),
     /// Show a file or folder in the OS file manager.
     ShowInFolder(PathBuf),
+    /// Opens the folder a missing model was in (or its closest parent).
+    ShowWhereItWas(PathBuf),
     Launched(Result<(), Arc<std::io::Error>>),
     SettingsChanged(Settings),
     /// A window frame while something animates.
@@ -918,6 +920,7 @@ impl App {
             },
             Message::OpenFile(path) => launch(move || opener::open(&path)),
             Message::ShowInFolder(path) => launch(move || opener::reveal(&path)),
+            Message::ShowWhereItWas(path) => launch(move || opener::open(nearest_existing(&path))),
             Message::Launched(Ok(())) => Task::none(),
             Message::Launched(Err(e)) => {
                 tracing::warn!(error = %e, "could not hand the file to the OS");
@@ -1347,6 +1350,14 @@ impl App {
 }
 
 /// Runs an OS hand-off (open, reveal) off the UI thread.
+/// `path`, or its closest ancestor that still exists (a missing model's
+/// folder is gone; its parent usually is not).
+fn nearest_existing(path: &std::path::Path) -> PathBuf {
+    let mut p = path.to_path_buf();
+    while !p.exists() && p.pop() {}
+    p
+}
+
 pub(crate) fn launch(
     f: impl FnOnce() -> Result<(), opener::OpenError> + Send + 'static,
 ) -> Task<Message> {
@@ -1874,6 +1885,7 @@ mod tests {
             kind: ModelKind::Folder,
             number: Some(1),
             created_at: 0,
+            missing_since: None,
             parts: parts
                 .iter()
                 .map(|p| PartInfo {
@@ -2187,6 +2199,77 @@ mod tests {
         for p in &parts {
             assert!(seen.contains(p));
         }
+    }
+
+    #[test]
+    fn forget_requires_confirmation() {
+        let mut a = app();
+        let id = ModelId::new();
+        let _ = a.update(Message::OpenModel(id));
+        let d = ModelDetail {
+            missing_since: Some(1),
+            ..detail(id, &["a.stl"])
+        };
+        let _ = a.update(Message::ModelLoaded(id, Ok(Some(d))));
+        // Without asking first, Forget does nothing.
+        let _ = a.update(Message::Org(Org::ConfirmForget(id)));
+        assert!(!a.org.confirm_forget);
+        let _ = a.update(Message::Org(Org::AskForget));
+        assert!(a.org.confirm_forget);
+        // Esc backs out of the question, not out of the model.
+        let _ = a.update(Message::Escape);
+        assert!(!a.org.confirm_forget);
+        assert!(matches!(a.model, Some(ModelView::Loaded { .. })));
+        let _ = a.update(Message::Org(Org::AskForget));
+        let _ = a.update(Message::Org(Org::ConfirmForget(id)));
+        assert!(!a.org.confirm_forget, "asked once, done");
+    }
+
+    #[test]
+    fn forgotten_model_closes_its_view() {
+        let mut a = app();
+        let id = ModelId::new();
+        let _ = a.update(Message::OpenModel(id));
+        let _ = a.update(Message::ModelLoaded(id, Ok(Some(detail(id, &["a.stl"])))));
+        let _ = a.update(Message::Engine(EngineEvent::ModelForgotten(id)));
+        assert!(a.model.is_none());
+    }
+
+    #[test]
+    fn change_mode_saved_per_library() {
+        let mut a = app();
+        let lib = library("NAS");
+        let other = library("Desk");
+        a.libraries.push(lib.clone());
+        a.libraries.push(other.clone());
+        let changed = Library {
+            change_mode: printdex_core::ChangeMode::Every(60),
+            kind: printdex_core::LibraryKind::Network,
+            ..lib.clone()
+        };
+        let _ = a.update(Message::Engine(EngineEvent::LibraryChanged(changed)));
+        assert_eq!(
+            a.libraries[0].change_mode,
+            printdex_core::ChangeMode::Every(60)
+        );
+        assert_eq!(a.libraries[1].change_mode, printdex_core::ChangeMode::Auto);
+        assert_eq!(
+            crate::view::settings::change_summary(&a.libraries[0]),
+            "Network share, checked every 60 minutes"
+        );
+        assert_eq!(
+            crate::view::settings::change_summary(&a.libraries[1]),
+            "Local folder, watched for changes"
+        );
+        let shares = Library {
+            kind: printdex_core::LibraryKind::Network,
+            ..other
+        };
+        assert_eq!(
+            crate::view::settings::change_summary(&shares),
+            "Network share, checked every 15 minutes"
+        );
+        assert_eq!(crate::view::settings::mode_choices().len(), 6);
     }
 
     #[test]

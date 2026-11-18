@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id as \"id!: PartId\", rel_path, format, size,\n                      CASE WHEN measured_fp IS fp_hash THEN dim_x END as \"dim_x?: f64\",\n                      CASE WHEN measured_fp IS fp_hash THEN dim_y END as \"dim_y?: f64\",\n                      CASE WHEN measured_fp IS fp_hash THEN dim_z END as \"dim_z?: f64\",\n                      CASE WHEN measured_fp IS fp_hash THEN triangles END as \"triangles?: i64\"\n               FROM parts\n               WHERE model_id = ? AND missing_since IS NULL ORDER BY rel_path",
+  "query": "SELECT id as \"id!: PartId\", rel_path, format, size,\n                      CASE WHEN measured_fp IS fp_hash THEN dim_x END as \"dim_x?: f64\",\n                      CASE WHEN measured_fp IS fp_hash THEN dim_y END as \"dim_y?: f64\",\n                      CASE WHEN measured_fp IS fp_hash THEN dim_z END as \"dim_z?: f64\",\n                      CASE WHEN measured_fp IS fp_hash THEN triangles END as \"triangles?: i64\"\n               FROM parts\n               WHERE model_id = ? AND (missing_since IS NULL OR ?) ORDER BY rel_path",
   "describe": {
     "columns": [
       {
@@ -73,7 +73,7 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 2
     },
     "nullable": [
       true,
@@ -86,5 +86,5 @@
       true
     ]
   },
-  "hash": "d100d931c145356d2cdcc60970317861b16db483182e336aaaf57573e90cda07"
+  "hash": "8f85ebcea841d86381e5cd986800fd83f37a760107b717afc1df019b1b379900"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id as \"id!: AssetId\", rel_path, size FROM assets\n               WHERE model_id = ? AND missing_since IS NULL ORDER BY rel_path",
+  "query": "SELECT id as \"id!: AssetId\", rel_path, size FROM assets\n               WHERE model_id = ? AND (missing_since IS NULL OR ?) ORDER BY rel_path",
   "describe": {
     "columns": [
       {
@@ -38,7 +38,7 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 2
     },
     "nullable": [
       true,
@@ -46,5 +46,5 @@
       false
     ]
   },
-  "hash": "2be8e86a080cd67eccff785039b154d359925edd308d07160a9b124ee33e765e"
+  "hash": "d1314510cfbc00c48b46ad2c33db73a5a1e9218688c8081e7cfc56b1d67a18ee"
 }

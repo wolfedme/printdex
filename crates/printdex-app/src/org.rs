@@ -8,8 +8,8 @@ use std::sync::Arc;
 use iced::Task;
 use iced::widget::{markdown, operation, text_editor};
 use printdex_core::{
-    CollectionId, CollectionInfo, CoreError, Engine, LibraryId, ModelData, ModelId, Scope,
-    SmartCounts, TagCount,
+    ChangeMode, CollectionId, CollectionInfo, CoreError, Engine, LibraryId, ModelData, ModelId,
+    Scope, SmartCounts, TagCount,
 };
 
 use crate::app::{App, Message, Screen};
@@ -78,6 +78,8 @@ pub struct OrgState {
     pub all_tags: bool,
     /// A neutral one-line notice (another install's sidecars).
     pub notice: Option<String>,
+    /// The open missing model's Forget asks for confirmation.
+    pub confirm_forget: bool,
 }
 
 impl OrgState {
@@ -94,6 +96,7 @@ impl OrgState {
             || self.collection_menu
             || self.new_collection.is_some()
             || self.collection_edit.is_some()
+            || self.confirm_forget
     }
 
     /// Closes every editor and menu.
@@ -104,6 +107,7 @@ impl OrgState {
         self.collection_menu = false;
         self.new_collection = None;
         self.collection_edit = None;
+        self.confirm_forget = false;
     }
 
     /// Existing tags that start with (or contain) what was typed, not yet on
@@ -170,6 +174,10 @@ pub enum Org {
     /// Close editors and menus (Esc, Cancel buttons).
     Cancel,
     SetSidecars(LibraryId, bool),
+    SetChangeMode(LibraryId, ChangeMode),
+    /// Forget the open missing model: asks first.
+    AskForget,
+    ConfirmForget(ModelId),
     ShowAllTags(bool),
     DismissNotice,
 }
@@ -521,6 +529,20 @@ impl App {
             Org::SetSidecars(lib, on) => run(engine, move |e| async move {
                 e.set_sidecars(lib, on).await.map(|_| ())
             }),
+            Org::SetChangeMode(lib, mode) => run(engine, move |e| async move {
+                e.set_change_mode(lib, mode).await.map(|_| ())
+            }),
+            Org::AskForget => {
+                self.org.cancel_edits();
+                self.org.confirm_forget = true;
+                Task::none()
+            }
+            Org::ConfirmForget(id) => {
+                if !std::mem::take(&mut self.org.confirm_forget) {
+                    return Task::none();
+                }
+                run(engine, move |e| async move { e.forget_model(id).await })
+            }
             Org::ShowAllTags(all) => {
                 self.org.all_tags = all;
                 Task::none()

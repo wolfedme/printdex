@@ -732,6 +732,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn missing_filter_lists_missing_models() {
+        let f = fx().await;
+        f.model("Red Dragon", "Red Dragon", false).await;
+        f.model("Gone Dragon", "Gone Dragon", true).await;
+        let missing = Scope::Smart(Smart::Missing);
+        let hits =
+            f.db.search_models_in(
+                &missing,
+                "",
+                &SearchFilter::default(),
+                SortOrder::default(),
+                10,
+            )
+            .await
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].name, "Gone Dragon");
+        assert!(hits[0].missing);
+        // Search narrows the Missing scope like any other.
+        assert_eq!(
+            f.db.count_models(&missing, "red", &SearchFilter::default())
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(f.db.smart_counts().await.unwrap().missing, 1);
+        // Everywhere else, missing models stay hidden.
+        assert_eq!(
+            f.db.count_models(&Scope::All, "dragon", &SearchFilter::default())
+                .await
+                .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
     async fn library_counts_per_library() {
         let f = fx().await;
         let other = f.second_library().await;

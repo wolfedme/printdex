@@ -17,6 +17,7 @@ use crate::app::{App, Message, ModelView};
 use crate::format::{file_name, group, parent_path, size};
 use crate::i18n::{Arg, t, t_args};
 use crate::icons::{self, Icon};
+use crate::org::Org;
 use crate::theme::{self, Palette};
 use crate::viewer::Load;
 
@@ -181,9 +182,14 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
             .push(text(seg.to_owned()).size(theme::SIZE_CAPTION));
     }
     let current = d.parts.get(part);
-    let reveal = app.model_path(&d.rel_path).map(Message::ShowInFolder);
+    let gone = d.missing_since.is_some();
+    let reveal = app
+        .model_path(&d.rel_path)
+        .filter(|_| !gone)
+        .map(Message::ShowInFolder);
     let open = current
         .and_then(|pt| app.model_path(&pt.rel_path))
+        .filter(|_| !gone)
         .map(Message::OpenFile);
     let header = container(
         column![
@@ -223,6 +229,10 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
     .padding([theme::S5, theme::S8])
     .width(Length::Fill)
     .style(move |_| p.bar());
+    let header: Element<'a, Message> = match d.missing_since {
+        Some(since) => column![header, missing_banner(app, p, d, since)].into(),
+        None => header.into(),
+    };
 
     // Main column: preview, parts, other files.
     let caption = current.map_or_else(String::new, |pt| {
@@ -536,6 +546,68 @@ fn detail_row<'a>(p: Palette, label: String, value: String, mono: bool) -> Eleme
     .spacing(theme::S4)
     .align_y(Alignment::Center)
     .into()
+}
+
+/// Under the header of a missing model: since when, where it was, and
+/// Forget (asks first).
+fn missing_banner<'a>(
+    app: &'a App,
+    p: Palette,
+    d: &'a ModelDetail,
+    since: i64,
+) -> Element<'a, Message> {
+    let where_it_was = app.model_path(&d.rel_path).map(Message::ShowWhereItWas);
+    let content: Element<'a, Message> = if app.org.confirm_forget {
+        row![
+            icons::icon(Icon::Alert, theme::ICON, p.status.fail),
+            text(t_args(
+                "model-forget-confirm",
+                &[("name", Arg::str(d.name.clone()))]
+            ))
+            .size(theme::SIZE_BODY)
+            .color(p.n.ink)
+            .width(Length::Fill),
+            small_button(p, t("settings-cancel"), Message::Org(Org::Cancel)),
+            button(
+                text(t("model-forget-yes"))
+                    .size(theme::SIZE_CAPTION)
+                    .font(theme::FONT_STRONG)
+            )
+            .padding([5.0, theme::S4])
+            .style(move |_, status| p.button_danger(status))
+            .on_press(Message::Org(Org::ConfirmForget(d.id))),
+        ]
+        .spacing(theme::S4)
+        .align_y(Alignment::Center)
+        .into()
+    } else {
+        let mut r = row![
+            icons::icon(Icon::Offline, theme::ICON, p.status.offline),
+            text(t_args(
+                "model-missing-since",
+                &[("date", Arg::str(date(since)))]
+            ))
+            .size(theme::SIZE_BODY)
+            .color(p.n.ink)
+            .width(Length::Fill),
+        ]
+        .spacing(theme::S4)
+        .align_y(Alignment::Center);
+        if let Some(msg) = where_it_was {
+            r = r.push(small_button(p, t("model-where-it-was"), msg));
+        }
+        r.push(small_button(
+            p,
+            t("model-forget"),
+            Message::Org(Org::AskForget),
+        ))
+        .into()
+    };
+    container(content)
+        .padding([theme::S4, theme::S8])
+        .width(Length::Fill)
+        .style(move |_| p.error_line())
+        .into()
 }
 
 fn missing<'a>(p: Palette) -> Element<'a, Message> {
