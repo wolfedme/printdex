@@ -1,6 +1,8 @@
 //! Views: turn [`App`] state into widgets. No logic beyond layout.
 
+mod dropdown;
 mod empty;
+mod files;
 mod grid;
 mod list;
 mod model;
@@ -16,7 +18,7 @@ mod widgets;
 
 pub use organize::notes_editor_id;
 
-use iced::widget::{Space, button, column, container, row, text};
+use iced::widget::{Space, button, column, container, row, stack, text};
 use iced::{Alignment, Element, Length};
 
 use crate::app::{App, Boot, Message, Screen};
@@ -64,7 +66,14 @@ fn shell(app: &App, p: Palette) -> Element<'_, Message> {
             crate::viewer::Msg::Software,
         )));
     }
-    r.into()
+    let mut layers = stack![r];
+    if let Some(toast) = files::toast(app, p) {
+        layers = layers.push(toast);
+    }
+    if let Some(dialog) = files::dialog(app, p) {
+        layers = layers.push(dialog);
+    }
+    layers.into()
 }
 
 fn library(app: &App, p: Palette) -> Element<'_, Message> {
@@ -91,15 +100,17 @@ fn library(app: &App, p: Palette) -> Element<'_, Message> {
     if app.filter_menu {
         top = top.push(toolbar::filter_bar(app, p)).push(hairline(p));
     }
-    column![
+    let mut col = column![
         top,
         container(content)
             .height(Length::Fill)
             .style(move |_| p.ground()),
         hairline(p),
-        statusbar::view(app, p),
-    ]
-    .into()
+    ];
+    if let Some(bar) = files::selection_bar(app, p) {
+        col = col.push(bar).push(hairline(p));
+    }
+    col.push(statusbar::view(app, p)).into()
 }
 
 fn centered<'a>(p: Palette, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {

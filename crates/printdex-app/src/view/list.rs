@@ -75,7 +75,11 @@ fn heading<'a>(p: Palette, label: String) -> iced::widget::Text<'a> {
 }
 
 fn list_row<'a>(app: &App, p: Palette, hit: &ModelHit) -> Element<'a, Message> {
-    let selected = app.motion.selection(hit.id, app.selected);
+    let selected = if !app.files.picked.is_empty() {
+        f32::from(u8::from(app.picked(hit.id)))
+    } else {
+        app.motion.selection(hit.id, app.selected)
+    };
     let hovered = app.hovered == Some(hit.id);
     let id = hit.id;
     let thumb = container(

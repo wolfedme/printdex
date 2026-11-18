@@ -56,6 +56,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
             Icon::Settings,
             t("settings-appearance"),
         ),
+        (SettingsSection::Apps, Icon::App, t("settings-apps")),
         (
             SettingsSection::Storage,
             Icon::Layers,
@@ -92,6 +93,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     let content = match app.settings_section {
         SettingsSection::Libraries => libraries(app, p),
         SettingsSection::Appearance => appearance(app, p),
+        SettingsSection::Apps => apps(app, p),
         SettingsSection::Storage => storage(app, p),
         SettingsSection::About => about(app, p),
     };
@@ -696,6 +698,51 @@ fn limit_label(mb: u32) -> String {
     } else {
         format!("{mb} MB")
     }
+}
+
+/// Settings › Apps: which app opens each printable format.
+fn apps(app: &App, p: Palette) -> Element<'_, Message> {
+    use crate::files::Fx;
+    let mut col =
+        column![heading(p, t("settings-apps"), t("settings-apps-body"))].spacing(theme::S5);
+    for f in crate::apps::FORMATS {
+        let chosen = app.files.apps.get(f);
+        let body = match chosen {
+            Some(a) => t_args(
+                "settings-apps-chosen",
+                &[
+                    ("app", Arg::str(crate::apps::app_name(a))),
+                    ("path", Arg::str(a.display().to_string())),
+                ],
+            ),
+            None => t("settings-apps-default"),
+        };
+        let mut controls = row![small_button(
+            p,
+            t("settings-apps-choose"),
+            Message::Files(Fx::ChooseApp(f))
+        )]
+        .spacing(theme::S2);
+        if chosen.is_some() {
+            controls = controls.push(small_button(
+                p,
+                t("settings-apps-reset"),
+                Message::Files(Fx::ResetApp(f)),
+            ));
+        }
+        let label = match f {
+            printdex_core::PrintableFormat::Stl => "STL",
+            printdex_core::PrintableFormat::ThreeMf => "3MF",
+            printdex_core::PrintableFormat::Obj => "OBJ",
+        };
+        col = col.push(widgets::hairline(p)).push(setting(
+            p,
+            t_args("settings-apps-format", &[("format", Arg::str(label))]),
+            body,
+            controls.into(),
+        ));
+    }
+    col.into()
 }
 
 fn storage(app: &App, p: Palette) -> Element<'_, Message> {

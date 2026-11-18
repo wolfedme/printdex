@@ -55,7 +55,11 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
 fn pane<'a>(app: &App, p: Palette, m: &GridMetrics, hit: &ModelHit) -> Element<'a, Message> {
     let hovered = app.hovered == Some(hit.id);
     let motion = &app.motion;
-    let selection = motion.selection(hit.id, app.selected);
+    let selection = if !app.files.picked.is_empty() {
+        f32::from(u8::from(app.picked(hit.id)))
+    } else {
+        motion.selection(hit.id, app.selected)
+    };
     let inner_w = (m.pane_width - 2.0 * PANE_PADDING - 2.0 * theme::S5).max(0.0);
     let inner_h = (m.well_height - 2.0 * theme::S5).max(0.0);
 

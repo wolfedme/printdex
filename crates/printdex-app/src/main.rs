@@ -1,6 +1,8 @@
 //! Printdex desktop app.
 
 mod app;
+mod apps;
+mod files;
 mod filters;
 mod format;
 mod grid;

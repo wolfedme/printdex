@@ -41,6 +41,9 @@ status-added = Added { $date }
 
 model-show-in-folder = Show in folder
 model-open = Open
+model-open-in = Open in { $app }
+model-open-default = Open with default app
+model-open-choose = Choose app for { $format } files…
 model-parts = Parts
 model-parts-summary = { $count ->
     [one] 1 file
@@ -151,6 +154,14 @@ settings-reduce-motion = Reduce motion
 settings-reduce-motion-body = No lifting or scaling. Colour fades stay.
 settings-about = About
 settings-storage = Storage
+settings-apps = Apps
+settings-apps-body = Open models straight in your slicer. Pick an app per file type; Printdex hands it the files and nothing else.
+settings-apps-format = { $format } files
+settings-apps-default = The system's default app
+settings-apps-chosen = { $app } · { $path }
+settings-apps-choose = Choose…
+settings-apps-reset = Use default
+apps-choose = Choose an app
 settings-cache-limit = Preview cache size
 settings-cache-limit-body = Thumbnails are kept on this computer. When the cache is full, the ones you haven’t seen for longest go first.
 settings-cache = Preview cache
@@ -338,3 +349,57 @@ card-never-printed = Never printed
 card-printed = Printed { $n }×
 list-last-print = Last print
 filter-material = Material
+
+## File actions
+files-rename = Rename
+files-move = Move to…
+files-trash = Move to trash
+files-clear = Clear selection
+files-selected = { $count ->
+    [one] 1 model selected
+   *[other] { $count } models selected
+}
+files-rename-title = Rename model
+files-rename-yes = Rename
+files-move-pick = Choose a folder in one of your libraries
+files-move-where = { $folder } in { $library }
+files-move-title = { $count ->
+    [one] Move 1 model to { $where }?
+   *[other] Move { $count } models to { $where }?
+}
+files-move-yes = Move
+files-trash-title = { $count ->
+    [one] Move 1 model to the trash?
+   *[other] Move { $count } models to the trash?
+}
+files-trash-body = The files go to the system trash. Models you tagged, noted or printed stay under Missing with everything you wrote; the rest are forgotten.
+files-trash-yes = Move to trash
+files-and-more = { $count ->
+    [one] , and 1 more
+   *[other] , and { $count } more
+}
+files-renamed = Renamed to { $name }
+files-moved = { $count ->
+    [one] Moved { $name }
+   *[other] Moved { $count } models
+}
+files-trashed = { $count ->
+    [one] Moved { $name } to the trash
+   *[other] Moved { $count } models to the trash
+}
+files-trashed-finder = { $count ->
+    [one] Moved { $name } to the trash. Restore it from the Trash in Finder.
+   *[other] Moved { $count } models to the trash. Restore them from the Trash in Finder.
+}
+files-undone = Undone
+files-undo = Undo
+files-error-name = That name can't be used. Avoid / \ : * ? " < > | and names starting with a dot.
+files-error-taken = Something named { $name } is already there.
+files-error-offline = The destination folder can't be reached right now.
+files-error-source-offline = The model's library can't be reached right now.
+files-error-busy = The library is being scanned. Try again in a moment.
+files-error-trash = The system trash can't be used for this folder.
+files-error-undo = There is nothing to undo.
+files-error-gone = The model's files are no longer where Printdex saw them.
+files-error-outside = That folder is not in one of your libraries.
+files-error-other = The files could not be changed. Nothing was lost; see the log for details.
