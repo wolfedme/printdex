@@ -129,6 +129,7 @@ impl Engine {
             path: data_dir.to_path_buf(),
             source,
         })?;
+        crate::backup::restore::apply_staged(data_dir)?;
         let db = Db::open(&data_dir.join("printdex.db")).await?;
         let (events, _) = broadcast::channel(EVENT_CAPACITY);
         let thumbs = ThumbnailService::start(db.clone(), events.clone(), cache_dir);

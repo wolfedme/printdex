@@ -278,4 +278,75 @@ impl Db {
         .await?;
         Ok(())
     }
+
+    /// Replaces this install's id (a restored database gets a new one).
+    pub async fn set_install_id(&self, id: &str) -> Result<()> {
+        self.set_meta_json_raw("install_id", id).await
+    }
+
+    async fn set_meta_json_raw(&self, key: &str, value: &str) -> Result<()> {
+        sqlx::query!(
+            "INSERT INTO meta (key, value) VALUES (?, ?)
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            key,
+            value
+        )
+        .execute(self.writer())
+        .await?;
+        Ok(())
+    }
+
+    /// Library ids stored under `key` in `meta`.
+    pub async fn library_list(&self, key: &str) -> Result<Vec<LibraryId>> {
+        let ids: Vec<String> = self.meta_json(key).await?.unwrap_or_default();
+        Ok(ids
+            .iter()
+            .filter_map(|s| crate::ids::Uuid::parse_str(s).ok())
+            .map(LibraryId)
+            .collect())
+    }
+
+    pub async fn set_library_list(&self, key: &str, ids: &[LibraryId]) -> Result<()> {
+        let v: Vec<String> = ids.iter().map(ToString::to_string).collect();
+        self.set_meta_json(key, &v).await
+    }
+
+    /// Removes `id` from the list under `key`; whether it was there.
+    pub async fn take_from_library_list(&self, key: &str, id: LibraryId) -> Result<bool> {
+        let mut ids = self.library_list(key).await?;
+        let before = ids.len();
+        ids.retain(|l| *l != id);
+        if ids.len() == before {
+            return Ok(false);
+        }
+        self.set_library_list(key, &ids).await?;
+        Ok(true)
+    }
+
+    /// Writes everything to the main database file and closes the pools
+    /// (the file can then be moved).
+    pub async fn close(&self) {
+        let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+            .execute(self.writer())
+            .await;
+        self.reader().close().await;
+        self.writer().close().await;
+    }
+
+    /// Points library `id` at `path`.
+    pub async fn set_library_path(&self, id: LibraryId, path: &str) -> Result<()> {
+        let now = now_ms();
+        let r = sqlx::query!(
+            "UPDATE libraries SET path = ?, updated_at = ? WHERE id = ?",
+            path,
+            now,
+            id
+        )
+        .execute(self.writer())
+        .await?;
+        if r.rows_affected() == 0 {
+            return Err(CoreError::LibraryNotFound(id));
+        }
+        Ok(())
+    }
 }

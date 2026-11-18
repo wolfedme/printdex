@@ -6,6 +6,7 @@ pub mod config;
 mod data;
 mod remote;
 pub mod repo;
+pub mod restore;
 pub(crate) mod run;
 pub mod scheduler;
 pub mod secrets;
@@ -18,6 +19,7 @@ pub use repo::{
     BackupJob, Globs, KEEP, Keep, ProgressFn, Repo, RepoOptions, SnapshotFilter, SnapshotInfo,
     Target, TargetSecrets,
 };
+pub use restore::{FileChange, FileDiff, ModelRestoreDest, RELINK, RestoredData, SIDECARS_FROM_DB};
 pub use run::{BackupScope, DATA_TAG, RunSummary, models_tag};
 pub use scheduler::{BackupScheduler, SchedulerConfig};
 

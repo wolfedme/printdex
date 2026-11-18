@@ -454,15 +454,27 @@ async fn run_scan_with(
     if let Some(ctx) = sidecar_ctx
         && lib.sidecar_enabled
     {
-        let imported =
-            crate::sidecar::import_library(db, &lib.path, lib.id, &sidecar_files, ctx.install)
-                .await?;
-        sidecars_imported = imported.imported;
-        for id in imported.rewrite {
-            ctx.writer.queue(id);
-        }
-        if imported.foreign {
-            let _ = events.send(EngineEvent::SidecarForeign { library: lib.id });
+        if subtrees.is_none()
+            && db
+                .take_from_library_list(crate::backup::SIDECARS_FROM_DB, lib.id)
+                .await?
+        {
+            // Restored from a backup: the restored point in time wins over
+            // newer sidecars, which are rewritten from the database.
+            for s in db.sidecar_states(lib.id).await? {
+                ctx.writer.queue(s.id);
+            }
+        } else {
+            let imported =
+                crate::sidecar::import_library(db, &lib.path, lib.id, &sidecar_files, ctx.install)
+                    .await?;
+            sidecars_imported = imported.imported;
+            for id in imported.rewrite {
+                ctx.writer.queue(id);
+            }
+            if imported.foreign {
+                let _ = events.send(EngineEvent::SidecarForeign { library: lib.id });
+            }
         }
     }
 
