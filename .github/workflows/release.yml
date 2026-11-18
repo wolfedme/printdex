@@ -149,7 +149,7 @@ jobs:
   macos:
     name: package (macos)
     needs: version
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
