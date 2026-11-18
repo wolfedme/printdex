@@ -452,6 +452,8 @@ Groups: Libraries, Collections, Smart filters, Tags, with counts in tabular figu
 ### Recipe card and print log
 Recipe: a 14px pane with a 3-column grid of label (11px) over mono value, then notes with neutral lightbulb or info icons. Print log entries: 14px panes with status icon and word, date and printer, attempt number, and chips for the settings used.
 
+Per-part settings: the recipe card lists each part that differs as a mono file name plus what differs; clicking it opens the editor on that part. The editor's "Settings for" chips switch between Whole model and each part (a pencil marks parts with their own settings). On a part, empty fields show the whole model's value as placeholder, "Not set" reads "As model", and required flags and notes are hidden because they belong to the whole recipe.
+
 ### Badges and switches
 Library status badges: printed green on its wash, scanning in Signal Ink on Signal Wash, offline slate on `rule-soft`. Switch: 34 × 20px, `primary` when on.
 

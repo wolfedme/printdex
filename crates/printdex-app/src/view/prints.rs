@@ -264,9 +264,23 @@ pub fn recipe_card<'a>(p: Palette, data: &'a ModelData) -> Element<'a, Message> 
             .map(|(l, v, _)| format!("{l} {v}"))
             .collect();
         col = col.push(
-            text(format!("{}: {}", part.part, vals.join(", ")))
-                .size(theme::SIZE_CAPTION)
-                .color(p.n.ink_2),
+            button(
+                row![
+                    text(part.part.clone())
+                        .size(theme::SIZE_CAPTION)
+                        .font(theme::FONT_DATA)
+                        .color(p.n.ink),
+                    text(vals.join(", "))
+                        .size(theme::SIZE_CAPTION)
+                        .color(p.n.ink_2)
+                        .width(Length::Fill),
+                ]
+                .spacing(theme::S3),
+            )
+            .width(Length::Fill)
+            .padding([2.0, theme::S2])
+            .style(move |_, status| p.button_ghost(status))
+            .on_press(pr(Pr::OpenRecipePart(part.part.clone()))),
         );
     }
     pane(p, col)
@@ -528,10 +542,11 @@ fn field<'a>(
     label: String,
     input: Input,
     value: &'a str,
+    hint: &str,
     unit: Option<&'static str>,
     error: bool,
 ) -> Element<'a, Message> {
-    let mut inp = text_input("", value)
+    let mut inp = text_input(hint, value)
         .on_input(move |s| pr(Pr::Input(input, s)))
         .on_submit(pr(Pr::Save))
         .size(theme::SIZE_BODY)
@@ -579,6 +594,55 @@ fn suggestion_row<'a>(
     r.wrap().vertical_spacing(theme::S1).into()
 }
 
+/// Recipe editor: whether the fields are for the whole model or one part.
+fn part_picker<'a>(p: Palette, f: &'a LogForm) -> Element<'a, Message> {
+    let chip = |label: String, scope: Option<String>, marked: bool| {
+        let on = f.scope == scope;
+        let mut content = row![].spacing(theme::S2).align_y(Alignment::Center);
+        if marked {
+            // A part with settings of its own.
+            content = content.push(icons::icon(Icon::Rename, theme::ICON_CHIP, p.t.accent_ink));
+        }
+        let mono = scope.is_some();
+        content = content.push(text(label).size(theme::SIZE_CAPTION).font(if mono {
+            theme::FONT_DATA
+        } else {
+            theme::FONT_MEDIUM
+        }));
+        button(content)
+            .padding([3.0, theme::S4])
+            .style(move |_, status| {
+                if on {
+                    p.segment(true, status)
+                } else {
+                    p.button_secondary(status)
+                }
+            })
+            .on_press(pr(Pr::Scope(scope)))
+    };
+    let mut chips = row![chip(t("recipe-whole-model"), None, false)].spacing(theme::S2);
+    for part in &f.parts {
+        chips = chips.push(chip(
+            part.clone(),
+            Some(part.clone()),
+            f.part_has_settings(part),
+        ));
+    }
+    let caption = match &f.scope {
+        None => t("recipe-parts-caption"),
+        Some(part) => t_args("recipe-part-caption", &[("part", Arg::str(part.clone()))]),
+    };
+    column![
+        text(t("recipe-applies-to"))
+            .size(theme::SIZE_DATA)
+            .color(p.n.ink_2),
+        chips.wrap().vertical_spacing(theme::S2),
+        text(caption).size(theme::SIZE_CAPTION).color(p.n.ink_3),
+    ]
+    .spacing(theme::S2)
+    .into()
+}
+
 /// The "Log a print" form (or the attempt and recipe editors), replacing
 /// the side column.
 pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message> {
@@ -595,6 +659,10 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
     ));
     let mut body = column![head].spacing(theme::S5);
     let is_recipe = f.mode == FormMode::Recipe;
+
+    if is_recipe && f.has_part_choice() {
+        body = body.push(part_picker(p, f));
+    }
 
     if !is_recipe {
         let outcomes = [
@@ -657,6 +725,7 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
         t("form-printer"),
         Input::Printer,
         &f.printer,
+        &f.hint(Input::Printer),
         None,
         false,
     );
@@ -671,6 +740,7 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
                     t("form-date"),
                     Input::Date,
                     &f.date,
+                    &f.hint(Input::Date),
                     None,
                     has_error(f, Field::Date)
                 ),
@@ -694,6 +764,7 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
                 t("form-material"),
                 Input::Material,
                 &f.material,
+                &f.hint(Input::Material),
                 None,
                 false
             ),
@@ -702,6 +773,7 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
                 t("form-filament"),
                 Input::Filament,
                 &f.filament,
+                &f.hint(Input::Filament),
                 None,
                 false
             ),
@@ -725,6 +797,7 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
                 t("form-layer"),
                 Input::Layer,
                 &f.layer,
+                &f.hint(Input::Layer),
                 Some("mm"),
                 has_error(f, Field::Layer)
             ),
@@ -733,6 +806,7 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
                 t("form-nozzle"),
                 Input::Nozzle,
                 &f.nozzle,
+                &f.hint(Input::Nozzle),
                 Some("mm"),
                 has_error(f, Field::Nozzle)
             ),
@@ -741,6 +815,7 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
                 t("form-infill"),
                 Input::Infill,
                 &f.infill,
+                &f.hint(Input::Infill),
                 Some("%"),
                 has_error(f, Field::Infill)
             ),
@@ -754,6 +829,7 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
                 t("form-bed"),
                 Input::Bed,
                 &f.bed,
+                &f.hint(Input::Bed),
                 Some("°C"),
                 has_error(f, Field::Bed)
             ),
@@ -762,6 +838,7 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
                 t("form-hotend"),
                 Input::Hotend,
                 &f.hotend,
+                &f.hint(Input::Hotend),
                 Some("°C"),
                 has_error(f, Field::Hotend)
             ),
@@ -770,6 +847,7 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
                 t("form-walls"),
                 Input::Walls,
                 &f.walls,
+                &f.hint(Input::Walls),
                 None,
                 has_error(f, Field::Walls)
             ),
@@ -777,6 +855,12 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
         .spacing(theme::S4),
     );
     let supports = f.supports;
+    // On a part, "not set" means "as the whole model".
+    let unset = if f.scope.is_some() {
+        t("form-as-model")
+    } else {
+        t("form-unset")
+    };
     body = body.push(
         column![
             text(t("form-supports"))
@@ -785,7 +869,7 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
             segmented(
                 p,
                 &[
-                    (None, None, Some(t("form-unset"))),
+                    (None, None, Some(unset.clone())),
                     (Some(Supports::None), None, Some(t("supports-none"))),
                     (Some(Supports::Normal), None, Some(t("supports-normal"))),
                     (Some(Supports::Tree), None, Some(t("supports-tree"))),
@@ -804,7 +888,7 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
             segmented(
                 p,
                 &[
-                    (None, None, Some(t("form-unset"))),
+                    (None, None, Some(unset.clone())),
                     (Some(Adhesion::Skirt), None, Some(t("adhesion-skirt"))),
                     (Some(Adhesion::Brim), None, Some(t("adhesion-brim"))),
                     (Some(Adhesion::Raft), None, Some(t("adhesion-raft"))),
@@ -816,7 +900,15 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
         .spacing(theme::S1),
     );
 
-    if is_recipe {
+    if is_recipe && f.scope.is_some() {
+        body = body.push(row![widgets::icon_button(
+            p,
+            Icon::Undo,
+            t("recipe-part-clear"),
+            Palette::button_secondary,
+            Some(pr(Pr::ClearPart)),
+        )]);
+    } else if is_recipe {
         // Required flags and notes.
         let mut req = row![].spacing(theme::S2);
         for (key, label) in REQUIRABLE {
@@ -891,6 +983,7 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
                 t("form-duration"),
                 Input::Duration,
                 &f.duration,
+                &f.hint(Input::Duration),
                 None,
                 has_error(f, Field::Duration)
             )]

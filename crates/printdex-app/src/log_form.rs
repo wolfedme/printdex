@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use iced::widget::text_editor;
 use printdex_core::model_data::{self, Range};
 use printdex_core::{
-    Adhesion, Attempt, AttemptId, AttemptResult, CoreError, Material, NewAttempt, PrintSettings,
-    Recipe, RecipeNote, Supports,
+    Adhesion, Attempt, AttemptId, AttemptResult, CoreError, Material, NewAttempt, PartOverride,
+    PrintSettings, Recipe, RecipeNote, Supports,
 };
 
 use crate::i18n::{Arg, t, t_args};
@@ -75,6 +75,15 @@ pub struct LogForm {
     pub required: BTreeSet<String>,
     pub recipe_notes: Vec<RecipeNote>,
     pub new_note: String,
+    /// Recipe editor: part file names that can get their own settings.
+    pub parts: Vec<String>,
+    /// Recipe editor: the part whose settings the fields show, or `None`
+    /// for the whole model.
+    pub scope: Option<String>,
+    /// Whole-model settings, up to date while a part is shown.
+    model_settings: PrintSettings,
+    /// Per-part settings, up to date except for the part being shown.
+    overrides: Vec<PartOverride>,
     /// Settings the form does not show, kept as they were.
     kept: PrintSettings,
     kept_recipe: Recipe,
@@ -263,6 +272,10 @@ impl LogForm {
             required: BTreeSet::new(),
             recipe_notes: Vec::new(),
             new_note: String::new(),
+            parts: Vec::new(),
+            scope: None,
+            model_settings: PrintSettings::default(),
+            overrides: Vec::new(),
             kept: PrintSettings::default(),
             kept_recipe: Recipe::default(),
             error: None,
@@ -316,17 +329,126 @@ impl LogForm {
         f
     }
 
-    /// Editing the recipe.
-    pub fn recipe(r: Option<&Recipe>) -> LogForm {
+    /// Editing the recipe of a model made of `parts` (file names).
+    pub fn recipe(r: Option<&Recipe>, parts: &[String]) -> LogForm {
         let mut f = LogForm::blank(FormMode::Recipe);
         if let Some(r) = r {
             f.fill(&r.settings);
             f.printer = r.settings.printer.clone().unwrap_or_default();
             f.required = r.required.clone();
             f.recipe_notes = r.notes.clone();
+            f.model_settings = r.settings.clone();
+            f.overrides = r.parts.clone();
             f.kept_recipe = r.clone();
         }
+        let mut names: Vec<String> = Vec::new();
+        // Parts with settings whose file is gone still show, so their
+        // settings can be read and removed.
+        let saved = f.overrides.iter().map(|o| o.part.as_str());
+        for name in parts.iter().map(String::as_str).chain(saved) {
+            if !names.iter().any(|n| n == name) {
+                names.push(name.to_owned());
+            }
+        }
+        f.parts = names;
         f
+    }
+
+    /// Whether the recipe editor offers per-part settings: the model has
+    /// several parts, or a part already has settings.
+    pub fn has_part_choice(&self) -> bool {
+        self.parts.len() > 1 || !self.overrides.is_empty()
+    }
+
+    /// Whether `part` has settings of its own (as typed so far).
+    pub fn part_has_settings(&self, part: &str) -> bool {
+        if self.scope.as_deref() == Some(part) {
+            return self.settings().map_or(true, |s| !s.is_empty());
+        }
+        self.overrides.iter().any(|o| o.part == part)
+    }
+
+    /// The whole-model settings and the per-part settings, with the
+    /// fields as typed.
+    fn current(&self) -> Result<(PrintSettings, Vec<PartOverride>), (Field, String)> {
+        let typed = self.settings()?;
+        let Some(part) = &self.scope else {
+            return Ok((typed, self.overrides.clone()));
+        };
+        let mut overrides = self.overrides.clone();
+        match overrides.iter().position(|o| &o.part == part) {
+            Some(i) if typed.is_empty() => {
+                overrides.remove(i);
+            }
+            Some(i) => overrides[i].settings = typed,
+            None if typed.is_empty() => {}
+            None => overrides.push(PartOverride {
+                part: part.clone(),
+                settings: typed,
+            }),
+        }
+        Ok((self.model_settings.clone(), overrides))
+    }
+
+    /// Shows the settings of `part` (`None`: the whole model). Fails, and
+    /// stays, when what is typed is not valid.
+    pub fn select_scope(&mut self, scope: Option<String>) -> Result<(), (Field, String)> {
+        if scope == self.scope {
+            return Ok(());
+        }
+        let (model, overrides) = self.current()?;
+        self.model_settings = model;
+        self.overrides = overrides;
+        let shown = match &scope {
+            None => self.model_settings.clone(),
+            Some(part) => self
+                .overrides
+                .iter()
+                .find(|o| &o.part == part)
+                .map(|o| o.settings.clone())
+                .unwrap_or_default(),
+        };
+        self.scope = scope;
+        self.fill(&shown);
+        self.printer = shown.printer.unwrap_or_default();
+        self.error = None;
+        Ok(())
+    }
+
+    /// Empties the fields of the part being shown, so it prints like the
+    /// rest of the model.
+    pub fn clear_part(&mut self) {
+        if self.scope.is_some() {
+            self.fill(&PrintSettings::default());
+            self.printer.clear();
+            self.error = None;
+        }
+    }
+
+    /// What an empty field means while a part is shown: the whole model's
+    /// value. Empty for the whole model.
+    pub fn hint(&self, input: crate::prints::Input) -> String {
+        use crate::prints::Input;
+        if self.scope.is_none() {
+            return String::new();
+        }
+        let s = &self.model_settings;
+        match input {
+            Input::Printer => s.printer.clone().unwrap_or_default(),
+            Input::Material => s
+                .material
+                .as_ref()
+                .map(|m| m.label().to_owned())
+                .unwrap_or_default(),
+            Input::Filament => s.filament.clone().unwrap_or_default(),
+            Input::Layer => num(s.layer_mm, 2),
+            Input::Nozzle => num(s.nozzle_mm, 1),
+            Input::Bed => int(s.bed_temp),
+            Input::Hotend => int(s.nozzle_temp),
+            Input::Infill => int(s.infill_pct),
+            Input::Walls => int(s.walls),
+            Input::Date | Input::Duration | Input::NewNote => String::new(),
+        }
     }
 
     /// The settings typed in, checked against their ranges.
@@ -403,7 +525,7 @@ impl LogForm {
     /// The edited recipe (mode [`FormMode::Recipe`]); `None` when it is
     /// empty, which removes it.
     pub fn to_recipe(&self) -> Result<Option<Recipe>, (Field, String)> {
-        let settings = self.settings()?;
+        let (settings, parts) = self.current()?;
         let mut notes = self.recipe_notes.clone();
         if let Some(text) = opt(&self.new_note) {
             notes.push(RecipeNote {
@@ -415,6 +537,7 @@ impl LogForm {
             settings,
             required: self.required.clone(),
             notes,
+            parts,
             ..self.kept_recipe.clone()
         };
         if r.settings.is_empty() && r.notes.is_empty() && r.parts.is_empty() {
@@ -497,9 +620,9 @@ mod tests {
 
     #[test]
     fn empty_recipe_removes_it() {
-        let f = LogForm::recipe(None);
+        let f = LogForm::recipe(None, &[]);
         assert_eq!(f.to_recipe().unwrap(), None);
-        let mut f = LogForm::recipe(Some(&recipe()));
+        let mut f = LogForm::recipe(Some(&recipe()), &[]);
         f.new_note = "Brim on the corners".into();
         let r = f.to_recipe().unwrap().unwrap();
         assert_eq!(r.notes.len(), 1);
@@ -528,5 +651,82 @@ mod tests {
         assert_eq!(b.result, AttemptResult::Partial);
         assert_eq!(b.duration_min, Some(90));
         assert_eq!(b.notes, "Lifted");
+    }
+
+    fn parts() -> Vec<String> {
+        vec!["body.stl".into(), "ring.stl".into()]
+    }
+
+    #[test]
+    fn part_settings_are_edited_separately() {
+        let mut f = LogForm::recipe(Some(&recipe()), &parts());
+        assert!(f.has_part_choice());
+        f.select_scope(Some("ring.stl".into())).unwrap();
+        assert_eq!(f.layer, "", "a part starts with no settings of its own");
+        assert_eq!(f.hint(crate::prints::Input::Layer), "0.20");
+        f.layer = "0.12".into();
+        f.walls = "4".into();
+        assert!(f.part_has_settings("ring.stl"));
+        assert!(!f.part_has_settings("body.stl"));
+        // Back to the whole model: its fields come back untouched.
+        f.select_scope(None).unwrap();
+        assert_eq!(f.layer, "0.20");
+        f.bed = "90".into();
+        let r = f.to_recipe().unwrap().unwrap();
+        assert_eq!(r.settings.bed_temp, Some(90));
+        assert_eq!(r.settings.layer_mm, Some(0.2));
+        assert_eq!(r.parts.len(), 1);
+        assert_eq!(r.parts[0].part, "ring.stl");
+        assert_eq!(r.parts[0].settings.layer_mm, Some(0.12));
+        assert_eq!(r.parts[0].settings.walls, Some(4));
+        assert_eq!(r.parts[0].settings.material, None, "only what differs");
+    }
+
+    #[test]
+    fn saving_while_a_part_is_shown_keeps_both() {
+        let mut f = LogForm::recipe(Some(&recipe()), &parts());
+        f.select_scope(Some("body.stl".into())).unwrap();
+        f.infill = "40".into();
+        let r = f.to_recipe().unwrap().unwrap();
+        assert_eq!(r.settings, recipe().settings);
+        assert_eq!(r.parts[0].settings.infill_pct, Some(40));
+    }
+
+    #[test]
+    fn cleared_part_loses_its_settings() {
+        let mut saved = recipe();
+        saved.parts = vec![PartOverride {
+            part: "gone.stl".into(),
+            settings: PrintSettings {
+                layer_mm: Some(0.1),
+                ..PrintSettings::default()
+            },
+        }];
+        let mut f = LogForm::recipe(Some(&saved), &["body.stl".into()]);
+        assert_eq!(
+            f.parts,
+            ["body.stl", "gone.stl"],
+            "missing parts still listed"
+        );
+        f.select_scope(Some("gone.stl".into())).unwrap();
+        assert_eq!(f.layer, "0.10");
+        f.clear_part();
+        assert!(!f.part_has_settings("gone.stl"));
+        assert!(f.to_recipe().unwrap().unwrap().parts.is_empty());
+    }
+
+    #[test]
+    fn invalid_part_value_blocks_switching() {
+        let mut f = LogForm::recipe(Some(&recipe()), &parts());
+        f.select_scope(Some("ring.stl".into())).unwrap();
+        f.bed = "900".into();
+        assert_eq!(f.select_scope(None).unwrap_err().0, Field::Bed);
+        assert_eq!(f.scope.as_deref(), Some("ring.stl"));
+    }
+
+    #[test]
+    fn single_part_models_have_no_part_choice() {
+        let f = LogForm::recipe(Some(&recipe()), &["only.stl".into()]);
+        assert!(!f.has_part_choice());
     }
 }
