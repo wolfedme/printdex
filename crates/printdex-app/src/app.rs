@@ -1149,6 +1149,20 @@ impl App {
                 // Smart filter counts follow the print log.
                 Task::batch([self.run_search(ticket), data, self.load_lists()])
             }
+            EngineEvent::FileOpDone(_) => {
+                // Names and paths changed: reload what shows them.
+                let ticket = self.search.refresh();
+                let model = match &self.model {
+                    Some(m) => Task::batch([self.load_model(m.id()), self.load_data(m.id())]),
+                    None => Task::none(),
+                };
+                Task::batch([
+                    self.load_libraries(),
+                    self.run_search(ticket),
+                    model,
+                    self.load_lists(),
+                ])
+            }
             EngineEvent::LibraryOffline(id) => {
                 self.mark_offline(id);
                 Task::none()

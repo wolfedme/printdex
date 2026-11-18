@@ -57,6 +57,8 @@ pub enum EngineEvent {
     OrganizeChanged,
     /// A missing model was forgotten.
     ModelForgotten(ModelId),
+    /// A file action (rename, move, trash) finished or was undone.
+    FileOpDone(crate::file_ops::OpSummary),
     /// A scan found sidecars written by another Printdex install.
     SidecarForeign {
         library: LibraryId,

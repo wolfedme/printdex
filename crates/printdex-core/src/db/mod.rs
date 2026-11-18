@@ -1,5 +1,6 @@
 //! SQLite store: one writer connection, a small pool of readers, WAL mode.
 
+pub mod file_ops;
 mod files;
 mod libraries;
 mod missing;
