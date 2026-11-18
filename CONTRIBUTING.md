@@ -36,3 +36,24 @@ whole engine (rustic, OpenDAL, sqlx) again, which costs CI time and disk.
 If a backup test is slow, check whether the crate doing the work is in the
 `[profile.dev.package]` list in `Cargo.toml`: unoptimised crypto and
 compression run several times slower.
+
+### Branches and releases
+
+- `dev` is the default branch. Feature and fix PRs go into `dev`; CI runs
+  the Linux job (fmt, clippy, tests) on the PR and again on the push to
+  `dev`, which also saves the build cache every PR starts from.
+- A release is a PR from `dev` into `main`. That PR runs the heavy jobs
+  once: Windows, macOS, MSRV and the bench smoke. Merge it with "Create a
+  merge commit", not squash.
+- Merging into `main` cuts the release (`.github/workflows/release-cut.yml`
+  and `scripts/release-cut.sh`): git-cliff picks the next version from the
+  conventional commits since the last tag (`feat` bumps the minor while
+  we're on 0.x, `fix`/`perf`/`build` the patch), bumps `Cargo.toml`,
+  rewrites `CHANGELOG.md`, tags `vX.Y.Z`, starts `release.yml` (installers,
+  signed update feeds, a draft GitHub release with the notes) and merges
+  `main` back into `dev`. Publishing the draft is a manual step.
+- Hotfix: branch from `main`, PR into `main` (full CI), merge; the same
+  workflow releases it and brings `dev` up to date.
+- Commit messages follow Conventional Commits (`feat(app): …`,
+  `fix(core): …`); `docs`, `ci`, `chore`, `refactor`, `test` and `style`
+  commits stay out of the changelog.

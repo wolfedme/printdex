@@ -1,0 +1,64 @@
+name: release cut
+
+# Every merge into main is a release (#109). This works out the next version
+# from the conventional commits since the last tag (git-cliff), bumps
+# Cargo.toml, rewrites CHANGELOG.md, tags vX.Y.Z, starts release.yml for the
+# tag (installers, signed update feeds, draft GitHub release with the notes)
+# and merges main back into dev so dev carries the version bump.
+#
+# No tests run here: the PR into main already ran the full set on exactly
+# this merge. Merge release PRs with "Create a merge commit" (not squash), so
+# dev and main keep a shared history.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-cut
+  cancel-in-progress: false
+
+permissions:
+  contents: write # push the release commit, the tag and dev
+  actions: write # start release.yml (a push made with this token can't)
+
+jobs:
+  cut:
+    name: cut release
+    # Our own release commit comes back as a push to main; skip it.
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+      - name: Commit and tag the release
+        id: cut
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          scripts/release-cut.sh
+      - name: Push
+        if: steps.cut.outputs.tag != ''
+        run: git push --atomic origin HEAD:main "refs/tags/${{ steps.cut.outputs.tag }}"
+      - name: Build the release
+        if: steps.cut.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --ref "${{ steps.cut.outputs.tag }}"
+      - name: Merge main back into dev
+        run: |
+          git fetch origin dev
+          git checkout -B dev origin/dev
+          # `main` is the local branch, including the release commit.
+          if ! git merge --no-edit main; then
+            echo "::error::main does not merge cleanly into dev; merge it by hand"
+            exit 1
+          fi
+          git push origin dev

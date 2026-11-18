@@ -1,14 +1,24 @@
 name: CI
 
-# Minutes budget (private repo: Linux 1x, Windows 2x, macOS 10x):
-# - Pull requests: one Linux job (fmt, clippy, tests).
-# - Push to main: Linux + Windows tests, MSRV, bench smoke.
-# - Weekly / manual / `ci: full` label on a PR: everything, including macOS.
+# Branches (#109): feature PRs go into `dev` (the default branch); `main`
+# only takes `dev` through a release PR, or a hotfix PR.
+#
+# Minutes budget (private repo: Linux 1x, Windows 2x, macOS 10x). Each heavy
+# job runs once per change:
+# - PR into dev, push to dev: one Linux job (fmt, clippy, tests). The dev push
+#   also saves the build cache; PRs can only restore the default branch's.
+# - PR into main: Windows, macOS, MSRV, bench smoke. The Linux job is skipped
+#   for the release PR (head `dev`), which dev's push already tested.
+# - Push to main: nothing here; the PR tested that exact merge, and
+#   release-cut.yml tags the release.
+# - Weekly / manual: everything, on dev, which keeps every cache warm.
+# - `ci: full` label on a PR into dev: the heavy jobs too.
 # - Docs, Markdown and design-tooling-only changes run nothing.
 # Dependency and licence checks live in deny.yml.
 
 on:
   pull_request:
+    branches: [dev, main]
     types: [opened, synchronize, reopened, labeled]
     paths-ignore:
       - "**/*.md"
@@ -19,7 +29,7 @@ on:
       - ".github/pull_request_template.md"
       - ".github/workflows/deny.yml"
   push:
-    branches: [main]
+    branches: [dev]
     paths-ignore:
       - "**/*.md"
       - "docs/**"
@@ -52,8 +62,11 @@ env:
 jobs:
   check:
     name: fmt + clippy + test (linux)
-    # Skip on label events: the run that opened/updated the PR already did this.
-    if: github.event.action != 'labeled'
+    # Skip on label events (the run that opened/updated the PR already did
+    # this) and on the release PR, whose head dev's push already tested.
+    if: >-
+      github.event.action != 'labeled' &&
+      !(github.event_name == 'pull_request' && github.base_ref == 'main' && github.head_ref == 'dev')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -63,7 +76,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/dev' }}
           # A failing job would otherwise never save, and every later run
           # compiles from scratch (Windows did, 14 min at 2x, see #104).
           cache-on-failure: true
@@ -73,9 +86,12 @@ jobs:
 
   test-windows:
     name: test (windows)
-    if: >-
-      github.event_name != 'pull_request' ||
-      (contains(github.event.pull_request.labels.*.name, 'ci: full') &&
+    if: &heavy >-
+      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.action != 'labeled' &&
+       github.base_ref == 'main') ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'ci: full') &&
        (github.event.action != 'labeled' || github.event.label.name == 'ci: full'))
     runs-on: windows-latest
     timeout-minutes: 45
@@ -84,20 +100,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          # A failing job would otherwise never save, and every later run
-          # compiles from scratch (Windows did, 14 min at 2x, see #104).
+          save-if: ${{ github.event_name != 'pull_request' }}
           cache-on-failure: true
       - run: cargo test --workspace
 
   test-macos:
     name: test (macos)
-    # macOS bills 10x, so it does not run on every merge.
-    if: >-
-      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' &&
-       contains(github.event.pull_request.labels.*.name, 'ci: full') &&
-       (github.event.action != 'labeled' || github.event.label.name == 'ci: full'))
+    # macOS bills 10x: release PRs, weekly, manual or `ci: full` only.
+    if: *heavy
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
@@ -111,10 +121,7 @@ jobs:
 
   msrv:
     name: msrv
-    if: >-
-      github.event_name != 'pull_request' ||
-      (contains(github.event.pull_request.labels.*.name, 'ci: full') &&
-       (github.event.action != 'labeled' || github.event.label.name == 'ci: full'))
+    if: *heavy
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -122,18 +129,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.94
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          # A failing job would otherwise never save, and every later run
-          # compiles from scratch (Windows did, 14 min at 2x, see #104).
+          save-if: ${{ github.event_name != 'pull_request' }}
           cache-on-failure: true
       - run: cargo check --workspace --all-targets
 
   bench-smoke:
     name: bench smoke (20k parts)
-    if: >-
-      github.event_name != 'pull_request' ||
-      (contains(github.event.pull_request.labels.*.name, 'ci: full') &&
-       (github.event.action != 'labeled' || github.event.label.name == 'ci: full'))
+    if: *heavy
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -141,9 +143,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          # A failing job would otherwise never save, and every later run
-          # compiles from scratch (Windows did, 14 min at 2x, see #104).
+          save-if: ${{ github.event_name != 'pull_request' }}
           cache-on-failure: true
       - name: Generate library
         run: cargo run --release -p printdex-cli -- bench gen "$RUNNER_TEMP/lib" --parts 20000
