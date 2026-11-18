@@ -50,9 +50,14 @@ pub struct Engine {
     pub(crate) sidecars: SidecarWriter,
     pub(crate) install: crate::ids::Uuid,
     pub(crate) fs: Arc<dyn Fs>,
-    data_dir: PathBuf,
+    pub(crate) data_dir: PathBuf,
     /// Models whose file action a crash interrupted and opening finished.
     recovered: Arc<Mutex<Vec<String>>>,
+    /// Running backup jobs and the open repository.
+    pub(crate) backup: Arc<crate::backup::run::BackupState>,
+    pub(crate) cache_dir: PathBuf,
+    /// Backup secrets (session and OS credential store).
+    pub(crate) secrets: Arc<crate::backup::secrets::Store>,
 }
 
 /// Removes a library from the "scanning" set on every exit path. Holds the
@@ -139,12 +144,20 @@ impl Engine {
             fs,
             data_dir: data_dir.to_path_buf(),
             recovered: Arc::new(Mutex::new(Vec::new())),
+            backup: Arc::new(crate::backup::run::BackupState::default()),
+            cache_dir: cache_dir.to_path_buf(),
+            secrets: Arc::new(crate::backup::secrets::Store::default()),
         };
         match engine.reconcile_ops().await {
             Ok(names) => *engine.recovered.lock().unwrap_or_else(|p| p.into_inner()) = names,
             Err(e) => tracing::warn!(error = %e, "could not check interrupted file actions"),
         }
         Ok(engine)
+    }
+
+    /// This install's id (the host name of its backups).
+    pub fn install_id(&self) -> crate::ids::Uuid {
+        self.install
     }
 
     /// Names of models whose rename, move or trash a crash interrupted and

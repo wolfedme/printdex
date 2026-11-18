@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT MAX(finished_at) as \"at: i64\" FROM backup_runs\n               WHERE kind = ? AND result = 'ok' AND library_id IS ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "at: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "0c6d9d14cf2ed4298fe4923141cbec05cd5f29c0f299b2ded1046a13d19ed235"
+}

@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT MAX(t) as \"t: i64\" FROM (\n                 SELECT MAX(updated_at) AS t FROM models\n                 UNION ALL SELECT MAX(updated_at) FROM libraries)",
+  "describe": {
+    "columns": [
+      {
+        "name": "t: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "31cef757782441aa85ba699a80cb44c508602843da823e970389e2a347f51aa4"
+}

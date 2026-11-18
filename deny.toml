@@ -47,10 +47,12 @@ confidence-threshold = 0.9
 # The allow list is a policy, not an inventory; unused entries are fine.
 unused-allowed-license = "allow"
 # Mozilla's CA certificate list, bundled by ureq (used by the updater's
-# Velopack). CDLA-Permissive-2.0 is a permissive data licence that puts no
+# Velopack) and by reqwest (backup targets, as webpki-root-certs).
+# CDLA-Permissive-2.0 is a permissive data licence that puts no
 # conditions on the program it ships in; allowed for this crate only.
 exceptions = [
     { allow = ["CDLA-Permissive-2.0"], crate = "webpki-roots" },
+    { allow = ["CDLA-Permissive-2.0"], crate = "webpki-root-certs" },
 ]
 
 [bans]

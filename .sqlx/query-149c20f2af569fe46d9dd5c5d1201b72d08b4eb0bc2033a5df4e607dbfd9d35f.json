@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE backup_targets SET encrypted = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "149c20f2af569fe46d9dd5c5d1201b72d08b4eb0bc2033a5df4e607dbfd9d35f"
+}

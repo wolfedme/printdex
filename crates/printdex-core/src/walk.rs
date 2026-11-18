@@ -109,6 +109,25 @@ impl Rules {
     }
 }
 
+impl Rules {
+    /// These rules as a backup filter, so a backup holds exactly the files
+    /// a scan sees: hidden entries and NAS/OS junk folders are skipped,
+    /// sidecars kept.
+    pub fn backup_globs() -> crate::backup::Globs {
+        let sidecar = crate::sidecar::FOLDER_SIDECAR;
+        crate::backup::Globs {
+            globs: vec![
+                // Everything, then the exceptions (the last match wins).
+                "**".to_owned(),
+                "!.*".to_owned(),
+                sidecar.to_owned(),
+                format!(".?*{sidecar}"),
+            ],
+            iglobs: IGNORED_DIR_NAMES.iter().map(|n| format!("!{n}/")).collect(),
+        }
+    }
+}
+
 /// Classifies a file by its extension, ignoring ASCII case.
 pub fn classify(file_name: &str) -> FileKind {
     if is_sidecar_name(file_name) {

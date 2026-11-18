@@ -1267,6 +1267,12 @@ impl App {
                 }
                 Task::none()
             }
+            // Backup status arrives with Settings › Backup (milestone 5, part B).
+            EngineEvent::BackupStarted { .. }
+            | EngineEvent::BackupProgress { .. }
+            | EngineEvent::BackupFinished { .. }
+            | EngineEvent::BackupFailed { .. }
+            | EngineEvent::BackupNeedsAttention(_) => Task::none(),
         }
     }
 

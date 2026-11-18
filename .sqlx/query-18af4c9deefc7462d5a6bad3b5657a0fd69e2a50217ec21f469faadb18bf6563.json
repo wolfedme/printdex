@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO backup_targets (kind, settings, encrypted, created_at)\n                     VALUES (?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "18af4c9deefc7462d5a6bad3b5657a0fd69e2a50217ec21f469faadb18bf6563"
+}
