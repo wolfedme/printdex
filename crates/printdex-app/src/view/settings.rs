@@ -62,6 +62,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
             Icon::Layers,
             t("settings-storage"),
         ),
+        (SettingsSection::Backup, Icon::Backup, t("settings-backup")),
         (SettingsSection::About, Icon::FileText, t("settings-about")),
     ] {
         let active = app.settings_section == section;
@@ -95,6 +96,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
         SettingsSection::Appearance => appearance(app, p),
         SettingsSection::Apps => apps(app, p),
         SettingsSection::Storage => storage(app, p),
+        SettingsSection::Backup => super::backup::view(app, p),
         SettingsSection::About => about(app, p),
     };
 
@@ -121,7 +123,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     .into()
 }
 
-fn heading<'a>(p: Palette, title: String, body: String) -> Element<'a, Message> {
+pub(super) fn heading<'a>(p: Palette, title: String, body: String) -> Element<'a, Message> {
     column![
         text(title)
             .size(theme::SIZE_TITLE)
@@ -133,7 +135,7 @@ fn heading<'a>(p: Palette, title: String, body: String) -> Element<'a, Message> 
     .into()
 }
 
-fn col_label<'a>(p: Palette, label: String) -> iced::widget::Text<'a> {
+pub(super) fn col_label<'a>(p: Palette, label: String) -> iced::widget::Text<'a> {
     text(label.to_uppercase())
         .size(theme::SIZE_GROUP)
         .font(theme::FONT_STRONG)
@@ -501,7 +503,7 @@ fn icon_only<'a>(
     .into()
 }
 
-fn small_button<'a>(p: Palette, label: String, msg: Message) -> Element<'a, Message> {
+pub(super) fn small_button<'a>(p: Palette, label: String, msg: Message) -> Element<'a, Message> {
     button(text(label).size(theme::SIZE_CAPTION))
         .padding([4.0, theme::S4])
         .style(move |_, status| p.button_secondary(status))
@@ -542,7 +544,7 @@ fn confirm_row<'a>(p: Palette, lib: &Library) -> Element<'a, Message> {
 }
 
 /// One labelled setting: title and explanation left, control right.
-fn setting<'a>(
+pub(super) fn setting<'a>(
     p: Palette,
     title: String,
     body: String,

@@ -112,6 +112,7 @@ pub enum SettingsSection {
     Appearance,
     Apps,
     Storage,
+    Backup,
     About,
 }
 
@@ -153,6 +154,8 @@ pub struct App {
     /// Multi-select, file action dialogs, undo toast, Open with.
     pub files: crate::files::FilesUi,
     pub updates: crate::updates::Updates,
+    /// Settings › Backup and the sidebar status line.
+    pub backup: crate::backup_ui::BackupUi,
     /// Watches libraries for changes and offline shares while the app runs.
     pub monitor: Option<Arc<printdex_core::Monitor>>,
     pub boot: Boot,
@@ -205,6 +208,7 @@ pub enum Message {
     MonitorStarted(Arc<printdex_core::Monitor>),
     Files(crate::files::Fx),
     Updates(crate::updates::Ux),
+    Backup(crate::backup_ui::Bx),
     Libraries(Result<LibrarySnapshot, Arc<CoreError>>),
     Engine(EngineEvent),
     SearchChanged(String),
@@ -288,6 +292,7 @@ impl App {
             engine: None,
             monitor: None,
             updates: crate::updates::Updates::default(),
+            backup: crate::backup_ui::BackupUi::default(),
             files: crate::files::FilesUi {
                 apps,
                 ..Default::default()
@@ -530,10 +535,12 @@ impl App {
                     self.run_search(ticket),
                     self.apply_cache_limit(),
                     self.load_lists(),
+                    self.start_backups(),
                 ])
             }
             Message::Files(f) => self.on_files(f),
             Message::Updates(u) => self.on_updates(u),
+            Message::Backup(b) => self.on_backup(b),
             Message::MonitorStarted(monitor) => {
                 self.monitor = Some(monitor);
                 Task::none()
@@ -753,10 +760,11 @@ impl App {
             }
             Message::ShowSection(section) => {
                 self.settings_section = section;
-                if section == SettingsSection::Storage {
-                    return self.measure_cache();
+                match section {
+                    SettingsSection::Storage => self.measure_cache(),
+                    SettingsSection::Backup => self.load_backup(),
+                    _ => Task::none(),
                 }
-                Task::none()
             }
             Message::CacheUsage(bytes) => {
                 self.cache_usage = Some(bytes);
@@ -1267,12 +1275,11 @@ impl App {
                 }
                 Task::none()
             }
-            // Backup status arrives with Settings › Backup (milestone 5, part B).
-            EngineEvent::BackupStarted { .. }
+            event @ (EngineEvent::BackupStarted { .. }
             | EngineEvent::BackupProgress { .. }
             | EngineEvent::BackupFinished { .. }
             | EngineEvent::BackupFailed { .. }
-            | EngineEvent::BackupNeedsAttention(_) => Task::none(),
+            | EngineEvent::BackupNeedsAttention(_)) => self.on_backup_event(event),
         }
     }
 
@@ -1458,6 +1465,7 @@ pub fn error_text(e: &CoreError) -> String {
         CoreError::CollectionExists => t("error-collection-exists"),
         CoreError::CollectionNameInvalid => t("error-collection-name"),
         CoreError::TextTooLong => t("error-text-too-long"),
+        CoreError::Backup(b) => crate::backup_ui::backup_error_text(b),
         _ => t("error-other"),
     }
 }

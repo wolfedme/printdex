@@ -345,6 +345,44 @@ impl Engine {
         .await
     }
 
+    /// The repository's size on the target, or `None` when nothing has
+    /// been backed up there yet. Waits for a running job.
+    pub async fn backup_size(&self) -> Result<Option<u64>> {
+        let (target, secrets) = self.current_target().await?;
+        let mut slot = self.backup.job.lock().await;
+        let cached = slot
+            .take()
+            .filter(|c| c.target == target.target && c.secrets == secrets);
+        let opts = RepoOptions {
+            cache_dir: (!target.target.is_folder()).then(|| self.cache_dir.join("backup")),
+            throttle: None,
+        };
+        let joined = tokio::task::spawn_blocking(move || {
+            let repo = match cached {
+                Some(c) => c.repo,
+                None => match Repo::open(&target.target, &secrets, &opts) {
+                    Ok(r) => r,
+                    Err(crate::CoreError::Backup(BackupError::NoRepository)) => {
+                        return (None, Ok(None));
+                    }
+                    Err(e) => return (None, Err(e)),
+                },
+            };
+            let out = repo.size().map(Some);
+            let keep = repo.is_open().then_some(Cached {
+                target: target.target,
+                secrets,
+                repo,
+            });
+            (keep, out)
+        })
+        .await;
+        let (keep, out) =
+            joined.unwrap_or_else(|e| (None, Err(BackupError::Repository(e.to_string()).into())));
+        *slot = keep;
+        out
+    }
+
     /// About how many bytes a first model backup of `library` reads (the
     /// size of its files; dedup and compression make the upload smaller).
     pub async fn estimate_models(&self, library: LibraryId) -> Result<u64> {
