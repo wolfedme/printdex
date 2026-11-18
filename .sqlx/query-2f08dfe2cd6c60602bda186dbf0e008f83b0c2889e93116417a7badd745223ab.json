@@ -1,15 +1,15 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id as \"id!: PartId\", model_id as \"model_id: ModelId\", rel_path, format,\n                      size, mtime_ns, fp_hash, missing_since\n               FROM parts WHERE library_id = ?",
+  "query": "SELECT id as \"id!: AssetId\", model_id as \"model_id: ModelId\", rel_path,\n                              size, mtime_ns, missing_since\n                       FROM assets WHERE library_id = ? AND rel_path >= ? AND rel_path < ?",
   "describe": {
     "columns": [
       {
-        "name": "id!: PartId",
+        "name": "id!: AssetId",
         "ordinal": 0,
         "type_info": "Blob",
         "origin": {
           "Table": {
-            "table": "parts",
+            "table": "assets",
             "name": "id"
           }
         }
@@ -20,7 +20,7 @@
         "type_info": "Blob",
         "origin": {
           "Table": {
-            "table": "parts",
+            "table": "assets",
             "name": "model_id"
           }
         }
@@ -31,69 +31,47 @@
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "parts",
+            "table": "assets",
             "name": "rel_path"
           }
         }
       },
       {
-        "name": "format",
-        "ordinal": 3,
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "parts",
-            "name": "format"
-          }
-        }
-      },
-      {
         "name": "size",
-        "ordinal": 4,
+        "ordinal": 3,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "parts",
+            "table": "assets",
             "name": "size"
           }
         }
       },
       {
         "name": "mtime_ns",
-        "ordinal": 5,
+        "ordinal": 4,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "parts",
+            "table": "assets",
             "name": "mtime_ns"
           }
         }
       },
       {
-        "name": "fp_hash",
-        "ordinal": 6,
-        "type_info": "Integer",
-        "origin": {
-          "Table": {
-            "table": "parts",
-            "name": "fp_hash"
-          }
-        }
-      },
-      {
         "name": "missing_since",
-        "ordinal": 7,
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "parts",
+            "table": "assets",
             "name": "missing_since"
           }
         }
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 3
     },
     "nullable": [
       true,
@@ -101,10 +79,8 @@
       false,
       false,
       false,
-      false,
-      true,
       true
     ]
   },
-  "hash": "89b0690452676a4cbd0080a34ee35047aeba37d254a65b57dc6da8f9e28579bb"
+  "hash": "2f08dfe2cd6c60602bda186dbf0e008f83b0c2889e93116417a7badd745223ab"
 }

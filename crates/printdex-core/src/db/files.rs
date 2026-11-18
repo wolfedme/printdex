@@ -105,6 +105,28 @@ enum Op<'a> {
 }
 
 /// Whether `a` and `b` are the same path or one lies inside the other.
+/// `rel_path` key ranges that cover `scope` (everything when `None`).
+/// A range also catches siblings like `Busts-old` for scope `Busts`, so
+/// rows still go through [`in_scope`].
+fn scope_ranges(scope: Option<&[String]>) -> Vec<(String, String)> {
+    match scope {
+        // Above every valid UTF-8 path.
+        None => vec![(String::new(), "\u{10FFFF}".to_owned())],
+        // '0' sorts right after '/'.
+        Some(s) => s.iter().map(|p| (p.clone(), format!("{p}0"))).collect(),
+    }
+}
+
+/// Whether `path` is one of the `scope` paths or inside one.
+pub(crate) fn in_scope(path: &str, scope: Option<&[String]>) -> bool {
+    scope.is_none_or(|s| {
+        s.iter().any(|p| {
+            path == p
+                || (path.starts_with(p.as_str()) && path.as_bytes().get(p.len()) == Some(&b'/'))
+        })
+    })
+}
+
 fn overlaps(a: &str, b: &str) -> bool {
     let inside = |inner: &str, outer: &str| {
         inner.len() > outer.len()
@@ -116,36 +138,49 @@ fn overlaps(a: &str, b: &str) -> bool {
 
 impl Db {
     /// Every part and asset of `lib` recorded so far, missing or not.
-    pub async fn known_files(&self, lib: LibraryId) -> Result<Vec<KnownFile>> {
-        let parts = sqlx::query!(
-            r#"SELECT rel_path, size, mtime_ns, fp_hash, missing_since FROM parts WHERE library_id = ?"#,
-            lib
-        )
-        .fetch_all(self.writer())
-        .await?;
-        let assets = sqlx::query!(
-            r#"SELECT rel_path, size, mtime_ns, missing_since FROM assets WHERE library_id = ?"#,
-            lib
-        )
-        .fetch_all(self.writer())
-        .await?;
-        let mut out = Vec::with_capacity(parts.len() + assets.len());
-        out.extend(parts.into_iter().map(|r| KnownFile {
-            rel_path: r.rel_path,
-            size: r.size as u64,
-            mtime_ns: r.mtime_ns,
-            fp_hash: r.fp_hash.map(|h| h as u64),
-            is_part: true,
-            present: r.missing_since.is_none(),
-        }));
-        out.extend(assets.into_iter().map(|r| KnownFile {
-            rel_path: r.rel_path,
-            size: r.size as u64,
-            mtime_ns: r.mtime_ns,
-            fp_hash: None,
-            is_part: false,
-            present: r.missing_since.is_none(),
-        }));
+    pub async fn known_files(
+        &self,
+        lib: LibraryId,
+        scope: Option<&[String]>,
+    ) -> Result<Vec<KnownFile>> {
+        let mut out = Vec::new();
+        for (lo, hi) in scope_ranges(scope) {
+            let parts = sqlx::query!(
+                r#"SELECT rel_path, size, mtime_ns, fp_hash, missing_since FROM parts
+                   WHERE library_id = ? AND rel_path >= ? AND rel_path < ?"#,
+                lib,
+                lo,
+                hi
+            )
+            .fetch_all(self.writer())
+            .await?;
+            let assets = sqlx::query!(
+                r#"SELECT rel_path, size, mtime_ns, missing_since FROM assets
+                   WHERE library_id = ? AND rel_path >= ? AND rel_path < ?"#,
+                lib,
+                lo,
+                hi
+            )
+            .fetch_all(self.writer())
+            .await?;
+            out.extend(parts.into_iter().map(|r| KnownFile {
+                rel_path: r.rel_path,
+                size: r.size as u64,
+                mtime_ns: r.mtime_ns,
+                fp_hash: r.fp_hash.map(|h| h as u64),
+                is_part: true,
+                present: r.missing_since.is_none(),
+            }));
+            out.extend(assets.into_iter().map(|r| KnownFile {
+                rel_path: r.rel_path,
+                size: r.size as u64,
+                mtime_ns: r.mtime_ns,
+                fp_hash: None,
+                is_part: false,
+                present: r.missing_since.is_none(),
+            }));
+        }
+        out.retain(|k| in_scope(&k.rel_path, scope));
         Ok(out)
     }
 
@@ -153,32 +188,51 @@ impl Db {
     /// relative path and keep their ids; rows the scan did not see are marked
     /// missing, never deleted. Unchanged rows are not written at all.
     pub async fn apply_scan(&self, lib: LibraryId, write: ScanWrite) -> Result<ApplyStats> {
-        let models = sqlx::query_as!(
-            ModelRow,
-            r#"SELECT id as "id!: ModelId", rel_path, name, kind, missing_since
-               FROM models WHERE library_id = ?"#,
-            lib
-        )
-        .fetch_all(self.writer())
-        .await?;
-        let parts = sqlx::query_as!(
-            PartRow,
-            r#"SELECT id as "id!: PartId", model_id as "model_id: ModelId", rel_path, format,
-                      size, mtime_ns, fp_hash, missing_since
-               FROM parts WHERE library_id = ?"#,
-            lib
-        )
-        .fetch_all(self.writer())
-        .await?;
-        let assets = sqlx::query_as!(
-            AssetRow,
-            r#"SELECT id as "id!: AssetId", model_id as "model_id: ModelId", rel_path,
-                      size, mtime_ns, missing_since
-               FROM assets WHERE library_id = ?"#,
-            lib
-        )
-        .fetch_all(self.writer())
-        .await?;
+        let scope = write.scope.as_deref();
+        let (mut models, mut parts, mut assets) = (Vec::new(), Vec::new(), Vec::new());
+        for (lo, hi) in scope_ranges(scope) {
+            models.extend(
+                sqlx::query_as!(
+                    ModelRow,
+                    r#"SELECT id as "id!: ModelId", rel_path, name, kind, missing_since
+                       FROM models WHERE library_id = ? AND rel_path >= ? AND rel_path < ?"#,
+                    lib,
+                    lo,
+                    hi
+                )
+                .fetch_all(self.writer())
+                .await?,
+            );
+            parts.extend(
+                sqlx::query_as!(
+                    PartRow,
+                    r#"SELECT id as "id!: PartId", model_id as "model_id: ModelId", rel_path, format,
+                              size, mtime_ns, fp_hash, missing_since
+                       FROM parts WHERE library_id = ? AND rel_path >= ? AND rel_path < ?"#,
+                    lib,
+                    lo,
+                    hi
+                )
+                .fetch_all(self.writer())
+                .await?,
+            );
+            assets.extend(
+                sqlx::query_as!(
+                    AssetRow,
+                    r#"SELECT id as "id!: AssetId", model_id as "model_id: ModelId", rel_path,
+                              size, mtime_ns, missing_since
+                       FROM assets WHERE library_id = ? AND rel_path >= ? AND rel_path < ?"#,
+                    lib,
+                    lo,
+                    hi
+                )
+                .fetch_all(self.writer())
+                .await?,
+            );
+        }
+        models.retain(|m| in_scope(&m.rel_path, scope));
+        parts.retain(|p| in_scope(&p.rel_path, scope));
+        assets.retain(|a| in_scope(&a.rel_path, scope));
 
         let models_by_path: HashMap<&str, &ModelRow> =
             models.iter().map(|m| (m.rel_path.as_str(), m)).collect();

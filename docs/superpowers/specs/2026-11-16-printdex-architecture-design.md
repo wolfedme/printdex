@@ -159,6 +159,20 @@ Same milestones as v1 design §10, with the design work slotted in:
   - Windows and macOS: GitHub Actions runners build, run all tests, including thumbnail rendering (GPU tests skip where no adapter exists; the CPU path always runs). Interactive macOS checks happen in an occasional Claude Code session on Max's Mac, mainly before releases.
   - NAS behaviour: no real NAS assumed. Tests run against a filesystem wrapper that injects latency, slow listings, disappearing mounts and unreliable change notifications; a local Samba share in CI is a later addition if the wrapper misses real-world issues.
   - Performance: the CLI `bench` command and a synthetic 100k-part library generator, run in CI to catch regressions; absolute targets are checked against the latency-injected setup.
+    - Budgets live in `bench/baseline.json` and fail CI on `main` when missed (`printdex bench check`): start to usable under 1 s, search p95 under 50 ms, rescan of one folder under 200 ms, an unchanged rescan reads no file contents, idle CPU under 1 % with 3 watched libraries, engine memory under 250 MB. A recorded baseline adds a ±20 % regression check once it is turned on.
+    - Measured 2026-11-18 on the 20k-part bench library (3,967 models) in the cloud VM:
+
+      | | Plain disk | 2 ms per filesystem call |
+      |---|---|---|
+      | Start to usable | 6 ms | 6 ms |
+      | Search p50 / p95 | 0.9 / 2.4 ms | 0.8 / 2.5 ms |
+      | Rescan of one folder | 96 ms | 115 ms |
+      | Unchanged rescan | 0.6 s, 0 files read | 14.8 s, 0 files read |
+      | Initial scan | 1.3 s | 36.8 s |
+      | Idle CPU (monitor, 3 libraries) | 0 % | |
+      | Engine memory | 46 MB | 34 MB |
+
+    - A rescan of one folder only reads and writes the top-level folder it lies in (grouping a top-level folder never depends on its siblings), so its cost follows that folder's size, not the library's.
 
 ## 13. Decided by Max (this session)
 

@@ -1,49 +1,49 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id as \"id!: ModelId\", rel_path, name, kind, missing_since\n               FROM models WHERE library_id = ?",
+  "query": "SELECT rel_path, size, mtime_ns, fp_hash, missing_since FROM parts\n                   WHERE library_id = ? AND rel_path >= ? AND rel_path < ?",
   "describe": {
     "columns": [
       {
-        "name": "id!: ModelId",
-        "ordinal": 0,
-        "type_info": "Blob",
-        "origin": {
-          "Table": {
-            "table": "models",
-            "name": "id"
-          }
-        }
-      },
-      {
         "name": "rel_path",
-        "ordinal": 1,
+        "ordinal": 0,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "models",
+            "table": "parts",
             "name": "rel_path"
           }
         }
       },
       {
-        "name": "name",
-        "ordinal": 2,
-        "type_info": "Text",
+        "name": "size",
+        "ordinal": 1,
+        "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "models",
-            "name": "name"
+            "table": "parts",
+            "name": "size"
           }
         }
       },
       {
-        "name": "kind",
-        "ordinal": 3,
-        "type_info": "Text",
+        "name": "mtime_ns",
+        "ordinal": 2,
+        "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "models",
-            "name": "kind"
+            "table": "parts",
+            "name": "mtime_ns"
+          }
+        }
+      },
+      {
+        "name": "fp_hash",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "fp_hash"
           }
         }
       },
@@ -53,22 +53,22 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "models",
+            "table": "parts",
             "name": "missing_since"
           }
         }
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 3
     },
     "nullable": [
+      false,
+      false,
+      false,
       true,
-      false,
-      false,
-      false,
       true
     ]
   },
-  "hash": "03315e1f62437e94e99d6087ed1447ad0630836eb9cef767fffbe6ba29cdf2f5"
+  "hash": "63ecd9d23cb3826514d3ec11e24233ad4db005b1c034401dfa246f5cd519a93a"
 }
