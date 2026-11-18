@@ -129,6 +129,25 @@ impl SnapshotInfo {
     }
 }
 
+/// File filter for a backup, in gitignore override syntax: `!pattern`
+/// skips, a plain pattern includes, and the last matching pattern wins
+/// (`iglobs` ignore case and come after `globs`). Empty backs up all.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Globs {
+    pub globs: Vec<String>,
+    pub iglobs: Vec<String>,
+}
+
+impl Globs {
+    /// Skips files matching `patterns`.
+    pub fn excluding(patterns: &[&str]) -> Globs {
+        Globs {
+            globs: patterns.iter().map(|p| format!("!{p}")).collect(),
+            iglobs: Vec::new(),
+        }
+    }
+}
+
 /// What [`Repo::backup`] backs up.
 #[derive(Clone, Copy, Debug)]
 pub struct BackupJob<'a> {
@@ -137,8 +156,8 @@ pub struct BackupJob<'a> {
     /// Its path inside the snapshot, so a library keeps one history even
     /// when its folder moves.
     pub as_path: &'a str,
-    /// Gitignore-style globs to skip.
-    pub excludes: &'a [String],
+    /// Which files to back up (everything by default).
+    pub filter: &'a Globs,
     pub tags: &'a [String],
     /// The install id of the computer backing up.
     pub host: &'a str,
@@ -552,7 +571,7 @@ impl Repo {
         let BackupJob {
             source,
             as_path,
-            excludes,
+            filter,
             tags,
             host,
         } = *job;
@@ -573,8 +592,9 @@ impl Repo {
             let _ = snap.add_tags(vec![list]);
         }
         let mut opts = BackupOptions::default().as_path(PathBuf::from(as_path));
-        opts.excludes =
-            Excludes::default().globs(excludes.iter().map(|g| format!("!{g}")).collect::<Vec<_>>());
+        opts.excludes = Excludes::default()
+            .globs(filter.globs.clone())
+            .iglobs(filter.iglobs.clone());
         self.guarded(cancel, progress, move |me| {
             let repo = me.take()?;
             let indexed = repo.to_indexed_ids()?;

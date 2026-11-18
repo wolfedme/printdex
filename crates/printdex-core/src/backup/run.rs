@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use tokio_util::sync::CancellationToken;
 
 use super::config::TargetConfig;
-use super::repo::{BackupJob, ProgressFn, Repo, RepoOptions, SnapshotInfo, Target, TargetSecrets};
+use super::repo::{
+    BackupJob, Globs, ProgressFn, Repo, RepoOptions, SnapshotInfo, Target, TargetSecrets,
+};
 use super::{BackupKind, data};
 use crate::engine::Engine;
 use crate::error::{BackupError, CoreError, Result};
@@ -262,7 +264,7 @@ impl Engine {
                         &BackupJob {
                             source: &src,
                             as_path: "/printdex-data",
-                            excludes: &[],
+                            filter: &Globs::default(),
                             tags: &[DATA_TAG.to_owned()],
                             host: &host,
                         },
@@ -295,9 +297,42 @@ impl Engine {
             .map_err(|e| BackupError::Repository(e.to_string()))?
     }
 
-    /// Backs up one library's model files (skipped while it is offline).
+    /// Backs up one library's model files (skipped while it is offline),
+    /// tagged `printdex-models:<library>`, with the scanner's rules.
     async fn backup_models(&self, library: LibraryId) -> Result<RunSummary> {
-        let _ = library;
-        Err(BackupError::NotConfigured.into())
+        let lib = self.db.library(library).await?;
+        let kind = BackupKind::Models(library);
+        if crate::engine::folder_status(self.fs.clone(), lib.path.clone()).await
+            == crate::engine::LibraryStatus::Offline
+        {
+            return self.job_skipped(kind).await;
+        }
+        let (root, host, tag) = (
+            lib.path.clone(),
+            self.install.to_string(),
+            models_tag(library),
+        );
+        let as_path = format!("/models/{library}");
+        self.run_job(kind, move |repo, cancel, progress| {
+            repo.backup(
+                &BackupJob {
+                    source: &root,
+                    as_path: &as_path,
+                    filter: &crate::walk::Rules::backup_globs(),
+                    tags: &[tag],
+                    host: &host,
+                },
+                cancel,
+                Some(progress),
+            )
+            .map(Some)
+        })
+        .await
+    }
+
+    /// About how many bytes a first model backup of `library` reads (the
+    /// size of its files; dedup and compression make the upload smaller).
+    pub async fn estimate_models(&self, library: LibraryId) -> Result<u64> {
+        self.db.library_bytes(library).await
     }
 }

@@ -183,8 +183,13 @@ async fn data_snapshot_has_db_photos_settings_not_caches() {
     let mut finished = false;
     while let Ok(e) = events.try_recv() {
         match e {
-            EngineEvent::BackupStarted { kind } if kind == BackupKind::Data => started = true,
-            EngineEvent::BackupFinished { kind, .. } if kind == BackupKind::Data => finished = true,
+            EngineEvent::BackupStarted {
+                kind: BackupKind::Data,
+            } => started = true,
+            EngineEvent::BackupFinished {
+                kind: BackupKind::Data,
+                ..
+            } => finished = true,
             _ => {}
         }
     }

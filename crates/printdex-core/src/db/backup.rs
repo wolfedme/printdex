@@ -224,6 +224,21 @@ impl Db {
         Ok(())
     }
 
+    /// Bytes of the files a library holds (parts and other files of
+    /// present models).
+    pub async fn library_bytes(&self, library: LibraryId) -> Result<u64> {
+        let n = sqlx::query_scalar!(
+            r#"SELECT
+                 (SELECT COALESCE(SUM(size), 0) FROM parts WHERE library_id = ?1 AND missing_since IS NULL)
+               + (SELECT COALESCE(SUM(size), 0) FROM assets WHERE library_id = ?1 AND missing_since IS NULL)
+               as "n!: i64""#,
+            library
+        )
+        .fetch_one(self.reader())
+        .await?;
+        Ok(u64::try_from(n).unwrap_or(0))
+    }
+
     pub async fn install_predecessors(&self) -> Result<Vec<String>> {
         Ok(sqlx::query_scalar!(
             r#"SELECT install_id as "install_id!" FROM install_predecessors ORDER BY added_at"#

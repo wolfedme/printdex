@@ -222,7 +222,7 @@ async fn passphrase_change_keeps_snapshots() {
         &printdex_core::backup::BackupJob {
             source: &src,
             as_path: "/x",
-            excludes: &[],
+            filter: &printdex_core::backup::Globs::default(),
             tags: &[],
             host: "h",
         },

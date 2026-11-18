@@ -10,10 +10,12 @@ pub(crate) mod run;
 pub mod secrets;
 
 pub use crate::db::backup::RunRow as BackupRun;
-pub use config::{BackupConfig, ModelSchedule, Schedule, TargetCheck, TargetConfig};
+pub use config::{
+    BackupConfig, ModelSchedule, Schedule, TargetCheck, TargetConfig, default_models_on,
+};
 pub use repo::{
-    BackupJob, KEEP, Keep, ProgressFn, Repo, RepoOptions, SnapshotFilter, SnapshotInfo, Target,
-    TargetSecrets,
+    BackupJob, Globs, KEEP, Keep, ProgressFn, Repo, RepoOptions, SnapshotFilter, SnapshotInfo,
+    Target, TargetSecrets,
 };
 pub use run::{BackupScope, DATA_TAG, RunSummary, models_tag};
 

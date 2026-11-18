@@ -6,7 +6,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use printdex_core::BackupError;
 use printdex_core::CoreError;
-use printdex_core::backup::{BackupJob, Repo, RepoOptions, SnapshotFilter, Target, TargetSecrets};
+use printdex_core::backup::{
+    BackupJob, Globs, Repo, RepoOptions, SnapshotFilter, Target, TargetSecrets,
+};
 use tokio_util::sync::CancellationToken;
 
 fn folder(dir: &Path) -> Target {
@@ -46,7 +48,7 @@ fn backup(
         &BackupJob {
             source: src,
             as_path: "/library",
-            excludes: &[],
+            filter: &Globs::default(),
             tags: &["printdex-models:test".to_owned()],
             host: "host-a",
         },
@@ -197,7 +199,7 @@ fn cancel_mid_backup_leaves_repo_valid() {
             &BackupJob {
                 source: &src,
                 as_path: "/library",
-                excludes: &[],
+                filter: &Globs::default(),
                 tags: &[],
                 host: "host-a",
             },
@@ -224,7 +226,7 @@ fn cancel_mid_backup_leaves_repo_valid() {
             &BackupJob {
                 source: &src,
                 as_path: "/library",
-                excludes: &[],
+                filter: &Globs::default(),
                 tags: &[],
                 host: "host-a",
             },
@@ -248,7 +250,7 @@ fn forget_keeps_other_hosts_and_tags() {
             &BackupJob {
                 source: &src,
                 as_path: "/library",
-                excludes: &[],
+                filter: &Globs::default(),
                 tags: &[tag.to_owned()],
                 host,
             },
@@ -301,7 +303,7 @@ fn excludes_skip_matching_files() {
             &BackupJob {
                 source: &src,
                 as_path: "/library",
-                excludes: &[".DS_Store".into(), "parts/".into()],
+                filter: &Globs::excluding(&[".DS_Store", "parts/"]),
                 tags: &[],
                 host: "h",
             },

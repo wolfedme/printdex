@@ -54,6 +54,14 @@ impl BackupConfig {
     }
 }
 
+/// Whether model backup starts switched on for a library of `kind` in the
+/// setup screen: on for local and removable drives, off for network
+/// shares (usually backed up by the NAS itself). Nothing is uploaded
+/// until the user confirms.
+pub fn default_models_on(kind: crate::db::LibraryKind) -> bool {
+    !matches!(kind, crate::db::LibraryKind::Network)
+}
+
 /// What [`Engine::test_target`] found.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TargetCheck {

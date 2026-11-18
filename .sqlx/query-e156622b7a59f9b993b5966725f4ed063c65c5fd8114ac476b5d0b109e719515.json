@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n                 (SELECT COALESCE(SUM(size), 0) FROM parts WHERE library_id = ?1 AND missing_since IS NULL)\n               + (SELECT COALESCE(SUM(size), 0) FROM assets WHERE library_id = ?1 AND missing_since IS NULL)\n               as \"n!: i64\"",
+  "describe": {
+    "columns": [
+      {
+        "name": "n!: i64",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e156622b7a59f9b993b5966725f4ed063c65c5fd8114ac476b5d0b109e719515"
+}
