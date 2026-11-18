@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::backup::{Attention, BackupKind, SnapshotInfo};
 use crate::db::Library;
 use crate::error::CoreError;
 use crate::ids::{LibraryId, ModelId};
@@ -74,4 +75,24 @@ pub enum EngineEvent {
         target: ThumbTarget,
         reason: ThumbFailure,
     },
+    BackupStarted {
+        kind: BackupKind,
+    },
+    /// Bytes read so far of a backup (or written, of a restore).
+    BackupProgress {
+        kind: BackupKind,
+        done: u64,
+        total: u64,
+    },
+    BackupFinished {
+        kind: BackupKind,
+        /// The new snapshot (none for prune and check).
+        snapshot: Option<SnapshotInfo>,
+    },
+    BackupFailed {
+        kind: BackupKind,
+        error: Arc<CoreError>,
+    },
+    /// What needs the user's attention now (empty: all is well).
+    BackupNeedsAttention(Vec<Attention>),
 }

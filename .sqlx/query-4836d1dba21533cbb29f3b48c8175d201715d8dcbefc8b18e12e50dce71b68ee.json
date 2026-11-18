@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!\", kind, library_id as \"library_id: LibraryId\", started_at,\n                      finished_at, result, bytes_added, error\n               FROM backup_runs ORDER BY id DESC LIMIT ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "backup_runs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "kind",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "backup_runs",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "name": "library_id: LibraryId",
+        "ordinal": 2,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "backup_runs",
+            "name": "library_id"
+          }
+        }
+      },
+      {
+        "name": "started_at",
+        "ordinal": 3,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "backup_runs",
+            "name": "started_at"
+          }
+        }
+      },
+      {
+        "name": "finished_at",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "backup_runs",
+            "name": "finished_at"
+          }
+        }
+      },
+      {
+        "name": "result",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "backup_runs",
+            "name": "result"
+          }
+        }
+      },
+      {
+        "name": "bytes_added",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "backup_runs",
+            "name": "bytes_added"
+          }
+        }
+      },
+      {
+        "name": "error",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "backup_runs",
+            "name": "error"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "4836d1dba21533cbb29f3b48c8175d201715d8dcbefc8b18e12e50dce71b68ee"
+}

@@ -53,6 +53,8 @@ pub struct Engine {
     data_dir: PathBuf,
     /// Models whose file action a crash interrupted and opening finished.
     recovered: Arc<Mutex<Vec<String>>>,
+    /// Backup secrets (session and OS credential store).
+    pub(crate) secrets: Arc<crate::backup::secrets::Store>,
 }
 
 /// Removes a library from the "scanning" set on every exit path. Holds the
@@ -139,6 +141,7 @@ impl Engine {
             fs,
             data_dir: data_dir.to_path_buf(),
             recovered: Arc::new(Mutex::new(Vec::new())),
+            secrets: Arc::new(crate::backup::secrets::Store::default()),
         };
         match engine.reconcile_ops().await {
             Ok(names) => *engine.recovered.lock().unwrap_or_else(|p| p.into_inner()) = names,

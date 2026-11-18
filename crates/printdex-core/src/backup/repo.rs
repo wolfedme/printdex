@@ -360,13 +360,23 @@ fn backend(
     secrets: &TargetSecrets,
     opts: &RepoOptions,
 ) -> Result<Arc<dyn WriteBackend>> {
+    if let Target::Folder { path } = target {
+        let p = path.to_str().ok_or(BackupError::TargetInvalid)?;
+        return Ok(Arc::new(LocalBackend::new(p, []).map_err(classify)?));
+    }
+    Ok(Arc::new(remote_backend(target, secrets, opts)?))
+}
+
+/// The OpenDAL backend for a remote target.
+fn remote_backend(
+    target: &Target,
+    secrets: &TargetSecrets,
+    opts: &RepoOptions,
+) -> Result<RemoteBackend> {
     let throttle = opts.throttle.map(Throttle);
     let secret = secrets.secret.clone().unwrap_or_default();
-    let be: Arc<dyn WriteBackend> = match target {
-        Target::Folder { path } => {
-            let p = path.to_str().ok_or(BackupError::TargetInvalid)?;
-            Arc::new(LocalBackend::new(p, []).map_err(classify)?)
-        }
+    let be = match target {
+        Target::Folder { .. } => return Err(BackupError::TargetInvalid.into()),
         Target::S3 {
             endpoint,
             bucket,
@@ -383,17 +393,15 @@ fn backend(
                 .root(&format!("/{}", prefix.trim_matches('/')))
                 .disable_config_load()
                 .disable_ec2_metadata();
-            Arc::new(
-                RemoteBackend::new(b, format!("s3:{endpoint}/{bucket}/{prefix}"), throttle)
-                    .map_err(classify)?,
-            )
+            RemoteBackend::new(b, format!("s3:{endpoint}/{bucket}/{prefix}"), throttle)
+                .map_err(classify)?
         }
         Target::WebDav { url, user } => {
             let b = opendal::services::Webdav::default()
                 .endpoint(url)
                 .username(user)
                 .password(&secret);
-            Arc::new(RemoteBackend::new(b, format!("webdav:{url}"), throttle).map_err(classify)?)
+            RemoteBackend::new(b, format!("webdav:{url}"), throttle).map_err(classify)?
         }
         #[cfg(unix)]
         Target::Sftp {
@@ -411,15 +419,35 @@ fn backend(
             if let Some(k) = key_file.as_ref().and_then(|k| k.to_str()) {
                 b = b.key(k);
             }
-            Arc::new(
-                RemoteBackend::new(b, format!("sftp:{user}@{host}:{path}"), throttle)
-                    .map_err(classify)?,
-            )
+            RemoteBackend::new(b, format!("sftp:{user}@{host}:{path}"), throttle)
+                .map_err(classify)?
         }
         #[cfg(not(unix))]
         Target::Sftp { .. } => return Err(BackupError::Unsupported.into()),
     };
     Ok(be)
+}
+
+/// Writes and removes a small file at the target, to check it can be
+/// reached and written.
+pub(crate) fn probe(target: &Target, secrets: &TargetSecrets) -> Result<()> {
+    const NAME: &str = ".printdex-probe";
+    match target {
+        Target::Folder { path } => {
+            if !path.is_dir() {
+                // A folder that doesn't exist yet is fine if it can be made.
+                std::fs::create_dir_all(path).map_err(|e| classify_io(&e))?;
+            }
+            let file = path.join(NAME);
+            std::fs::write(&file, b"printdex").map_err(|e| classify_io(&e))?;
+            std::fs::remove_file(&file).map_err(|e| classify_io(&e))?;
+            Ok(())
+        }
+        _ => {
+            let be = remote_backend(target, secrets, &RepoOptions::default())?;
+            be.probe(NAME).map_err(classify)
+        }
+    }
 }
 
 impl Repo {

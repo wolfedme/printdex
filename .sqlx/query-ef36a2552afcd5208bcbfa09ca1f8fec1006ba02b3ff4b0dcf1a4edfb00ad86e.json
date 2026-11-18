@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!\", settings, encrypted as \"encrypted: bool\"\n               FROM backup_targets ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "backup_targets",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "settings",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "backup_targets",
+            "name": "settings"
+          }
+        }
+      },
+      {
+        "name": "encrypted: bool",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "backup_targets",
+            "name": "encrypted"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ef36a2552afcd5208bcbfa09ca1f8fec1006ba02b3ff4b0dcf1a4edfb00ad86e"
+}

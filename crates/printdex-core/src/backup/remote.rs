@@ -71,6 +71,16 @@ impl RemoteBackend {
         Ok(Self { op, location })
     }
 
+    /// Writes and removes `name` at the target's root.
+    pub fn probe(&self, name: &str) -> RusticResult<()> {
+        self.op
+            .write(name, b"printdex".to_vec())
+            .map_err(|e| backend_err("Writing to the backup target failed.", e))?;
+        self.op
+            .delete(name)
+            .map_err(|e| backend_err("Deleting from the backup target failed.", e))
+    }
+
     fn path(tpe: FileType, id: &Id) -> String {
         let hex = id.to_hex();
         match tpe {

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT library_id as \"library_id!: LibraryId\", models_on as \"models_on: bool\"\n               FROM backup_libraries ORDER BY library_id",
+  "describe": {
+    "columns": [
+      {
+        "name": "library_id!: LibraryId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "backup_libraries",
+            "name": "library_id"
+          }
+        }
+      },
+      {
+        "name": "models_on: bool",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "backup_libraries",
+            "name": "models_on"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "1ff3ceaf5a0c100c84a1a4919086cddaa42fc0a83222d9c3caa0d9c06db202d3"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO backup_libraries (library_id, models_on) VALUES (?, ?)\n                 ON CONFLICT (library_id) DO UPDATE SET models_on = excluded.models_on",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "9cf9bc519db1dc1552ff1eeac661a47e4e50bef62543d23447dd02794a105e6f"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT install_id as \"install_id!\" FROM install_predecessors ORDER BY added_at",
+  "describe": {
+    "columns": [
+      {
+        "name": "install_id!",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "install_predecessors",
+            "name": "install_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "186762bb6fe6c58565a60ca50c989df6b4c21a61ecabfa9a43c1fc17cfde7e63"
+}

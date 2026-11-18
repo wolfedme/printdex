@@ -55,6 +55,7 @@ rustic_backend = { version = "0.8", default-features = false }
 # pulls in two dozen). SFTP is added per target in printdex-core.
 opendal = { version = "0.59", default-features = false, features = ["blocking", "http-transport-reqwest", "executors-tokio", "layers-retry", "layers-throttle", "services-s3", "services-webdav"] }
 bytes = "1"
+keyring = "4"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
