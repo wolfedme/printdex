@@ -10,6 +10,19 @@
   "tolerance": 0.2,
   "slack_ms": 25,
   "slack_us": 2000,
-  "baseline": null,
-  "enforce_regressions": false
+  "baseline": {
+    "models": 3967,
+    "initial_scan_ms": 1499,
+    "rescan_ms": 357,
+    "rescan_fingerprinted": 0,
+    "subtree_rescan_ms": 46,
+    "start_to_usable_ms": 6,
+    "search_p50_us": 789,
+    "search_p95_us": 2315,
+    "search_max_us": 5797,
+    "queries": 200,
+    "idle_cpu_pct": 0.0,
+    "rss_mb": 43
+  },
+  "enforce_regressions": true
 }

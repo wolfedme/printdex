@@ -36,7 +36,8 @@ fn source(dir: &Path) {
     stl.push_str("endsolid hook\n");
     std::fs::write(dir.join("Hook/hook.stl"), stl).unwrap();
     let mut rng = fastrand::Rng::with_seed(7);
-    let noise: Vec<u8> = (0..300_000).map(|_| rng.u8(..)).collect();
+    let mut noise = vec![0u8; 300_000];
+    rng.fill(&mut noise);
     std::fs::write(dir.join("Hook/parts/noise.bin"), noise).unwrap();
 }
 
@@ -178,7 +179,8 @@ fn cancel_mid_backup_leaves_repo_valid() {
     // Enough incompressible data for several packs.
     let mut rng = fastrand::Rng::with_seed(1);
     for i in 0..12 {
-        let data: Vec<u8> = (0..2_000_000).map(|_| rng.u8(..)).collect();
+        let mut data = vec![0u8; 2_000_000];
+        rng.fill(&mut data);
         std::fs::write(src.join(format!("big{i}.bin")), data).unwrap();
     }
     let mut repo =
