@@ -62,8 +62,26 @@ enum BenchCommand {
         queries: u32,
         #[arg(long, default_value_t = 1)]
         seed: u64,
+        /// Milliseconds added to every filesystem call (a slow share).
+        #[arg(long, default_value_t = 0)]
+        chaos_latency_ms: u64,
+        /// Seconds to measure idle CPU with the monitor running (0 skips).
+        #[arg(long, default_value_t = 0)]
+        idle_secs: u64,
+        /// Also write the report as JSON to this file.
+        #[arg(long, value_name = "FILE")]
+        report: Option<PathBuf>,
+    },
+    /// Compare a JSON report with budgets and the recorded baseline.
+    Check {
+        report: PathBuf,
+        #[arg(long, default_value = "bench/baseline.json")]
+        baseline: PathBuf,
     },
 }
+
+/// Exit code when a bench check fails.
+const EXIT_BENCH_CHECK: u8 = 3;
 
 /// Exit code when an unchanged rescan read file contents.
 const EXIT_BENCH_REFINGERPRINTED: u8 = 2;
@@ -140,15 +158,38 @@ async fn run_bench(cmd: BenchCommand) -> anyhow::Result<ExitCode> {
             println!("words: {}", r.words.len());
             Ok(ExitCode::SUCCESS)
         }
-        BenchCommand::Run { dir, queries, seed } => {
-            let r = bench::run::run(&dir, queries, seed).await?;
+        BenchCommand::Run {
+            dir,
+            queries,
+            seed,
+            chaos_latency_ms,
+            idle_secs,
+            report,
+        } => {
+            let opts = bench::run::BenchOptions {
+                queries,
+                seed,
+                chaos_latency: std::time::Duration::from_millis(chaos_latency_ms),
+                idle: std::time::Duration::from_secs(idle_secs),
+            };
+            let r = bench::run::run(&dir, &opts).await?;
+            println!("models: {}", r.models);
             println!("initial_scan_ms: {}", r.initial_scan_ms);
             println!("rescan_ms: {}", r.rescan_ms);
             println!("rescan_fingerprinted: {}", r.rescan_fingerprinted);
+            println!("subtree_rescan_ms: {}", r.subtree_rescan_ms);
+            println!("start_to_usable_ms: {}", r.start_to_usable_ms);
             println!("search_p50_us: {}", r.search_p50_us);
             println!("search_p95_us: {}", r.search_p95_us);
             println!("search_max_us: {}", r.search_max_us);
             println!("queries: {}", r.queries);
+            if idle_secs > 0 {
+                println!("idle_cpu_pct: {:.2}", r.idle_cpu_pct);
+            }
+            println!("rss_mb: {}", r.rss_mb);
+            if let Some(path) = report {
+                std::fs::write(&path, serde_json::to_string_pretty(&r)?)?;
+            }
             if r.rescan_fingerprinted != 0 {
                 eprintln!(
                     "error: unchanged rescan read {} files",
@@ -156,6 +197,25 @@ async fn run_bench(cmd: BenchCommand) -> anyhow::Result<ExitCode> {
                 );
                 return Ok(ExitCode::from(EXIT_BENCH_REFINGERPRINTED));
             }
+            Ok(ExitCode::SUCCESS)
+        }
+        BenchCommand::Check { report, baseline } => {
+            let r: bench::run::BenchReport =
+                serde_json::from_str(&std::fs::read_to_string(&report)?)?;
+            let b: bench::check::Baseline =
+                serde_json::from_str(&std::fs::read_to_string(&baseline)?)?;
+            let findings = bench::check::compare(&r, &b);
+            if b.baseline.is_none() {
+                println!("no recorded baseline yet: checking budgets only");
+            }
+            for f in &findings {
+                let tag = if f.fails { "FAIL" } else { "warn" };
+                println!("{tag} {}: {}", f.metric, f.message);
+            }
+            if findings.iter().any(|f| f.fails) {
+                return Ok(ExitCode::from(EXIT_BENCH_CHECK));
+            }
+            println!("ok");
             Ok(ExitCode::SUCCESS)
         }
     }

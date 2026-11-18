@@ -32,6 +32,9 @@ pub struct ScanWrite {
     /// Relative paths (folders or files) the scan could not read this round.
     /// Existing rows at, under or containing them are not marked missing.
     pub keep: Vec<String>,
+    /// Top-level paths a subtree scan covers; rows outside are left alone.
+    /// `None` for a full scan.
+    pub scope: Option<Vec<String>>,
 }
 
 /// Model counts from applying a scan.
@@ -282,7 +285,11 @@ async fn run_scan_with(
     after_walk(&files);
     progress(ScanPhase::Walking, files_seen, files_seen);
 
-    let known = db.known_files(lib.id).await?;
+    // A subtree scan reads and writes only the top-level folders it
+    // touches: grouping a top-level folder never depends on its siblings,
+    // so the rest of the library can stay out of memory.
+    let scope = subtrees.and_then(scope_of);
+    let known = db.known_files(lib.id, scope.as_deref()).await?;
     // Outside the walked subtrees, the library is what the database says:
     // the present files go in unchanged, so the diff leaves them alone.
     let walked_sidecars: Vec<(String, i64)> = files
@@ -314,7 +321,9 @@ async fn run_scan_with(
     // A library that had files and now yields none is far more likely an
     // unmounted share (empty mount point) or a share failing mid-walk than a
     // deliberately emptied folder. Refuse instead of marking it all missing.
-    if files.is_empty() && !known.is_empty() {
+    // (A subtree scan may rightly find its folders gone; the root check in
+    // the walk and before writing guards it.)
+    if subtrees.is_none() && files.is_empty() && !known.is_empty() {
         return Err(CoreError::LibraryOffline(lib.path.clone()));
     }
     let mut keep = Vec::new();
@@ -407,6 +416,7 @@ async fn run_scan_with(
                 fingerprints,
                 groups,
                 keep,
+                scope,
             },
         )
         .await?;
@@ -471,6 +481,22 @@ async fn run_scan_with(
         duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         partial: subtrees.is_some(),
     })
+}
+
+/// The top-level folders (or root files) that `subtrees` lie in, or `None`
+/// when one of them is the whole library.
+fn scope_of(subtrees: &[String]) -> Option<Vec<String>> {
+    let mut tops: Vec<String> = Vec::with_capacity(subtrees.len());
+    for s in subtrees {
+        let top = s.split('/').next().unwrap_or_default();
+        if top.is_empty() {
+            return None;
+        }
+        tops.push(top.to_owned());
+    }
+    tops.sort_unstable();
+    tops.dedup();
+    Some(tops)
 }
 
 /// `/`-joined UTF-8 relative path, or `None` if not representable.
@@ -611,6 +637,62 @@ mod tests {
         let s = f.scan().await;
         assert_eq!(s.fingerprinted, 1);
         assert_ne!(f.count(q).await, before);
+    }
+
+    async fn scan_paths(f: &Fixture, paths: &[&str]) -> ScanSummary {
+        let paths: Vec<String> = paths.iter().map(|p| (*p).to_owned()).collect();
+        scan_subtrees(
+            real(),
+            &f.db,
+            &f.lib,
+            &f.tx,
+            CancellationToken::new(),
+            None,
+            &paths,
+        )
+        .await
+        .unwrap()
+    }
+
+    #[test]
+    fn scope_is_the_top_level_folders() {
+        let s = |v: &[&str]| scope_of(&v.iter().map(|p| (*p).to_owned()).collect::<Vec<_>>());
+        assert_eq!(
+            s(&["Minis/Orc", "Minis/Elf/stl", "Busts"]),
+            Some(vec!["Busts".into(), "Minis".into()])
+        );
+        assert_eq!(s(&["hook.stl"]), Some(vec!["hook.stl".into()]));
+        assert_eq!(s(&["Minis", ""]), None);
+    }
+
+    #[tokio::test]
+    async fn subtree_scan_leaves_other_top_level_folders_alone() {
+        let f = Fixture::new(&[
+            "Minis/Orc/orc.stl",
+            "Busts/Bust/bust.stl",
+            "Busts-old/Bust/bust.stl",
+        ])
+        .await;
+        f.scan().await;
+        // Gone on disk, but outside the scanned scope: not touched.
+        fs::remove_dir_all(f.root.join("Busts")).unwrap();
+        write(&f.root, "Minis/Elf/elf.stl", b"elf");
+        let s = scan_paths(&f, &["Minis/Elf"]).await;
+        assert_eq!((s.models_added, s.models_missing), (1, 0));
+        assert!(f.model("Busts/Bust").await.1.is_none());
+        assert!(f.model("Busts-old/Bust").await.1.is_none());
+        assert!(f.model("Minis/Orc").await.1.is_none());
+    }
+
+    #[tokio::test]
+    async fn subtree_scan_of_a_deleted_top_level_folder_marks_it_missing() {
+        let f = Fixture::new(&["Minis/Orc/orc.stl", "Busts/Bust/bust.stl"]).await;
+        f.scan().await;
+        fs::remove_dir_all(f.root.join("Busts")).unwrap();
+        let s = scan_paths(&f, &["Busts"]).await;
+        assert_eq!(s.models_missing, 1);
+        assert!(f.model("Busts/Bust").await.1.is_some());
+        assert!(f.model("Minis/Orc").await.1.is_none());
     }
 
     #[tokio::test]

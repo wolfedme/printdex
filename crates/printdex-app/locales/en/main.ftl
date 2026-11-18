@@ -403,3 +403,20 @@ files-error-undo = There is nothing to undo.
 files-error-gone = The model's files are no longer where Printdex saw them.
 files-error-outside = That folder is not in one of your libraries.
 files-error-other = The files could not be changed. Nothing was lost; see the log for details.
+
+## Updates
+updates-ask = Check for updates automatically? Printdex looks at its GitHub releases once a day and sends nothing about you or your library.
+updates-yes = Check automatically
+updates-not-now = Not now
+updates-title = Updates
+updates-auto = Check automatically
+updates-auto-hint = Once a day, from Printdex's GitHub releases. Updates install only when you restart.
+updates-check-now = Check now
+updates-idle = Not checked yet.
+updates-checking = Checking for updates…
+updates-up-to-date = Printdex is up to date.
+updates-downloading = Downloading Printdex { $version }…
+updates-ready = Printdex { $version } is ready to install.
+updates-restart = Restart to update
+updates-failed = Could not check for updates: { $error }
+updates-unavailable = Updates come with the installed app. This copy wasn't installed with the Printdex installer, so it doesn't update itself.

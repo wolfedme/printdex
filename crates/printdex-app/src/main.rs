@@ -18,6 +18,7 @@ mod search;
 mod settings;
 mod theme;
 mod thumbs;
+mod updates;
 mod view;
 mod viewer;
 
@@ -53,6 +54,8 @@ enum ModeArg {
 }
 
 fn main() -> anyhow::Result<()> {
+    // First thing: Velopack's install/update hooks may run and exit here.
+    velopack::VelopackApp::build().run();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -102,6 +105,7 @@ fn main() -> anyhow::Result<()> {
                 size: app::INITIAL_WINDOW,
                 transparent: glass_window,
                 blur: glass_window,
+                icon: window_icon(),
                 ..iced::window::Settings::default()
             })
             .default_font(theme::FONT_BODY);
@@ -110,4 +114,21 @@ fn main() -> anyhow::Result<()> {
     }
     application.run()?;
     Ok(())
+}
+
+/// The app icon for the window and task bar (macOS uses the bundle's).
+fn window_icon() -> Option<iced::window::Icon> {
+    let png = include_bytes!("../../../packaging/icons/printdex-256.png");
+    let img = image::load_from_memory_with_format(png, image::ImageFormat::Png).ok()?;
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    iced::window::icon::from_rgba(rgba.into_raw(), w, h).ok()
+}
+
+#[cfg(test)]
+mod icon_tests {
+    #[test]
+    fn window_icon_decodes() {
+        assert!(super::window_icon().is_some());
+    }
 }

@@ -1,49 +1,49 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT rel_path, size, mtime_ns, fp_hash, missing_since FROM parts WHERE library_id = ?",
+  "query": "SELECT id as \"id!: ModelId\", rel_path, name, kind, missing_since\n                       FROM models WHERE library_id = ? AND rel_path >= ? AND rel_path < ?",
   "describe": {
     "columns": [
       {
-        "name": "rel_path",
+        "name": "id!: ModelId",
         "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "models",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "rel_path",
+        "ordinal": 1,
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "parts",
+            "table": "models",
             "name": "rel_path"
           }
         }
       },
       {
-        "name": "size",
-        "ordinal": 1,
-        "type_info": "Integer",
-        "origin": {
-          "Table": {
-            "table": "parts",
-            "name": "size"
-          }
-        }
-      },
-      {
-        "name": "mtime_ns",
+        "name": "name",
         "ordinal": 2,
-        "type_info": "Integer",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "parts",
-            "name": "mtime_ns"
+            "table": "models",
+            "name": "name"
           }
         }
       },
       {
-        "name": "fp_hash",
+        "name": "kind",
         "ordinal": 3,
-        "type_info": "Integer",
+        "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "parts",
-            "name": "fp_hash"
+            "table": "models",
+            "name": "kind"
           }
         }
       },
@@ -53,22 +53,22 @@
         "type_info": "Integer",
         "origin": {
           "Table": {
-            "table": "parts",
+            "table": "models",
             "name": "missing_since"
           }
         }
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 3
     },
     "nullable": [
-      false,
-      false,
-      false,
       true,
+      false,
+      false,
+      false,
       true
     ]
   },
-  "hash": "f59b92dcbd207a5dedc10bb2683a8df1fec4c26fc58ff2e767c7a1319c2776b3"
+  "hash": "08f73be1b2f0123033d205a8bbb3ee49e4c5cc9711c56f00fc4865b208ac62c9"
 }

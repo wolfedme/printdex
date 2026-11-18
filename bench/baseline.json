@@ -1,0 +1,15 @@
+{
+  "budgets": {
+    "start_to_usable_ms": 1000,
+    "search_p95_us": 50000,
+    "subtree_rescan_ms": 200,
+    "rescan_fingerprinted": 0,
+    "idle_cpu_pct": 1.0,
+    "rss_mb": 250
+  },
+  "tolerance": 0.2,
+  "slack_ms": 25,
+  "slack_us": 2000,
+  "baseline": null,
+  "enforce_regressions": false
+}

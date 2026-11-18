@@ -128,11 +128,23 @@ jobs:
       - name: Generate library
         run: cargo run --release -p printdex-cli -- bench gen "$RUNNER_TEMP/lib" --parts 20000
       - name: Benchmark
-        # Fails only when an unchanged rescan reads file contents (exit 2).
-        # Timings are reported, not enforced: shared runners are too noisy.
+        # Exit 2 when an unchanged rescan reads file contents.
         run: |
           set -o pipefail
           echo '### printdex bench (20k parts)' >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          cargo run --release -p printdex-cli -- bench run "$RUNNER_TEMP/lib" | tee -a "$GITHUB_STEP_SUMMARY"
+          cargo run --release -p printdex-cli -- bench run "$RUNNER_TEMP/lib" --idle-secs 30 --report bench-report.json | tee -a "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - name: Compare with budgets and baseline
+        # Budgets (bench/baseline.json) always fail; regressions against the
+        # recorded baseline fail once `enforce_regressions` is on.
+        run: |
+          set -o pipefail
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cargo run --release -p printdex-cli -- bench check bench-report.json | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-report
+          path: bench-report.json

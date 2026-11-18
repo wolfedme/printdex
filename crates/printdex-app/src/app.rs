@@ -152,6 +152,7 @@ pub struct App {
     pub engine: Option<Engine>,
     /// Multi-select, file action dialogs, undo toast, Open with.
     pub files: crate::files::FilesUi,
+    pub updates: crate::updates::Updates,
     /// Watches libraries for changes and offline shares while the app runs.
     pub monitor: Option<Arc<printdex_core::Monitor>>,
     pub boot: Boot,
@@ -203,6 +204,7 @@ pub enum Message {
     Booted(Result<Engine, Arc<CoreError>>),
     MonitorStarted(Arc<printdex_core::Monitor>),
     Files(crate::files::Fx),
+    Updates(crate::updates::Ux),
     Libraries(Result<LibrarySnapshot, Arc<CoreError>>),
     Engine(EngineEvent),
     SearchChanged(String),
@@ -285,6 +287,7 @@ impl App {
             options,
             engine: None,
             monitor: None,
+            updates: crate::updates::Updates::default(),
             files: crate::files::FilesUi {
                 apps,
                 ..Default::default()
@@ -338,7 +341,10 @@ impl App {
             Message::Booted,
         );
         let mode = iced::system::theme().map(Message::SystemMode);
-        (App::new(options), Task::batch([open, mode]))
+        let mut app = App::new(options);
+        app.updates = crate::updates::Updates::start();
+        let check = Task::done(Message::Updates(crate::updates::Ux::Tick));
+        (app, Task::batch([open, mode, check]))
     }
 
     /// Light or dark right now: the `--mode` override, else the setting,
@@ -527,6 +533,7 @@ impl App {
                 ])
             }
             Message::Files(f) => self.on_files(f),
+            Message::Updates(u) => self.on_updates(u),
             Message::MonitorStarted(monitor) => {
                 self.monitor = Some(monitor);
                 Task::none()
@@ -1089,7 +1096,7 @@ impl App {
     }
 
     /// Writes the settings file off the UI thread.
-    fn save_settings(&self) -> Task<Message> {
+    pub(crate) fn save_settings(&self) -> Task<Message> {
         let Some(dir) = self.options.config_dir.clone() else {
             return Task::none();
         };
@@ -1377,6 +1384,12 @@ impl App {
             event::listen_with(on_event),
             iced::system::theme_changes().map(Message::SystemMode),
         ];
+        if self.settings.update_checks == Some(true) && self.updates.available() {
+            subs.push(
+                iced::time::every(std::time::Duration::from_secs(3600))
+                    .map(|_| Message::Updates(crate::updates::Ux::Tick)),
+            );
+        }
         if self.motion.animating(std::time::Instant::now()) {
             subs.push(window::frames().map(Message::Frame));
         }

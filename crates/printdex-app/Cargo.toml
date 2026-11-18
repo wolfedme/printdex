@@ -22,6 +22,9 @@ clap.workspace = true
 directories.workspace = true
 fluent-bundle.workspace = true
 iced.workspace = true
+minisign-verify.workspace = true
+serde_json.workspace = true
+velopack.workspace = true
 # Codecs for thumbnails (PNG) through iced's image widget.
 image.workspace = true
 jiff.workspace = true

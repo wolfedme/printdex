@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT rel_path, size, mtime_ns, missing_since FROM assets WHERE library_id = ?",
+  "query": "SELECT rel_path, size, mtime_ns, missing_since FROM assets\n                   WHERE library_id = ? AND rel_path >= ? AND rel_path < ?",
   "describe": {
     "columns": [
       {
@@ -49,7 +49,7 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 3
     },
     "nullable": [
       false,
@@ -58,5 +58,5 @@
       true
     ]
   },
-  "hash": "3681973e35b03a63d0106320532d4396c9923ea2217d35a14cd98e6547b09c2e"
+  "hash": "f1b8bd1620d30d42b5a004f52a5f76a864297839d27762b94a8cfbfb2d75ec06"
 }

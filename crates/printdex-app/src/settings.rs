@@ -53,6 +53,8 @@ pub struct Settings {
     pub reduce_motion: bool,
     /// Thumbnail cache size limit, one of [`CACHE_LIMITS_MB`].
     pub cache_mb: u32,
+    /// Check for updates automatically: `None` until the user answered.
+    pub update_checks: Option<bool>,
 }
 
 impl Default for Settings {
@@ -65,6 +67,7 @@ impl Default for Settings {
             translucency: Translucency::default(),
             reduce_motion: false,
             cache_mb: DEFAULT_CACHE_MB,
+            update_checks: None,
         }
     }
 }
@@ -170,6 +173,7 @@ impl Settings {
         {
             s.cache_mb = v;
         }
+        s.update_checks = table.get("update-checks").and_then(toml::Value::as_bool);
         s
     }
 
@@ -186,6 +190,9 @@ impl Settings {
         );
         t.insert("reduce-motion".into(), self.reduce_motion.into());
         t.insert("cache-limit-mb".into(), i64::from(self.cache_mb).into());
+        if let Some(v) = self.update_checks {
+            t.insert("update-checks".into(), v.into());
+        }
         t.to_string()
     }
 
@@ -224,6 +231,7 @@ mod tests {
             translucency: Translucency::Off,
             reduce_motion: true,
             cache_mb: 5000,
+            update_checks: Some(true),
         }
     }
 
