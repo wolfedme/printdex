@@ -3,15 +3,19 @@
 //! S3, WebDAV or SFTP target.
 
 pub mod config;
+mod data;
 mod remote;
 pub mod repo;
+pub(crate) mod run;
 pub mod secrets;
 
+pub use crate::db::backup::RunRow as BackupRun;
 pub use config::{BackupConfig, ModelSchedule, Schedule, TargetCheck, TargetConfig};
 pub use repo::{
     BackupJob, KEEP, Keep, ProgressFn, Repo, RepoOptions, SnapshotFilter, SnapshotInfo, Target,
     TargetSecrets,
 };
+pub use run::{BackupScope, DATA_TAG, RunSummary, models_tag};
 
 use crate::ids::LibraryId;
 

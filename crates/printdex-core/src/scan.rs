@@ -202,7 +202,7 @@ async fn scan_with_events(
 /// Copy of an error for event subscribers. `CoreError` is not `Clone`
 /// because the I/O and database errors inside it are not; those are copied
 /// by kind and message.
-fn clone_error(e: &CoreError) -> CoreError {
+pub(crate) fn clone_error(e: &CoreError) -> CoreError {
     match e {
         CoreError::LibraryNotFound(id) => CoreError::LibraryNotFound(*id),
         CoreError::LibraryPathInvalid(p) => CoreError::LibraryPathInvalid(p.clone()),

@@ -90,6 +90,10 @@ pub enum BackupError {
     TargetInvalid,
     #[error("this kind of target is not available on this system")]
     Unsupported,
+    #[error("no backup target is set up")]
+    NotConfigured,
+    #[error("the passphrase or target credentials are needed")]
+    SecretsNeeded,
     #[error("there is no backup at the target")]
     NoRepository,
     #[error("snapshot not found")]
