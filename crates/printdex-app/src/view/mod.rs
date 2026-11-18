@@ -10,6 +10,7 @@ mod model;
 mod organize;
 mod preview;
 mod prints;
+mod restore;
 pub mod settings;
 mod sidebar;
 mod statusbar;
@@ -88,7 +89,7 @@ fn library(app: &App, p: Palette) -> Element<'_, Message> {
     }
     let filtered = !app.search.query.text.trim().is_empty() || !app.chips.is_empty();
     content = content.push(if no_library {
-        empty::no_library(p)
+        empty::no_library(app, p)
     } else if app.search.loaded && app.search.hits.is_empty() && filtered {
         empty::no_results(p, &app.search.query.text)
     } else if app.settings.view == ViewMode::List {
@@ -99,6 +100,9 @@ fn library(app: &App, p: Palette) -> Element<'_, Message> {
 
     let mut top = column![];
     if let Some(b) = update_banner(app, p) {
+        top = top.push(b).push(hairline(p));
+    }
+    if let Some(b) = restore::relink_banner(app, p) {
         top = top.push(b).push(hairline(p));
     }
     let mut top = top.push(toolbar::view(app, p)).push(hairline(p));

@@ -15,6 +15,7 @@ mod motion;
 mod nav;
 mod org;
 mod prints;
+mod restore_ui;
 mod search;
 mod settings;
 mod theme;

@@ -225,6 +225,7 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
                     reveal
                 ),
                 file_actions(p, gone),
+                restore_button(app, p, d.id),
                 open_button(app, p, open),
                 log_button(p, app.prints.form.is_none()),
             ]
@@ -236,10 +237,14 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
     .padding([theme::S5, theme::S8])
     .width(Length::Fill)
     .style(move |_| p.bar());
-    let header: Element<'a, Message> = match d.missing_since {
-        Some(since) => column![header, missing_banner(app, p, d, since)].into(),
-        None => header.into(),
-    };
+    let mut header = column![header];
+    if let Some(since) = d.missing_since {
+        header = header.push(missing_banner(app, p, d, since));
+    }
+    if let Some(panel) = super::restore::model_panel(app, p, d) {
+        header = header.push(panel);
+    }
+    let header: Element<'a, Message> = header.into();
 
     // Main column: preview, parts, other files.
     let caption = current.map_or_else(String::new, |pt| {
@@ -711,6 +716,13 @@ fn missing_banner<'a>(
         if let Some(msg) = where_it_was {
             r = r.push(small_button(p, t("model-where-it-was"), msg));
         }
+        if app.backup.target().is_some() {
+            r = r.push(small_button(
+                p,
+                t("restore-model"),
+                Message::Restore(crate::restore_ui::Rx::OpenModel(d.id)),
+            ));
+        }
         r.push(small_button(
             p,
             t("model-forget"),
@@ -748,4 +760,18 @@ fn missing<'a>(p: Palette) -> Element<'a, Message> {
     .center(Length::Fill)
     .style(move |_| p.ground())
     .into()
+}
+
+/// "Restore from backup…" in the header, once backups are set up.
+fn restore_button<'a>(app: &App, p: Palette, id: printdex_core::ModelId) -> Element<'a, Message> {
+    if app.backup.target().is_none() {
+        return Space::new().into();
+    }
+    icon_button(
+        p,
+        Icon::Backup,
+        t("restore-model"),
+        Palette::button_ghost,
+        Some(Message::Restore(crate::restore_ui::Rx::OpenModel(id))),
+    )
 }

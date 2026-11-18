@@ -841,7 +841,11 @@ impl App {
             Bx::Unlocked(Ok(())) => {
                 self.backup.prompt = Prompt::default();
                 self.backup.secrets_known = true;
-                self.load_backup()
+                self.backup
+                    .attention
+                    .retain(|a| !matches!(a, Attention::PassphraseNeeded | Attention::Credentials));
+                // Libraries waiting after a restore can now offer their files.
+                Task::batch([self.load_backup(), self.load_pending()])
             }
             Bx::Unlocked(Err(e)) => {
                 self.backup.prompt.busy = false;
