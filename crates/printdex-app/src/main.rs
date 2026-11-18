@@ -18,6 +18,7 @@ mod search;
 mod settings;
 mod theme;
 mod thumbs;
+mod updates;
 mod view;
 mod viewer;
 
@@ -53,6 +54,8 @@ enum ModeArg {
 }
 
 fn main() -> anyhow::Result<()> {
+    // First thing: Velopack's install/update hooks may run and exit here.
+    velopack::VelopackApp::build().run();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

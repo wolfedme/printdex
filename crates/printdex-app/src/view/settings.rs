@@ -857,7 +857,90 @@ fn about(app: &App, p: Palette) -> Element<'_, Message> {
         .padding(theme::S6)
         .width(Length::Fill)
         .style(move |_| p.pane(false, false)),
+        updates(app, p),
     ]
     .spacing(theme::S6)
+    .into()
+}
+
+/// Settings › About › Updates: the automatic-check choice, Check now and
+/// what the last check found.
+fn updates(app: &App, p: Palette) -> Element<'_, Message> {
+    use crate::updates::{UpdateState, Ux};
+    let title = text(t("updates-title"))
+        .size(theme::SIZE_SECTION)
+        .font(theme::FONT_BOLD)
+        .color(p.n.ink);
+    if !app.updates.available() {
+        return column![
+            title,
+            text(t("updates-unavailable"))
+                .size(theme::SIZE_CAPTION)
+                .color(p.n.ink_2),
+        ]
+        .spacing(theme::S3)
+        .into();
+    }
+    let s = app.settings;
+    let auto = toggler(s.update_checks == Some(true))
+        .size(20)
+        .style(move |_, status| p.toggler(status))
+        .on_toggle(|on| Message::Updates(Ux::Consent(on)));
+    let (status, color) = match &app.updates.state {
+        UpdateState::Idle => (t("updates-idle"), p.n.ink_2),
+        UpdateState::Checking => (t("updates-checking"), p.n.ink_2),
+        UpdateState::UpToDate => (t("updates-up-to-date"), p.n.ink_2),
+        UpdateState::Downloading(v) => (
+            t_args("updates-downloading", &[("version", Arg::str(v.clone()))]),
+            p.n.ink_2,
+        ),
+        UpdateState::Ready(info) => (
+            t_args(
+                "updates-ready",
+                &[("version", Arg::str(info.TargetFullRelease.Version.clone()))],
+            ),
+            p.n.ink,
+        ),
+        UpdateState::Failed(e) => (
+            t_args("updates-failed", &[("error", Arg::str(e.clone()))]),
+            p.status.fail,
+        ),
+    };
+    let action: Element<'_, Message> = if matches!(app.updates.state, UpdateState::Ready(_)) {
+        widgets::icon_button(
+            p,
+            Icon::Refresh,
+            t("updates-restart"),
+            Palette::button_primary,
+            Some(Message::Updates(Ux::Restart)),
+        )
+    } else {
+        let busy = matches!(
+            app.updates.state,
+            UpdateState::Checking | UpdateState::Downloading(_)
+        );
+        widgets::icon_button(
+            p,
+            Icon::Refresh,
+            t("updates-check-now"),
+            Palette::button_secondary,
+            (!busy).then_some(Message::Updates(Ux::CheckNow)),
+        )
+    };
+    column![
+        title,
+        widgets::hairline(p),
+        setting(p, t("updates-auto"), t("updates-auto-hint"), auto.into()),
+        row![
+            text(status)
+                .size(theme::SIZE_BODY)
+                .color(color)
+                .width(Length::Fill),
+            action,
+        ]
+        .spacing(theme::S6)
+        .align_y(Alignment::Center),
+    ]
+    .spacing(theme::S5)
     .into()
 }

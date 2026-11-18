@@ -96,7 +96,11 @@ fn library(app: &App, p: Palette) -> Element<'_, Message> {
         grid::view(app, p)
     });
 
-    let mut top = column![toolbar::view(app, p), hairline(p)];
+    let mut top = column![];
+    if let Some(b) = update_banner(app, p) {
+        top = top.push(b).push(hairline(p));
+    }
+    let mut top = top.push(toolbar::view(app, p)).push(hairline(p));
     if app.filter_menu {
         top = top.push(toolbar::filter_bar(app, p)).push(hairline(p));
     }
@@ -144,4 +148,64 @@ fn error_line<'a>(p: Palette, message: &str) -> Element<'a, Message> {
     .padding([theme::S3, theme::S5])
     .style(move |_| p.error_line())
     .into()
+}
+
+/// One line over the library: the first-launch "Check for updates
+/// automatically?" question, or "Restart to update" once one is ready.
+fn update_banner(app: &App, p: Palette) -> Option<Element<'_, Message>> {
+    use crate::updates::{UpdateState, Ux};
+    let (message, actions): (String, Vec<Element<'_, Message>>) =
+        if let UpdateState::Ready(info) = &app.updates.state {
+            (
+                t_args(
+                    "updates-ready",
+                    &[("version", Arg::str(info.TargetFullRelease.Version.clone()))],
+                ),
+                vec![widgets::icon_button(
+                    p,
+                    Icon::Refresh,
+                    t("updates-restart"),
+                    Palette::button_primary,
+                    Some(Message::Updates(Ux::Restart)),
+                )],
+            )
+        } else if app.ask_update_consent() {
+            (
+                t("updates-ask"),
+                vec![
+                    widgets::icon_button(
+                        p,
+                        Icon::Refresh,
+                        t("updates-yes"),
+                        Palette::button_primary,
+                        Some(Message::Updates(Ux::Consent(true))),
+                    ),
+                    button(text(t("updates-not-now")).size(theme::SIZE_CAPTION))
+                        .padding([5.0, theme::S4])
+                        .style(move |_, status| p.button_ghost(status))
+                        .on_press(Message::Updates(Ux::Consent(false)))
+                        .into(),
+                ],
+            )
+        } else {
+            return None;
+        };
+    let mut r = row![
+        text(message)
+            .size(theme::SIZE_BODY)
+            .color(p.n.ink)
+            .width(Length::Fill),
+    ]
+    .spacing(theme::S3)
+    .align_y(Alignment::Center);
+    for a in actions {
+        r = r.push(a);
+    }
+    Some(
+        container(r)
+            .padding([theme::S3, theme::S7])
+            .width(Length::Fill)
+            .style(move |_| p.bar())
+            .into(),
+    )
 }
