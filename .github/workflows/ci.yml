@@ -41,6 +41,12 @@ concurrency:
 env:
   SQLX_OFFLINE: "true"
   CARGO_TERM_COLOR: always
+  # Full debug info for ~30 test binaries (iced, wgpu, rustic, OpenDAL)
+  # filled the runner's disk and crashed the linker. Line tables keep
+  # useful backtraces; incremental builds don't help a fresh runner.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   check:
