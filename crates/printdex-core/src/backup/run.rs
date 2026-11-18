@@ -41,6 +41,17 @@ pub struct RunSummary {
     pub snapshot: Option<SnapshotInfo>,
 }
 
+/// Thins this install's snapshots of `tag` to the retention policy
+/// ([`super::KEEP`]); other installs' snapshots are never touched. A
+/// failure only logs: the snapshot just made is safe either way.
+fn thin(repo: &mut Repo, host: &str, tag: &str) {
+    match repo.forget(super::KEEP, host, tag) {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(n, tag, "thinned backup snapshots"),
+        Err(e) => tracing::warn!(error = %e, tag, "could not thin backup snapshots"),
+    }
+}
+
 fn row(kind: BackupKind) -> (&'static str, Option<LibraryId>) {
     match kind {
         BackupKind::Data => ("data", None),
@@ -65,6 +76,8 @@ pub struct BackupState {
     cancel: Mutex<CancellationToken>,
     /// Settings files the app wants in the data snapshot.
     extra_files: Mutex<Vec<PathBuf>>,
+    /// What the scheduler last found needs attention.
+    pub(crate) attention: Mutex<Vec<super::Attention>>,
 }
 
 impl std::fmt::Debug for BackupState {
@@ -260,7 +273,7 @@ impl Engine {
             Ok(()) => {
                 let (src, host) = (staging.clone(), self.install.to_string());
                 self.run_job(BackupKind::Data, move |repo, cancel, progress| {
-                    repo.backup(
+                    let snap = repo.backup(
                         &BackupJob {
                             source: &src,
                             as_path: "/printdex-data",
@@ -270,8 +283,9 @@ impl Engine {
                         },
                         cancel,
                         Some(progress),
-                    )
-                    .map(Some)
+                    )?;
+                    thin(repo, &host, DATA_TAG);
+                    Ok(Some(snap))
                 })
                 .await
             }
@@ -314,18 +328,19 @@ impl Engine {
         );
         let as_path = format!("/models/{library}");
         self.run_job(kind, move |repo, cancel, progress| {
-            repo.backup(
+            let snap = repo.backup(
                 &BackupJob {
                     source: &root,
                     as_path: &as_path,
                     filter: &crate::walk::Rules::backup_globs(),
-                    tags: &[tag],
+                    tags: std::slice::from_ref(&tag),
                     host: &host,
                 },
                 cancel,
                 Some(progress),
-            )
-            .map(Some)
+            )?;
+            thin(repo, &host, &tag);
+            Ok(Some(snap))
         })
         .await
     }

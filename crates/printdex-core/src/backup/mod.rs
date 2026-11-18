@@ -7,6 +7,7 @@ mod data;
 mod remote;
 pub mod repo;
 pub(crate) mod run;
+pub mod scheduler;
 pub mod secrets;
 
 pub use crate::db::backup::RunRow as BackupRun;
@@ -18,6 +19,7 @@ pub use repo::{
     Target, TargetSecrets,
 };
 pub use run::{BackupScope, DATA_TAG, RunSummary, models_tag};
+pub use scheduler::{BackupScheduler, SchedulerConfig};
 
 use crate::ids::LibraryId;
 

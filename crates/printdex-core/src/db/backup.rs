@@ -239,6 +239,26 @@ impl Db {
         Ok(u64::try_from(n).unwrap_or(0))
     }
 
+    pub async fn target_created_at(&self, id: i64) -> Result<Option<i64>> {
+        Ok(
+            sqlx::query_scalar!("SELECT created_at FROM backup_targets WHERE id = ?", id)
+                .fetch_optional(self.writer())
+                .await?,
+        )
+    }
+
+    /// The newest change to what the user wrote (models' and libraries'
+    /// update times).
+    pub async fn last_user_change(&self) -> Result<Option<i64>> {
+        Ok(sqlx::query_scalar!(
+            r#"SELECT MAX(t) as "t: i64" FROM (
+                 SELECT MAX(updated_at) AS t FROM models
+                 UNION ALL SELECT MAX(updated_at) FROM libraries)"#
+        )
+        .fetch_one(self.reader())
+        .await?)
+    }
+
     pub async fn install_predecessors(&self) -> Result<Vec<String>> {
         Ok(sqlx::query_scalar!(
             r#"SELECT install_id as "install_id!" FROM install_predecessors ORDER BY added_at"#

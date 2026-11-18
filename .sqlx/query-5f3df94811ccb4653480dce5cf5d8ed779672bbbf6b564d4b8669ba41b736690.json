@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT created_at FROM backup_targets WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "created_at",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "backup_targets",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5f3df94811ccb4653480dce5cf5d8ed779672bbbf6b564d4b8669ba41b736690"
+}
