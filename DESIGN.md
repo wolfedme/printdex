@@ -19,8 +19,8 @@ colors:
   accent: "oklch(0.62 0.17 100)"
   accent-soft: "oklch(0.94 0.076 100 / 0.8)"
   accent-ink: "oklch(0.48 0.17 100)"
-  primary: "oklch(0.62 0.17 100)"
-  primary-hi: "oklch(0.57 0.17 100)"
+  primary: "oklch(0.84 0.17 95)"
+  primary-hi: "oklch(0.80 0.17 95)"
   on-primary: "oklch(0.18 0.068 100)"
   ok: "oklch(0.53 0.135 150)"
   ok-soft: "oklch(0.94 0.04 150)"
@@ -275,7 +275,7 @@ Screens recorded: library grid, list view, no results, model, log a print, setti
 Near-neutral graphite glass, one signal-yellow accent, four fixed material colours and four fixed status colours. Base keys in the frontmatter are light with blur; `-solid` is the no-blur fallback, `-dark` the dark theme, `-dark-solid` both. Tokens not listed with a `-solid` twin are the same with or without blur.
 
 ### Primary
-- **Signal Yellow** (`accent`, `primary`): selection rings, the focus ring, the main action button ("Log a print", "Save attempt"), switches when on. Deep mustard in light so it holds on pale glass; bright yellow in dark.
+- **Signal Yellow** (`accent`, `primary`): selection rings, the focus ring, the main action button ("Log a print", "Save attempt"), switches when on. In light, the accent (rings, text) is deep mustard so it holds on pale glass, while `primary` (filled buttons, switches) is a brighter yellow with dark ink so the main action still reads as signal rather than olive; in dark both are bright yellow.
 - **Signal Wash** (`accent-soft`): fill of the selected model pane, selected list row, pressed segment, active sidebar item, scan badge and the recipe-prefill note.
 - **Signal Ink** (`accent-ink`): text and icons on the Signal Wash.
 - **Ink on Signal** (`on-primary`): text on a filled accent button.
@@ -285,8 +285,8 @@ Near-neutral graphite glass, one signal-yellow accent, four fixed material colou
 | `accent` | oklch(0.62 0.17 100) · `#9f8600†` | same | oklch(0.9 0.18 100) · `#fadf27` | same |
 | `accent-soft` | oklch(0.94 0.076 100 / 0.8) · `#f7edb2cc` | oklch(0.94 0.076 100) · `#f7edb2` | oklch(0.38 0.07 100 / 0.6) · `#4b430f99` | oklch(0.34 0.07 100) · `#413801` |
 | `accent-ink` | oklch(0.48 0.17 100) · `#755c00†` | same | oklch(0.9 0.14 100) · `#f4e06a` | same |
-| `primary` | oklch(0.62 0.17 100) · `#9f8600†` | same | oklch(0.9 0.18 100) · `#fadf27` | same |
-| `primary-hi` | oklch(0.57 0.17 100) · `#907600†` | same | oklch(0.95 0.18 100) · `#fff043†` | same |
+| `primary` | oklch(0.84 0.17 95) · `#edc812` | same | oklch(0.9 0.18 100) · `#fadf27` | same |
+| `primary-hi` | oklch(0.80 0.17 95) · `#e0bb00` | same | oklch(0.95 0.18 100) · `#fff043†` | same |
 | `on-primary` | oklch(0.18 0.068 100) · `#191100†` | same | oklch(0.18 0.068 100) · `#191100†` | same |
 
 ### Secondary (material colours)
@@ -333,7 +333,7 @@ Graphite glass. In the blur set, the window is transparent and panes stack trans
 | `on-rail-2` | oklch(0.38 0.02 265) · `#3d424d` | same | oklch(0.78 0.012 265) · `#b4b7bf` | same |
 
 ### Colour themes
-A user setting under Settings > Appearance > "Colour theme", default Graphite signal. A theme changes only the glass tint (`ground`, `surface`, `tray`, `rail`, `rail-hi`) and the accent set (`accent`, `accent-soft`, `accent-ink`, `primary`, `primary-hi`, `on-primary`). Material and status colours never change. In every preset `primary` equals `accent` except Violet frost, whose main action is a deeper violet (`oklch(0.52 0.2 295)`, dark `oklch(0.72 0.15 298)`). Full sets, including each solid fallback, are in `.impeccable/design.json` under `extensions.colorThemes`.
+A user setting under Settings > Appearance > "Colour theme", default Graphite signal. A theme changes only the glass tint (`ground`, `surface`, `tray`, `rail`, `rail-hi`) and the accent set (`accent`, `accent-soft`, `accent-ink`, `primary`, `primary-hi`, `on-primary`). Material and status colours never change. In every preset `primary` equals `accent` except Violet frost, whose main action is a deeper violet (`oklch(0.52 0.2 295)`, dark `oklch(0.72 0.15 298)`), and Graphite signal light, whose main action is a brighter yellow (`oklch(0.84 0.17 95)`) than its mustard accent. Full sets, including each solid fallback, are in `.impeccable/design.json` under `extensions.colorThemes`.
 
 | Colour theme | Theme | Sidebar glass (`rail`) | Content glass (`ground`) | Accent (`accent`) | Accent text (`accent-ink`) | On accent |
 |---|---|---|---|---|---|---|
