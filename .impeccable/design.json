@@ -241,9 +241,9 @@
       "accent": {
         "role": "primary",
         "displayName": "Signal Yellow",
-        "canonical": "oklch(0.62 0.17 100)",
-        "srgb": "#9f8600",
-        "note": "Slightly outside sRGB; hex is the per-channel clamp.",
+        "canonical": "oklch(0.84 0.17 95)",
+        "srgb": "#edc812",
+        "note": "Brighter than the accent so the main action reads as signal yellow on pale glass (2026-11-19 critique, issue #115); rings and text keep the mustard accent.",
         "tonalRamp": [
           "oklch(0.15 0.000 100)",
           "oklch(0.25 0.067 100)",
@@ -308,9 +308,8 @@
       "primary-hi": {
         "role": "primary",
         "displayName": "Signal Yellow, hover",
-        "canonical": "oklch(0.57 0.17 100)",
-        "srgb": "#907600",
-        "note": "Slightly outside sRGB; hex is the per-channel clamp.",
+        "canonical": "oklch(0.80 0.17 95)",
+        "srgb": "#e0bb00",
         "tonalRamp": [
           "oklch(0.15 0.000 100)",
           "oklch(0.25 0.067 100)",
@@ -1240,12 +1239,12 @@
               "srgb": "#755c00"
             },
             "primary": {
-              "oklch": "oklch(0.62 0.17 100)",
-              "srgb": "#9f8600"
+              "oklch": "oklch(0.84 0.17 95)",
+              "srgb": "#edc812"
             },
             "primary-hi": {
-              "oklch": "oklch(0.57 0.17 100)",
-              "srgb": "#907600"
+              "oklch": "oklch(0.80 0.17 95)",
+              "srgb": "#e0bb00"
             },
             "on-primary": {
               "oklch": "oklch(0.18 0.068 100)",

@@ -114,3 +114,53 @@ async fn photo_must_be_an_image() {
         Err(printdex_core::CoreError::PhotoInvalid)
     ));
 }
+
+#[tokio::test]
+async fn set_material_keeps_the_rest_of_the_recipe() {
+    let (_d, engine, m) = fx().await;
+    let a = engine
+        .log_attempt(m, &attempt(AttemptResult::Success))
+        .await
+        .unwrap();
+    engine.recipe_from_attempt(a).await.unwrap();
+    assert_eq!(
+        engine
+            .set_material(&[m], Some(Material::Tpu))
+            .await
+            .unwrap(),
+        1
+    );
+    let r = engine.model_data(m).await.unwrap().unwrap().recipe.unwrap();
+    assert_eq!(r.settings.material, Some(Material::Tpu));
+    assert_eq!(r.settings.bed_temp, Some(85));
+    // Setting it again changes nothing.
+    assert_eq!(
+        engine
+            .set_material(&[m], Some(Material::Tpu))
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn set_material_on_a_model_without_recipe() {
+    let (_d, engine, m) = fx().await;
+    engine
+        .set_material(&[m], Some(Material::Pla))
+        .await
+        .unwrap();
+    let r = engine.model_data(m).await.unwrap().unwrap().recipe.unwrap();
+    assert_eq!(r.settings.material, Some(Material::Pla));
+    // Clearing the only setting removes the recipe.
+    engine.set_material(&[m], None).await.unwrap();
+    assert!(
+        engine
+            .model_data(m)
+            .await
+            .unwrap()
+            .unwrap()
+            .recipe
+            .is_none()
+    );
+}

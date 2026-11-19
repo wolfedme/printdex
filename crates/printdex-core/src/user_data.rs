@@ -13,7 +13,8 @@ use crate::error::{CoreError, Result};
 use crate::events::EngineEvent;
 use crate::ids::{AttemptId, CollectionId, LibraryId, ModelId, PhotoId};
 use crate::model_data::{
-    Attempt, CollectionInfo, ModelData, NewAttempt, PhotoRef, Recipe, RecipeNote, TagCount,
+    Attempt, CollectionInfo, Material, ModelData, NewAttempt, PhotoRef, Recipe, RecipeNote,
+    TagCount,
 };
 
 impl Engine {
@@ -133,6 +134,25 @@ impl Engine {
         self.db.set_recipe(id, recipe).await?;
         self.changed(id);
         Ok(())
+    }
+
+    /// Sets (or clears) the recipe material of every model in `ids`,
+    /// keeping the rest of each recipe ("Set material" on a selection).
+    /// A recipe left with nothing in it is removed. Returns how many
+    /// models changed.
+    pub async fn set_material(&self, ids: &[ModelId], material: Option<Material>) -> Result<usize> {
+        let mut changed = 0;
+        for &id in ids {
+            let old = self.db.model_data(id).await?.and_then(|d| d.recipe);
+            let mut recipe = old.clone().unwrap_or_default();
+            recipe.settings.material = material.clone();
+            let new = (!recipe.is_empty()).then_some(recipe);
+            if new != old {
+                self.set_recipe(id, new.as_ref()).await?;
+                changed += 1;
+            }
+        }
+        Ok(changed)
     }
 
     /// Records a print of model `id`.

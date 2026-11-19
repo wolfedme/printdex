@@ -65,6 +65,23 @@ impl Material {
         })
     }
 
+    /// A material named in a file or folder path, for tinting previews of
+    /// models without a recipe ("Clip_PETG.stl", "TPU/Gaskets"). Only
+    /// whole words that can't mean anything else count: PLA, PETG, ABS,
+    /// ASA, TPU. The deepest match wins, so a file name beats its folder.
+    pub fn infer_from_path(rel_path: &str) -> Option<Material> {
+        rel_path
+            .rsplit(|c: char| !c.is_ascii_alphanumeric())
+            .find_map(|w| match w.to_ascii_uppercase().as_str() {
+                "PLA" => Some(Material::Pla),
+                "PETG" => Some(Material::Petg),
+                "ABS" => Some(Material::Abs),
+                "ASA" => Some(Material::Asa),
+                "TPU" => Some(Material::Tpu),
+                _ => None,
+            })
+    }
+
     /// Display and storage name.
     pub fn label(&self) -> &str {
         match self {
@@ -350,6 +367,14 @@ pub struct Recipe {
 }
 
 impl Recipe {
+    /// Whether the recipe holds nothing at all.
+    pub fn is_empty(&self) -> bool {
+        self.settings.is_empty()
+            && self.required.is_empty()
+            && self.notes.is_empty()
+            && self.parts.is_empty()
+    }
+
     pub fn validate(&self) -> Result<()> {
         self.settings.validate()?;
         for p in &self.parts {
@@ -459,6 +484,19 @@ impl ModelData {
             });
         crate::db::render_material(m.map(Material::key).as_deref())
     }
+
+    /// Like [`preview_material`](Self::preview_material), falling back to
+    /// the material named in `rel_path` (the part on show).
+    pub fn preview_material_at(&self, rel_path: &str) -> printdex_render::Material {
+        match self.preview_material() {
+            printdex_render::Material::Unknown => crate::db::render_material(
+                Material::infer_from_path(rel_path)
+                    .map(|m| m.key())
+                    .as_deref(),
+            ),
+            m => m,
+        }
+    }
 }
 
 /// The matching key for a tag or collection name: trimmed, inner whitespace
@@ -494,6 +532,27 @@ pub fn check_source(url: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn material_from_path() {
+        assert_eq!(
+            Material::infer_from_path("Clips/clip_PETG.stl"),
+            Some(Material::Petg)
+        );
+        assert_eq!(
+            Material::infer_from_path("TPU/Gaskets/ring.stl"),
+            Some(Material::Tpu)
+        );
+        // The file name beats its folder.
+        assert_eq!(
+            Material::infer_from_path("PLA/hinge-asa.3mf"),
+            Some(Material::Asa)
+        );
+        // Whole words only; ambiguous names (PA, PC, PET) never count.
+        assert_eq!(Material::infer_from_path("Plates/placard.stl"), None);
+        assert_eq!(Material::infer_from_path("PC case/pa_bracket.stl"), None);
+        assert_eq!(Material::infer_from_path("pet bowl.stl"), None);
+    }
 
     #[test]
     fn material_parse() {

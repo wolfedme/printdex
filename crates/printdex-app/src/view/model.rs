@@ -196,6 +196,7 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
     }
     let current = d.parts.get(part);
     let gone = d.missing_since.is_some();
+    let compact = app.compact();
     let reveal = app
         .model_path(&d.rel_path)
         .filter(|_| !gone)
@@ -207,23 +208,37 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
         column![
             crumbs,
             row![
-                text(d.name.clone())
-                    .size(theme::SIZE_DISPLAY)
-                    .font(theme::FONT_BOLD)
-                    .color(p.n.ink)
-                    .wrapping(text::Wrapping::None),
-                text(d.number.map(format_number).unwrap_or_default())
-                    .size(theme::SIZE_BODY)
-                    .font(theme::FONT_DATA)
-                    .color(p.n.ink_3),
-                Space::new().width(Length::Fill),
-                icon_button(
-                    p,
-                    Icon::FolderOpen,
-                    t("model-show-in-folder"),
-                    Palette::button_ghost,
-                    reveal
-                ),
+                // A long name is clipped rather than pushing the actions
+                // (and Log a print) out of the window.
+                container(
+                    row![
+                        text(d.name.clone())
+                            .size(theme::SIZE_DISPLAY)
+                            .font(theme::FONT_BOLD)
+                            .color(p.n.ink)
+                            .wrapping(text::Wrapping::None),
+                        text(d.number.map(format_number).unwrap_or_default())
+                            .size(theme::SIZE_BODY)
+                            .font(theme::FONT_DATA)
+                            .color(p.n.ink_3)
+                            .wrapping(text::Wrapping::None),
+                    ]
+                    .spacing(theme::S4)
+                    .align_y(Alignment::Center),
+                )
+                .width(Length::Fill)
+                .clip(true),
+                if compact {
+                    tip(p, Icon::FolderOpen, t("model-show-in-folder"), reveal)
+                } else {
+                    icon_button(
+                        p,
+                        Icon::FolderOpen,
+                        t("model-show-in-folder"),
+                        Palette::button_ghost,
+                        reveal,
+                    )
+                },
                 file_actions(p, gone),
                 restore_button(app, p, d.id),
                 open_button(app, p, open),
@@ -387,9 +402,10 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
     side = match (&app.prints.form, data) {
         (Some(f), _) => side.push(prints::form(app, p, f)),
         (None, Some(data)) => side
+            // The core loop first: how to print it, how it went.
             .push(prints::recipe_card(p, data))
-            .push(organize)
             .push(prints::print_log(app, p, data))
+            .push(organize)
             .push(details),
         (None, None) => side.push(organize).push(details),
     };
@@ -402,32 +418,31 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
     .height(Length::Fill)
     .style(move |_, status| p.scrollbar(status));
 
-    let status = container(
-        row![
-            hint(p, "Esc", t("status-key-back")),
-            hint(p, "←→", t("status-key-part")),
-            hint(p, "O", t("status-key-open-file")),
-            hint(p, "T", t("status-key-tag")),
-            hint(p, "N", t("status-key-notes")),
-            hint(p, "L", t("status-key-log")),
+    // Key hints only; the added date lives in Details. The viewer hint
+    // goes first when the window narrows.
+    let mut hints = row![
+        hint(p, "Esc", t("status-key-back")),
+        hint(p, "←→", t("status-key-part")),
+        hint(p, "O", t("status-key-open-file")),
+        hint(p, "T", t("status-key-tag")),
+        hint(p, "N", t("status-key-notes")),
+        hint(p, "L", t("status-key-log")),
+    ]
+    .spacing(theme::S6)
+    .align_y(Alignment::Center);
+    if !compact {
+        hints = hints.push(
             text(t("status-key-turn"))
                 .size(theme::SIZE_CAPTION)
                 .color(p.n.ink_3),
-            Space::new().width(Length::Fill),
-            text(t_args(
-                "status-added",
-                &[("date", Arg::str(date(d.created_at)))]
-            ))
-            .size(theme::SIZE_CAPTION)
-            .font(theme::FONT_MEDIUM),
-        ]
-        .spacing(theme::S6)
-        .align_y(Alignment::Center),
-    )
-    .height(theme::STATUSBAR_HEIGHT)
-    .padding([0.0, theme::S7])
-    .align_y(Alignment::Center)
-    .style(move |_| p.bar());
+        );
+    }
+    let status = container(hints)
+        .width(Length::Fill)
+        .height(theme::STATUSBAR_HEIGHT)
+        .padding([0.0, theme::S7])
+        .align_y(Alignment::Center)
+        .style(move |_| p.bar());
 
     column![
         header,

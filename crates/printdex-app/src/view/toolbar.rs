@@ -18,6 +18,7 @@ use crate::settings::{Settings, ViewMode};
 use crate::theme::{self, Palette};
 
 const SEARCH_WIDTH: f32 = 300.0;
+const SEARCH_WIDTH_COMPACT: f32 = 220.0;
 
 /// A sort order with its translated name, for the pick list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,6 +66,7 @@ fn chip_text(chip: Chip) -> (String, String) {
 
 pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     let settings = app.settings;
+    let compact = app.compact();
 
     let field = text_input(&t("toolbar-search"), &app.search.query.text)
         .id(search_id())
@@ -87,7 +89,12 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
             .height(Length::Fill)
             .align_y(Alignment::Center),
     ]
-    .width(SEARCH_WIDTH)
+    // Narrower in compact windows so the sort and view controls fit.
+    .width(if compact {
+        SEARCH_WIDTH_COMPACT
+    } else {
+        SEARCH_WIDTH
+    })
     .height(theme::CONTROL_HEIGHT);
 
     let mut left = row![search].spacing(theme::S4).align_y(Alignment::Center);
@@ -121,10 +128,15 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     } else {
         &SORTS
     };
-    let sort = row![
-        text(t("sort-label"))
-            .size(theme::SIZE_CAPTION)
-            .color(p.n.ink_3),
+    let mut sort = row![].spacing(theme::S3).align_y(Alignment::Center);
+    if !compact {
+        sort = sort.push(
+            text(t("sort-label"))
+                .size(theme::SIZE_CAPTION)
+                .color(p.n.ink_3),
+        );
+    }
+    let sort = sort.push(
         pick_list(
             sorts,
             Some(SortChoice(app.search.query.sort)),
@@ -140,33 +152,35 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
         .padding([7.0, theme::S4])
         .style(move |_, status| p.pick(status))
         .menu_style(move |_| p.pick_menu()),
-    ]
-    .spacing(theme::S3)
-    .align_y(Alignment::Center);
+    );
 
     let retry = matches!(
         app.search.query.scope,
         Scope::Library(id) if app.offline.contains_key(&id)
     );
-    let mut rescan = button(
-        row![
-            icons::icon(Icon::Refresh, theme::ICON, p.n.ink_2),
-            text(if retry {
-                t("toolbar-retry")
-            } else {
-                t("toolbar-rescan")
-            })
-            .size(theme::SIZE_BODY),
-        ]
+    let rescan_label = if retry {
+        t("toolbar-retry")
+    } else {
+        t("toolbar-rescan")
+    };
+    let mut content = row![icons::icon(Icon::Refresh, theme::ICON, p.n.ink_2)]
         .spacing(7)
-        .align_y(Alignment::Center),
-    )
-    .height(theme::CONTROL_HEIGHT)
-    .padding([8.0, theme::S5])
-    .style(move |_, status| p.button_secondary(status));
+        .align_y(Alignment::Center);
+    if !compact {
+        content = content.push(text(rescan_label.clone()).size(theme::SIZE_BODY));
+    }
+    let mut rescan = button(content)
+        .height(theme::CONTROL_HEIGHT)
+        .padding([8.0, if compact { theme::S4 } else { theme::S5 }])
+        .style(move |_, status| p.button_secondary(status));
     if !app.libraries.is_empty() {
         rescan = rescan.on_press(Message::Rescan);
     }
+    let rescan: Element<'_, Message> = if compact {
+        widgets::with_tip(p, rescan, rescan_label)
+    } else {
+        rescan.into()
+    };
 
     container(
         row![

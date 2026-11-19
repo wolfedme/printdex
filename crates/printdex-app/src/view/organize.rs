@@ -30,6 +30,30 @@ fn org(o: Org) -> Message {
 pub fn side<'a>(org_state: &'a OrgState, p: Palette, id: ModelId) -> Element<'a, Message> {
     static EMPTY: std::sync::LazyLock<ModelData> = std::sync::LazyLock::new(ModelData::default);
     let data = org_state.data_for(id).unwrap_or(&EMPTY);
+    // Nothing to show and nothing being edited: one row of add buttons
+    // instead of three headed sections of empty space.
+    let untouched = data.tags.is_empty()
+        && data.collections.is_empty()
+        && data.source.is_none()
+        && org_state.tag_input.is_none()
+        && !org_state.collection_menu
+        && org_state.source_edit.is_none();
+    if untouched {
+        return row![
+            add_button(p, Icon::Tag, t("tag-add"), org(Org::StartTag)),
+            add_button(
+                p,
+                Icon::Collection,
+                t("collection-add-model"),
+                org(Org::ToggleCollectionMenu)
+            ),
+            add_button(p, Icon::Link, t("source-add"), org(Org::StartSource)),
+        ]
+        .spacing(theme::S3)
+        .wrap()
+        .vertical_spacing(theme::S3)
+        .into();
+    }
     column![
         tags(org_state, p, data),
         collections(org_state, p, id, data),

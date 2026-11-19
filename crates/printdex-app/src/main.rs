@@ -105,6 +105,7 @@ fn main() -> anyhow::Result<()> {
             .subscription(App::subscription)
             .window(iced::window::Settings {
                 size: app::INITIAL_WINDOW,
+                min_size: Some(app::MIN_WINDOW),
                 transparent: glass_window,
                 blur: glass_window,
                 icon: window_icon(),
