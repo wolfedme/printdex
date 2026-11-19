@@ -43,3 +43,10 @@ protect_breaking_commits = true
 filter_commits = false
 tag_pattern = "v[0-9].*"
 sort_commits = "oldest"
+
+# Next version for release-cut.yml (`git cliff --bumped-version`). While the
+# version is 0.x, a feature bumps the minor and a breaking change does too.
+[bump]
+initial_tag = "v0.1.0"
+features_always_bump_minor = true
+breaking_always_bump_major = false
