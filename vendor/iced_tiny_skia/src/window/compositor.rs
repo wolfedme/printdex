@@ -194,10 +194,10 @@ pub fn present(
         surface.layer_stack.push_front(renderer.layers().to_vec());
         surface.background_color = background_color;
 
-        let damage = damage::group(
+        let damage = coalesce(damage::group(
             damage,
             Rectangle::with_size(viewport.logical_size()),
-        );
+        ));
 
         let mut pixels = tiny_skia::PixmapMut::from_bytes(
             bytemuck::cast_slice_mut(&mut buffer),
@@ -265,4 +265,59 @@ pub fn screenshot(
             acc
         },
     )
+}
+
+// Printdex patch (see vendor/README.md): `damage::group` only merges regions
+// that waste under 20,000 px², so scrolling a grid of cards leaves about a
+// hundred small, overlapping regions. `Renderer::draw` repaints every layer
+// once per region and clears a full-window clip mask each time, which made a
+// scroll frame cost ~90 ms instead of ~3 ms. Many regions, or regions that
+// cover at least half of their bounding box, are drawn as one rectangle.
+const MAX_REGIONS: usize = 8;
+
+fn coalesce(damage: Vec<Rectangle>) -> Vec<Rectangle> {
+    let Some((first, rest)) = damage.split_first() else {
+        return damage;
+    };
+    if rest.is_empty() {
+        return damage;
+    }
+
+    let union = rest.iter().fold(*first, |union, region| union.union(region));
+    let area: f32 = damage.iter().map(Rectangle::area).sum();
+
+    if damage.len() > MAX_REGIONS || area * 2.0 >= union.area() {
+        vec![union]
+    } else {
+        damage
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(x: f32, y: f32, w: f32, h: f32) -> Rectangle {
+        Rectangle::new(crate::core::Point::new(x, y), crate::core::Size::new(w, h))
+    }
+
+    #[test]
+    fn keeps_a_few_distant_regions() {
+        let damage = vec![rect(0.0, 0.0, 10.0, 10.0), rect(500.0, 500.0, 10.0, 10.0)];
+        assert_eq!(coalesce(damage.clone()), damage);
+    }
+
+    #[test]
+    fn merges_regions_that_mostly_cover_their_bounds() {
+        let damage = vec![rect(0.0, 0.0, 100.0, 60.0), rect(0.0, 50.0, 100.0, 60.0)];
+        assert_eq!(coalesce(damage), vec![rect(0.0, 0.0, 100.0, 110.0)]);
+    }
+
+    #[test]
+    fn merges_many_regions() {
+        let damage: Vec<_> = (0..20)
+            .map(|i| rect(i as f32 * 100.0, i as f32 * 100.0, 10.0, 10.0))
+            .collect();
+        assert_eq!(coalesce(damage), vec![rect(0.0, 0.0, 1910.0, 1910.0)]);
+    }
 }

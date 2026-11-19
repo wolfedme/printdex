@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/printdex-core", "crates/printdex-cli", "crates/printdex-app", "crates/printdex-mesh", "crates/printdex-render"]
+exclude = ["vendor"]
 
 [workspace.package]
 version = "0.1.0"
@@ -85,3 +86,8 @@ zstd = { opt-level = 3 }
 zstd-safe = { opt-level = 3 }
 rustic_core = { opt-level = 3 }
 binrw = { opt-level = 3 }
+
+# iced's software renderer with one fix (merged damage regions); see
+# vendor/README.md. Remove once iced ships the fix.
+[patch.crates-io]
+iced_tiny_skia = { path = "vendor/iced_tiny_skia" }
