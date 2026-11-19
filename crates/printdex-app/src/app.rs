@@ -50,6 +50,13 @@ pub const GRID_PAD_Y: f32 = theme::S6;
 pub const GRID_PAD_X: f32 = theme::S7;
 /// Initial window size (the DESIGN.md mock width).
 pub const INITIAL_WINDOW: Size = Size::new(1280.0, 800.0);
+/// Smallest window: the model header, the log form's side column and the
+/// toolbar still fit, in their compact form.
+pub const MIN_WINDOW: Size = Size::new(1024.0, 640.0);
+/// Below this content width (window minus sidebar), toolbars, headers and
+/// the status bar switch to their compact form: icon-only secondary
+/// actions and fewer key hints.
+pub const COMPACT_BELOW: f32 = 960.0;
 
 /// Startup options from the command line and the settings file.
 #[derive(Clone, Debug)]
@@ -420,6 +427,11 @@ impl App {
         GridMetrics::for_width(self.window.width - theme::SIDEBAR_WIDTH - 2.0 * GRID_PAD_X)
     }
 
+    /// Whether the content area is narrow enough for compact chrome.
+    pub fn compact(&self) -> bool {
+        self.window.width - theme::SIDEBAR_WIDTH < COMPACT_BELOW
+    }
+
     /// The grid viewport, estimated from the window until the scrollable
     /// reports its real size.
     pub fn grid_viewport(&self) -> GridViewport {
@@ -712,7 +724,11 @@ impl App {
                 operation::focus(search_id()),
                 operation::select_all(search_id()),
             ]),
-            Message::Escape if self.files.dialog.is_some() || self.files.open_menu => {
+            Message::Escape
+                if self.files.dialog.is_some()
+                    || self.files.open_menu
+                    || self.files.material_menu =>
+            {
                 self.update(Message::Files(crate::files::Fx::Cancel))
             }
             Message::Escape if !self.files.picked.is_empty() && self.screen == Screen::Library => {

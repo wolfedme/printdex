@@ -64,6 +64,23 @@ pub fn icon_button<'a>(
     .into()
 }
 
+/// Wraps a control in the app's tooltip, shown below it. Used where a
+/// label is dropped for space, so the name is still one hover away.
+pub fn with_tip<'a>(
+    p: Palette,
+    content: impl Into<Element<'a, Message>>,
+    label: String,
+) -> Element<'a, Message> {
+    iced::widget::tooltip(
+        content,
+        container(text(label).size(theme::SIZE_CAPTION))
+            .padding([3.0, theme::S3])
+            .style(move |_| p.tooltip()),
+        iced::widget::tooltip::Position::Bottom,
+    )
+    .into()
+}
+
 /// Section heading with an optional caption after it.
 pub fn section<'a>(p: Palette, title: String, caption: Option<String>) -> Element<'a, Message> {
     let mut r = row![

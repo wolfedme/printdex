@@ -390,6 +390,13 @@ fn entry<'a>(
         ))
         .size(theme::SIZE_CAPTION)
         .color(p.n.ink_3),
+        // Edit and delete sit on the heading line instead of a row of
+        // their own under every attempt.
+        row![
+            ghost_icon(p, Icon::Rename, t("log-edit"), pr(Pr::OpenEdit(a.id))),
+            ghost_icon(p, Icon::Remove, t("log-delete"), pr(Pr::AskDelete(a.id))),
+        ]
+        .spacing(theme::S1),
     ]
     .spacing(theme::S3)
     .align_y(Alignment::Center);
@@ -495,32 +502,27 @@ fn entry<'a>(
             );
         }
         _ => {
-            let mut actions = row![].spacing(theme::S1).align_y(Alignment::Center);
-            match a.result {
-                AttemptResult::Success if !is_recipe => {
-                    actions =
-                        actions.push(small(p, t("log-save-recipe"), pr(Pr::SaveAsRecipe(a.id))));
+            // One text action at most: "Save as recipe" only on the newest
+            // success (older ones are rarely what you want to keep), "Add as
+            // note" on failures that say what went wrong.
+            let newest_success = data
+                .attempts
+                .iter()
+                .filter(|x| x.result == AttemptResult::Success)
+                .max_by_key(|x| (x.printed_at, x.number))
+                .map(|x| x.id);
+            let action = match a.result {
+                AttemptResult::Success if !is_recipe && newest_success == Some(a.id) => {
+                    Some(small(p, t("log-save-recipe"), pr(Pr::SaveAsRecipe(a.id))))
                 }
                 AttemptResult::Failed | AttemptResult::Partial if !a.notes.trim().is_empty() => {
-                    actions = actions.push(small(p, t("log-add-as-note"), pr(Pr::StartNote(a.id))));
+                    Some(small(p, t("log-add-as-note"), pr(Pr::StartNote(a.id))))
                 }
-                _ => {}
+                _ => None,
+            };
+            if let Some(action) = action {
+                col = col.push(row![action]);
             }
-            actions = actions
-                .push(Space::new().width(Length::Fill))
-                .push(ghost_icon(
-                    p,
-                    Icon::Rename,
-                    t("log-edit"),
-                    pr(Pr::OpenEdit(a.id)),
-                ))
-                .push(ghost_icon(
-                    p,
-                    Icon::Remove,
-                    t("log-delete"),
-                    pr(Pr::AskDelete(a.id)),
-                ));
-            col = col.push(actions);
         }
     }
     let fresh = app.prints.fresh == Some(a.id);
@@ -1201,8 +1203,10 @@ pub fn status_line<'a>(
     p: Palette,
     last: Option<&printdex_core::LastPrint>,
 ) -> Element<'a, Message> {
+    // Never printed is the common case and an absence, so it shows
+    // nothing; the "Never printed" smart filter finds those models.
     let (icon, word, color, when) = match last {
-        None => (Icon::NeverPrinted, t("card-never-printed"), p.n.ink_3, None),
+        None => return Space::new().into(),
         Some(l) => {
             let (icon, word, color) = match l.result {
                 AttemptResult::Success => (
@@ -1220,7 +1224,7 @@ pub fn status_line<'a>(
         text(word)
             .size(theme::SIZE_DATA)
             .font(theme::FONT_MEDIUM)
-            .color(if last.is_some() { color } else { p.n.ink_3 })
+            .color(color)
             .wrapping(text::Wrapping::None),
     ]
     .spacing(theme::S2)

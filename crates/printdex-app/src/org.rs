@@ -277,7 +277,10 @@ impl App {
                 match result {
                     Ok(Some(data)) => {
                         self.org.notes_md = markdown::parse(&data.notes).collect();
-                        let material = data.preview_material();
+                        let material = match self.current_part() {
+                            Some(pt) => data.preview_material_at(&pt.rel_path),
+                            None => data.preview_material(),
+                        };
                         self.org.data = Some((id, *data));
                         return self.viewer.set_material(material).map(Message::Viewer);
                     }

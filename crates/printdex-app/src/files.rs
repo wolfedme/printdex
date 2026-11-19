@@ -8,7 +8,9 @@ use std::time::Duration;
 use iced::Task;
 use iced::keyboard::Modifiers;
 use iced::widget::{Id, operation};
-use printdex_core::{CoreError, LibraryId, ModelId, OpKind, OpState, OpSummary, PrintableFormat};
+use printdex_core::{
+    CoreError, LibraryId, Material, ModelId, OpKind, OpState, OpSummary, PrintableFormat,
+};
 
 use crate::app::{App, Message, ModelView, Screen};
 use crate::apps::{self, Apps};
@@ -63,6 +65,10 @@ pub struct FilesUi {
     pub apps: Apps,
     /// The Open button's menu.
     pub open_menu: bool,
+    /// A short success note in the toast's place ("PETG set on 12 models").
+    pub info: Option<String>,
+    /// The selection bar's "Set material" menu.
+    pub material_menu: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -90,6 +96,10 @@ pub enum Fx {
     ChooseApp(PrintableFormat),
     AppChosen(PrintableFormat, Option<PathBuf>),
     ResetApp(PrintableFormat),
+    ToggleMaterialMenu,
+    /// Set (or with `None` clear) the recipe material of the selection.
+    SetMaterial(Option<Material>),
+    MaterialSet(Option<Material>, Result<usize, Arc<CoreError>>),
 }
 
 impl From<Fx> for Message {
@@ -343,6 +353,7 @@ impl App {
             Fx::Cancel => {
                 self.files.dialog = None;
                 self.files.open_menu = false;
+                self.files.material_menu = false;
                 Task::none()
             }
             Fx::Confirm => {
@@ -430,8 +441,58 @@ impl App {
                 }
                 if self.files.toast.is_none() {
                     self.files.note = None;
+                    self.files.info = None;
                 }
                 Task::none()
+            }
+            Fx::ToggleMaterialMenu => {
+                self.files.material_menu = !self.files.material_menu;
+                Task::none()
+            }
+            Fx::SetMaterial(material) => {
+                self.files.material_menu = false;
+                let ids = self.action_targets();
+                let Some(engine) = engine.filter(|_| !ids.is_empty()) else {
+                    return Task::none();
+                };
+                let m = material.clone();
+                Task::perform(
+                    async move { engine.set_material(&ids, m).await.map_err(Arc::new) },
+                    move |r| Message::Files(Fx::MaterialSet(material.clone(), r)),
+                )
+            }
+            Fx::MaterialSet(material, result) => {
+                let (text, ok) = match result {
+                    Ok(n) => {
+                        let n = n as u64;
+                        let text = match material {
+                            Some(m) => t_args(
+                                "files-material-set",
+                                &[
+                                    ("count", Arg::count(n)),
+                                    ("material", Arg::str(m.label().to_owned())),
+                                ],
+                            ),
+                            None => t_args("files-material-cleared", &[("count", Arg::count(n))]),
+                        };
+                        (text, true)
+                    }
+                    Err(e) => (error_text(&e), false),
+                };
+                // A short note in the toast's place; it goes like a toast.
+                self.files.toast = None;
+                if ok {
+                    self.files.note = None;
+                    self.files.info = Some(text);
+                } else {
+                    self.files.info = None;
+                    self.files.note = Some(text);
+                }
+                self.files.toast_seq += 1;
+                let seq = self.files.toast_seq;
+                Task::perform(tokio::time::sleep(TOAST), move |()| {
+                    Message::Files(Fx::HideToast(seq))
+                })
             }
             Fx::ToggleOpenMenu => {
                 self.files.open_menu = !self.files.open_menu;
@@ -478,6 +539,7 @@ impl App {
         self.files.toast_seq += 1;
         let seq = self.files.toast_seq;
         self.files.note = None;
+        self.files.info = None;
         self.files.toast = Some((op, seq));
         Task::perform(tokio::time::sleep(TOAST), move |()| {
             Message::Files(Fx::HideToast(seq))

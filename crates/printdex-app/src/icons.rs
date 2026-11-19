@@ -27,6 +27,7 @@ icon_files! {
     Folder => "folder.svg",
     Refresh => "refresh-cw.svg",
     Layers => "layers-2.svg",
+    Material => "cylinder.svg",
     Alert => "triangle-alert.svg",
     ExternalLink => "external-link.svg",
     FolderOpen => "folder-open.svg",

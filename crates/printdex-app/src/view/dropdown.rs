@@ -1,6 +1,6 @@
 //! A button with a menu that drops down over the content below it, so
 //! opening it never pushes the layout around. The menu's right edge lines
-//! up with the button's.
+//! up with the button's; it opens upwards when there is no room below.
 
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::overlay;
@@ -200,9 +200,19 @@ where
             .menu
             .as_widget_mut()
             .layout(self.tree, renderer, &limits.width(self.width));
-        let w = node.size().width;
+        let Size {
+            width: w,
+            height: h,
+        } = node.size();
         let x = (self.anchor.x - w).clamp(0.0, (bounds.width - w).max(0.0));
-        node.move_to(Point::new(x, self.anchor.y))
+        // No room below (a button near the bottom of the window): open
+        // upwards instead.
+        let y = if self.anchor.y + h > bounds.height && self.button.y - GAP - h >= 0.0 {
+            self.button.y - GAP - h
+        } else {
+            self.anchor.y
+        };
+        node.move_to(Point::new(x, y))
     }
 
     fn draw(

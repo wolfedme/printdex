@@ -4,6 +4,8 @@
 use iced::widget::{Space, button, column, container, mouse_area, opaque, row, text, text_input};
 use iced::{Alignment, Element, Length};
 
+use printdex_core::Material;
+
 use super::widgets::icon_button;
 use crate::app::{App, Message};
 use crate::files::{Dialog, Fx, name_list, rename_field_id, toast_text};
@@ -180,7 +182,12 @@ pub fn toast(app: &App, p: Palette) -> Option<Element<'_, Message>> {
             }
             (r.into(), true)
         }
-        (None, None) => return None,
+        (None, None) => (
+            text(app.files.info.clone()?)
+                .size(theme::SIZE_CAPTION)
+                .into(),
+            true,
+        ),
     };
     let card = container(
         row![
@@ -203,10 +210,21 @@ pub fn toast(app: &App, p: Palette) -> Option<Element<'_, Message>> {
             .height(Length::Fill)
             .align_x(Alignment::Center)
             .align_y(Alignment::End)
-            .padding(theme::S8)
+            .padding(iced::Padding {
+                // Clear of the selection bar while it shows.
+                bottom: if app.files.picked.len() >= 2 {
+                    theme::S8 + SELECTION_BAR_HEIGHT
+                } else {
+                    theme::S8
+                },
+                ..iced::Padding::new(theme::S8)
+            })
             .into(),
     )
 }
+
+/// Height of the selection bar: a 32px control with 6px above and below.
+const SELECTION_BAR_HEIGHT: f32 = theme::CONTROL_HEIGHT + 2.0 * theme::S3;
 
 /// "3 selected" with the actions, while more than one model is picked.
 pub fn selection_bar(app: &App, p: Palette) -> Option<Element<'_, Message>> {
@@ -222,6 +240,7 @@ pub fn selection_bar(app: &App, p: Palette) -> Option<Element<'_, Message>> {
                     .font(theme::FONT_STRONG)
                     .color(p.n.ink),
                 Space::new().width(Length::Fill),
+                material_menu(app, p),
                 icon_button(
                     p,
                     Icon::Move,
@@ -252,4 +271,42 @@ pub fn selection_bar(app: &App, p: Palette) -> Option<Element<'_, Message>> {
         .style(move |_| p.bar())
         .into(),
     )
+}
+
+/// Width of the "Set material" menu.
+const MATERIAL_MENU_WIDTH: f32 = 200.0;
+
+/// "Set material" with its menu: the known materials, then "No material".
+fn material_menu(app: &App, p: Palette) -> Element<'_, Message> {
+    let anchor = icon_button(
+        p,
+        Icon::Material,
+        t("files-set-material"),
+        Palette::button_secondary,
+        Some(Message::Files(Fx::ToggleMaterialMenu)),
+    );
+    let menu = app.files.material_menu.then(|| {
+        let item = |label: String, msg: Fx| {
+            button(text(label).size(theme::SIZE_BODY).width(Length::Fill))
+                .width(Length::Fill)
+                .padding([4.0, theme::S4])
+                .style(move |_, status| p.button_ghost(status))
+                .on_press(Message::Files(msg))
+        };
+        let mut menu = column![].spacing(theme::S1);
+        for m in Material::KNOWN {
+            menu = menu.push(item(m.label().to_owned(), Fx::SetMaterial(Some(m))));
+        }
+        menu = menu
+            .push(super::widgets::hairline(p))
+            .push(item(t("files-clear-material"), Fx::SetMaterial(None)));
+        container(menu)
+            .padding(theme::S2)
+            .width(Length::Fill)
+            .style(move |_| p.dialog())
+            .into()
+    });
+    super::dropdown::dropdown(anchor, menu, MATERIAL_MENU_WIDTH)
+        .on_dismiss(Message::Files(Fx::ToggleMaterialMenu))
+        .into()
 }

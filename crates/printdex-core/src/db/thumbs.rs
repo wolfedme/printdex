@@ -63,7 +63,21 @@ fn join(root: &str, rel: &str) -> PathBuf {
 
 /// The preview ramp for a stored material key (see `Material::key`).
 pub fn render_material(key: Option<&str>) -> printdex_render::Material {
-    match key.and_then(crate::model_data::Material::parse) {
+    ramp(key.and_then(crate::model_data::Material::parse))
+}
+
+/// The preview ramp for a model's recipe (or last print) material, else
+/// the material named in the part's path, so a fresh library still reads
+/// by material.
+fn preview_material(key: Option<&str>, rel_path: &str) -> printdex_render::Material {
+    ramp(
+        key.and_then(crate::model_data::Material::parse)
+            .or_else(|| crate::model_data::Material::infer_from_path(rel_path)),
+    )
+}
+
+fn ramp(m: Option<crate::model_data::Material>) -> printdex_render::Material {
+    match m {
         Some(crate::model_data::Material::Petg) => printdex_render::Material::Petg,
         Some(crate::model_data::Material::Pla) => printdex_render::Material::Pla,
         Some(crate::model_data::Material::Tpu) => printdex_render::Material::Tpu,
@@ -93,7 +107,7 @@ impl Db {
             size: u64::try_from(r.size).unwrap_or(0),
             mtime_ns: r.mtime_ns,
             fp_hash: r.fp_hash.map(|h| h as u64),
-            material: render_material(r.material.as_deref()),
+            material: preview_material(r.material.as_deref(), &r.rel_path),
         }))
     }
 
@@ -130,7 +144,7 @@ impl Db {
             size: u64::try_from(r.size).unwrap_or(0),
             mtime_ns: r.mtime_ns,
             fp_hash: r.fp_hash.map(|h| h as u64),
-            material: render_material(lib.material.as_deref()),
+            material: preview_material(lib.material.as_deref(), &r.rel_path),
         })
         .collect();
         let images = sqlx::query!(

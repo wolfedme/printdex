@@ -37,7 +37,6 @@ status-key-open-model = Open
 status-key-back = Back to library
 status-key-part = Part
 status-key-open-file = Open file
-status-added = Added { $date }
 
 model-show-in-folder = Show in folder
 model-open = Open
@@ -351,7 +350,6 @@ form-error-duration = Write the print time like 2h 15m, or in minutes.
 form-error-date = Use a date like 2026-11-17, today or earlier.
 form-error-photo = That photo can’t be added. Use PNG, JPEG or WebP.
 card-supports = Supports
-card-never-printed = Never printed
 card-printed = Printed { $n }×
 list-last-print = Last print
 filter-material = Material
@@ -364,6 +362,16 @@ files-clear = Clear selection
 files-selected = { $count ->
     [one] 1 model selected
    *[other] { $count } models selected
+}
+files-set-material = Set material
+files-clear-material = No material
+files-material-set = { $count ->
+    [one] { $material } set on 1 model
+   *[other] { $material } set on { $count } models
+}
+files-material-cleared = { $count ->
+    [one] Material cleared on 1 model
+   *[other] Material cleared on { $count } models
 }
 files-rename-title = Rename model
 files-rename-yes = Rename
