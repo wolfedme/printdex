@@ -91,7 +91,9 @@ fn library(app: &App, p: Palette) -> Element<'_, Message> {
     content = content.push(if no_library {
         empty::no_library(app, p)
     } else if app.search.loaded && app.search.hits.is_empty() && filtered {
-        empty::no_results(p, &app.search.query.text)
+        empty::no_results(p, &app.search.query.text, !app.chips.is_empty())
+    } else if app.search.loaded && app.search.hits.is_empty() && app.scans.is_empty() {
+        empty::empty_scope(p, &app.search.query.scope)
     } else if app.settings.view == ViewMode::List {
         list::view(app, p)
     } else {
