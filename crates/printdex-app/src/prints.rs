@@ -23,6 +23,41 @@ const TOAST: Duration = Duration::from_millis(2600);
 /// Printer suggestions under the field.
 const PRINTER_SUGGESTIONS: usize = 4;
 
+/// The toast after logging a print. It notices effort that paid off: a
+/// first try that worked, or the first success after failed tries. A
+/// failure that says what went wrong points to "Add as note", which
+/// keeps the fix in the recipe.
+pub fn saved_toast(
+    earlier: &[printdex_core::Attempt],
+    result: AttemptResult,
+    has_notes: bool,
+) -> String {
+    let number = earlier.len() as u64 + 1;
+    let saved = t_args("log-saved", &[("n", Arg::str(number.to_string()))]);
+    let succeeded = earlier.iter().any(|a| a.result == AttemptResult::Success);
+    let extra = match result {
+        AttemptResult::Success if earlier.is_empty() => Some(t("log-saved-first-try")),
+        AttemptResult::Success if !succeeded => Some(t_args(
+            "log-saved-first-success",
+            &[
+                ("count", Arg::count(earlier.len() as u64)),
+                ("n", Arg::str(earlier.len().to_string())),
+            ],
+        )),
+        AttemptResult::Failed | AttemptResult::Partial if has_notes => {
+            Some(t("log-saved-note-hint"))
+        }
+        _ => None,
+    };
+    match extra {
+        Some(e) => t_args(
+            "log-saved-with",
+            &[("saved", Arg::str(saved)), ("extra", Arg::str(e))],
+        ),
+        None => saved,
+    }
+}
+
 pub fn printer_input_id() -> iced::widget::Id {
     iced::widget::Id::new("form-printer")
 }
@@ -124,7 +159,8 @@ pub enum Pr {
     FileDropped(PathBuf),
     Save,
     /// The attempt saved (or the recipe), with photo errors if any.
-    Saved(Result<Option<(AttemptId, u32)>, Arc<CoreError>>),
+    /// The saved attempt and its toast ("Attempt 4 saved").
+    Saved(Result<Option<(AttemptId, String)>, Arc<CoreError>>),
     ShowAll(bool),
     AskDelete(AttemptId),
     ConfirmDelete(AttemptId),
@@ -366,14 +402,13 @@ impl App {
             Pr::Saved(Ok(saved)) => {
                 self.prints.saving = false;
                 self.prints.form = None;
-                let Some((attempt, number)) = saved else {
+                let Some((attempt, toast)) = saved else {
                     return Task::none();
                 };
                 self.prints.fresh = Some(attempt);
                 self.prints.toast_seq += 1;
                 let seq = self.prints.toast_seq;
-                self.prints.toast =
-                    Some(t_args("log-saved", &[("n", Arg::str(number.to_string()))]));
+                self.prints.toast = Some(toast);
                 Task::batch([
                     Task::perform(tokio::time::sleep(TOAST), move |()| {
                         Message::Prints(Pr::HideToast(seq))
@@ -482,14 +517,15 @@ impl App {
         let task = match form.mode {
             FormMode::Log => match form.new_attempt() {
                 Ok(new) => {
-                    let number = data.map_or(0, |d| d.attempts.len()) as u32 + 1;
+                    let earlier = data.map_or(&[][..], |d| d.attempts.as_slice());
+                    let toast = saved_toast(earlier, new.result, !new.notes.trim().is_empty());
                     Task::perform(
                         async move {
                             let a = engine.log_attempt(id, &new).await?;
                             for p in photos {
                                 engine.add_photo(a, &p).await?;
                             }
-                            Ok(Some((a, number)))
+                            Ok(Some((a, toast)))
                         },
                         |r: Result<_, CoreError>| Message::Prints(Pr::Saved(r.map_err(Arc::new))),
                     )
@@ -549,6 +585,44 @@ pub fn has_error(form: &LogForm, field: Field) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tried(result: AttemptResult) -> printdex_core::Attempt {
+        printdex_core::Attempt {
+            id: AttemptId::new(),
+            printed_at: 0,
+            result,
+            settings: printdex_core::PrintSettings::default(),
+            duration_min: None,
+            notes: String::new(),
+            parts: vec![],
+            photos: vec![],
+            number: 1,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn saved_toast_notices_effort_that_paid_off() {
+        use AttemptResult::{Failed, Partial, Success};
+        assert_eq!(
+            saved_toast(&[], Success, false),
+            "Attempt 1 saved. Printed on the first try."
+        );
+        assert_eq!(
+            saved_toast(&[tried(Failed), tried(Partial)], Success, false),
+            "Attempt 3 saved. First success, after 2 tries that didn’t work."
+        );
+        // Not the first success: no fanfare.
+        assert_eq!(
+            saved_toast(&[tried(Success), tried(Failed)], Success, false),
+            "Attempt 3 saved"
+        );
+        assert_eq!(
+            saved_toast(&[], Failed, true),
+            "Attempt 1 saved. “Add as note” on it keeps the fix in the recipe."
+        );
+        assert_eq!(saved_toast(&[], Failed, false), "Attempt 1 saved");
+    }
 
     #[test]
     fn printer_suggestions_prefer_prefix() {

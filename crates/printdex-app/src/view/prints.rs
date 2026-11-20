@@ -289,10 +289,22 @@ pub fn recipe_card<'a>(p: Palette, data: &'a ModelData) -> Element<'a, Message> 
 /// The print log under the organize pane.
 pub fn print_log<'a>(app: &'a App, p: Palette, data: &'a ModelData) -> Element<'a, Message> {
     let n = data.attempts.len() as u64;
+    // Effort worth acknowledging: the print time logged, when any was.
+    let logged: u32 = data.attempts.iter().filter_map(|a| a.duration_min).sum();
     let caption = (n > 0).then(|| {
-        t_args(
+        let count = t_args(
             "log-count",
             &[("count", Arg::count(n)), ("n", Arg::str(n.to_string()))],
+        );
+        if logged == 0 {
+            return count;
+        }
+        t_args(
+            "log-count-time",
+            &[
+                ("attempts", Arg::str(count)),
+                ("time", Arg::str(crate::log_form::format_duration(logged))),
+            ],
         )
     });
     let head = section_head(p, Icon::LogPrint, t("log-title"), caption).push(

@@ -12,6 +12,23 @@ sidebar-add-library = Add library
 sidebar-scanning = Scanning { $library }
 sidebar-scan-listing = Listing files…
 sidebar-scan-progress = { $done } of { $total } files
+scan-done-first = { $count ->
+    [0] No models found in { $library } yet. Printdex looks for STL, 3MF and OBJ files.
+    [one] Found 1 model in { $library } in { $time }
+   *[other] Found { $n } models in { $library } in { $time }
+}
+scan-done-same = { $library } is up to date. Checked { $count ->
+    [one] 1 file
+   *[other] { $n } files
+} in { $time }.
+scan-done-changed = { $library } rescanned in { $time }: { $changes }
+scan-change-new = { $n } new
+scan-change-moved = { $count ->
+    [one] 1 moved with everything you wrote
+   *[other] { $n } moved with everything you wrote
+}
+scan-change-back = { $n } back
+scan-change-missing = { $n } missing
 
 toolbar-search = Search models
 toolbar-rescan = Rescan
@@ -87,6 +104,22 @@ empty-results-title = No models match “{ $query }”
 empty-results-body = Try fewer or shorter words.
 empty-filters-title = No models match these filters
 empty-filters-body = Remove a filter to see more.
+empty-clear-search = Clear search
+empty-clear-filters = Clear filters
+empty-failed-last-title = Nothing failed last time
+empty-failed-last-body = No model’s latest print failed. When one does, it waits here until you log a print that works.
+empty-never-printed-title = Every model here has been printed
+empty-never-printed-body = Models you haven’t logged a print for show up here.
+empty-missing-title = Nothing is missing
+empty-missing-body = Every model is where Printdex last saw it.
+empty-added-week-title = Nothing new this week
+empty-added-week-body = Models first found in the last seven days show up here.
+empty-collection-title = This collection is empty
+empty-collection-body = Open a model and choose Add to collection to put it here.
+empty-tag-title = No models have this tag
+empty-tag-body = Open a model and press T to tag it.
+empty-folder-title = No models in this folder yet
+empty-folder-body = Printdex looks for STL, 3MF and OBJ files. Add some to the folder, then press Rescan.
 
 error-library-overlaps = That folder overlaps the library at { $path }.
 error-library-invalid = That folder can’t be added. Pick a folder that exists and has a readable name.
@@ -294,6 +327,7 @@ log-count = { $count ->
     [one] { $n } attempt
    *[other] { $n } attempts
 }
+log-count-time = { $attempts } · { $time } logged
 log-a-print = Log a print
 log-edit-title = Edit attempt
 log-empty = Nothing printed yet. Log a print to remember what worked and what didn’t.
@@ -316,6 +350,13 @@ log-edit = Edit attempt
 log-delete = Delete attempt
 log-delete-confirm = Delete this attempt and its photos?
 log-saved = Attempt { $n } saved
+log-saved-with = { $saved }. { $extra }
+log-saved-first-try = Printed on the first try.
+log-saved-first-success = { $count ->
+    [one] First success, after 1 try that didn’t work.
+   *[other] First success, after { $n } tries that didn’t work.
+}
+log-saved-note-hint = “Add as note” on it keeps the fix in the recipe.
 form-outcome = Outcome
 form-prefilled = Filled in from the recipe. Change what you did differently.
 form-printer = Printer

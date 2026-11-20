@@ -171,6 +171,9 @@ pub struct App {
     pub libraries: Vec<Library>,
     pub counts: HashMap<LibraryId, u64>,
     pub scans: HashMap<LibraryId, ScanState>,
+    /// Libraries whose first scan is running (just added), so its
+    /// summary says what was found rather than what changed.
+    pub first_scans: std::collections::HashSet<LibraryId>,
     pub search: SearchState,
     pub selected: Option<ModelId>,
     pub hovered: Option<ModelId>,
@@ -264,6 +267,8 @@ pub enum Message {
     Status(LibraryId, Result<LibraryStatus, Arc<CoreError>>, bool),
     ToggleFilterMenu,
     ToggleChip(Chip),
+    /// Remove every filter chip.
+    ClearChips,
     ModelLoaded(ModelId, Result<Option<ModelDetail>, Arc<CoreError>>),
     SelectPart(usize),
     /// Open the selected part with the OS default app (O).
@@ -312,6 +317,7 @@ impl App {
             libraries: Vec::new(),
             counts: HashMap::new(),
             scans: HashMap::new(),
+            first_scans: Default::default(),
             search,
             selected: None,
             hovered: None,
@@ -658,6 +664,7 @@ impl App {
                     self.libraries.push(lib);
                 }
                 self.scans.insert(id, scan_starting());
+                self.first_scans.insert(id);
                 self.start_scan(id)
             }
             Message::LibraryAdded(Err(e)) => {
@@ -666,10 +673,17 @@ impl App {
             }
             Message::ScanDone(id, result) => {
                 self.scans.remove(&id);
+                let first = self.first_scans.remove(&id);
                 match result {
                     Ok(summary) => {
                         tracing::info!(?summary, "scan finished");
-                        Task::none()
+                        if summary.partial {
+                            return Task::none();
+                        }
+                        let Some(name) = self.library(id).map(|l| l.display_name.clone()) else {
+                            return Task::none();
+                        };
+                        self.show_info(scan_summary_text(&name, &summary, first))
                     }
                     Err(e) if matches!(*e, CoreError::Cancelled) => Task::none(),
                     Err(e) if matches!(*e, CoreError::LibraryOffline(_)) => {
@@ -907,6 +921,13 @@ impl App {
             Message::ToggleFilterMenu => {
                 self.filter_menu = !self.filter_menu;
                 Task::none()
+            }
+            Message::ClearChips => {
+                self.chips.clear();
+                match self.search.update(|q| q.filter = filters::to_filter(&[])) {
+                    Some(ticket) => self.run_search(ticket),
+                    None => Task::none(),
+                }
             }
             Message::ToggleChip(chip) => {
                 filters::toggle(&mut self.chips, chip);
@@ -1362,6 +1383,21 @@ impl App {
         }
     }
 
+    /// A short success note, bottom centre, in the undo toast's place.
+    pub(crate) fn show_info(&mut self, text: String) -> Task<Message> {
+        if self.files.toast.is_some() {
+            // An undo offer outranks a note.
+            return Task::none();
+        }
+        self.files.note = None;
+        self.files.info = Some(text);
+        self.files.toast_seq += 1;
+        let seq = self.files.toast_seq;
+        Task::perform(tokio::time::sleep(SCAN_NOTE), move |()| {
+            Message::Files(crate::files::Fx::HideToast(seq))
+        })
+    }
+
     pub(crate) fn show_error(&mut self, e: &CoreError) {
         tracing::warn!(error = %e, "engine error");
         self.error = Some(error_text(e));
@@ -1462,6 +1498,75 @@ pub(crate) fn launch(
         },
         Message::Launched,
     )
+}
+
+/// How long the scan summary stays.
+const SCAN_NOTE: std::time::Duration = std::time::Duration::from_secs(6);
+
+/// "Found 1,204 models in Workshop in 2.1 s", or for a rescan what
+/// changed: "Workshop rescanned in 0.4 s: 3 new, 2 moved with everything
+/// you wrote". Real numbers only; speed is the feature, so the time shows.
+pub fn scan_summary_text(library: &str, s: &ScanSummary, first: bool) -> String {
+    let time = scan_time(s.duration_ms);
+    let lib = || Arg::str(library.to_owned());
+    if first {
+        return t_args(
+            "scan-done-first",
+            &[
+                ("count", Arg::count(s.models_added)),
+                ("n", Arg::str(crate::format::group(s.models_added))),
+                ("library", lib()),
+                ("time", Arg::str(time)),
+            ],
+        );
+    }
+    let mut changes = Vec::new();
+    for (key, n) in [
+        ("scan-change-new", s.models_added),
+        ("scan-change-moved", s.models_moved),
+        ("scan-change-back", s.models_returned),
+        ("scan-change-missing", s.models_missing),
+    ] {
+        if n > 0 {
+            changes.push(t_args(
+                key,
+                &[
+                    ("count", Arg::count(n)),
+                    ("n", Arg::str(crate::format::group(n))),
+                ],
+            ));
+        }
+    }
+    if changes.is_empty() {
+        t_args(
+            "scan-done-same",
+            &[
+                ("library", lib()),
+                ("count", Arg::count(s.files_seen)),
+                ("n", Arg::str(crate::format::group(s.files_seen))),
+                ("time", Arg::str(time)),
+            ],
+        )
+    } else {
+        t_args(
+            "scan-done-changed",
+            &[
+                ("library", lib()),
+                ("time", Arg::str(time)),
+                ("changes", Arg::str(changes.join(", "))),
+            ],
+        )
+    }
+}
+
+/// 12 ms, 2.1 s, 38 s, 3 min 12 s.
+fn scan_time(ms: u64) -> String {
+    match ms {
+        0..1_000 => format!("{ms} ms"),
+        1_000..10_000 => format!("{:.1} s", ms as f64 / 1000.0),
+        10_000..60_000 => format!("{} s", ms / 1000),
+        _ => format!("{} min {} s", ms / 60_000, ms % 60_000 / 1000),
+    }
 }
 
 fn scan_starting() -> ScanState {
@@ -1583,6 +1688,38 @@ fn engine_events(sub: &EngineSub) -> impl Stream<Item = Message> + use<> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn summary(added: u64, moved: u64, missing: u64, ms: u64) -> ScanSummary {
+        ScanSummary {
+            files_seen: 4210,
+            fingerprinted: 0,
+            skipped: 0,
+            models_added: added,
+            models_missing: missing,
+            models_returned: 0,
+            models_moved: moved,
+            sidecars_imported: 0,
+            duration_ms: ms,
+            partial: false,
+        }
+    }
+
+    #[test]
+    fn scan_summary_says_what_was_found_and_how_fast() {
+        assert_eq!(
+            scan_summary_text("Workshop", &summary(1204, 0, 0, 2140), true),
+            "Found 1,204 models in Workshop in 2.1 s"
+        );
+        assert_eq!(
+            scan_summary_text("Workshop", &summary(0, 0, 0, 380), false),
+            "Workshop is up to date. Checked 4,210 files in 380 ms."
+        );
+        assert_eq!(
+            scan_summary_text("Workshop", &summary(3, 1, 2, 75_000), false),
+            "Workshop rescanned in 1 min 15 s: 3 new, 1 moved with everything you wrote, 2 missing"
+        );
+        assert!(scan_summary_text("Empty", &summary(0, 0, 0, 10), true).starts_with("No models"));
+    }
     use printdex_core::ModelKind;
 
     fn app() -> App {
@@ -2764,7 +2901,10 @@ mod tests {
         model_open(&mut a);
         let _ = a.update(Message::Prints(Pr::OpenLog));
         let attempt = printdex_core::AttemptId::new();
-        let _ = a.update(Message::Prints(Pr::Saved(Ok(Some((attempt, 4))))));
+        let _ = a.update(Message::Prints(Pr::Saved(Ok(Some((
+            attempt,
+            "Attempt 4 saved".into(),
+        ))))));
         assert!(a.prints.form.is_none());
         assert_eq!(a.prints.fresh, Some(attempt));
         assert_eq!(a.prints.toast.as_deref(), Some("Attempt 4 saved"));
