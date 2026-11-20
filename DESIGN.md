@@ -396,6 +396,13 @@ Desktop window only; native OS window decorations, which the mockup does not dra
 
 Spacing scale: 2, 4, 6, 8, 12, 16, 20, 24, 32px.
 
+Layout rules (refined 2026-11-20):
+- **One gutter.** Toolbar, grid, list, model header, model body and status bars all use the same 20px side gutter, so content keeps its left edge when moving between library and model.
+- **Headings hug their content.** A section heading sits 8px above what it names and 24px below the group before it (model view: preview, Parts, Notes, Other files). The model view's two columns are 24px apart.
+- **Card text is one group.** On a model pane the name (up to two lines), the recipe chips or folder and the last-print line follow each other at 4px; a short name leaves its slack at the bottom of the pane, never between the name and its meta. Pane height stays fixed for the virtualized grid.
+- **Part tiles fill the column.** Part tiles are at least 100px wide and widen so a full row ends flush with the preview pane above; the still preview shrinks with a narrow main column instead of being clipped.
+- **Key hints are pairs.** In status bars a key cap sits 4px from its label and 16px from the next hint.
+
 ## Elevation & Depth
 
 Flat by translucency. Depth comes from stacked glass fills over one blur and a bright 1px edge (`edge`: white at 0.9 in light, 0.1 in dark), never from drop shadows. The only shadows are a soft contact ellipse under preview models (`contact-shadow`) and a 1px shadow under the switch thumb.

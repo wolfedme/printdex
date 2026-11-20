@@ -28,8 +28,26 @@ const SIDE_WIDTH: f32 = 384.0;
 const PREVIEW_HEIGHT: f32 = 340.0;
 /// Width of the preview inside the well (4:3 of its inner height).
 const PREVIEW_WIDTH: f32 = (PREVIEW_HEIGHT - 2.0 * theme::S9) * 4.0 / 3.0;
-const TILE_WIDTH: f32 = 112.0;
-const TILE_WELL: f32 = 76.0;
+/// Narrowest a part tile gets; tiles widen to fill the main column.
+const TILE_MIN_WIDTH: f32 = 100.0;
+/// Preview well height per pixel of tile width.
+const TILE_WELL_RATIO: f32 = 0.68;
+/// Side gutter of the header, body and status bar; the same as the
+/// library's toolbar and grid, so content keeps its left edge.
+const GUTTER: f32 = theme::S7;
+/// Space between groups in the main column (and between the columns).
+const GROUP_GAP: f32 = theme::S8;
+
+/// Width of each part tile so a row of them fills `main` exactly.
+fn tile_width(main: f32) -> f32 {
+    let n = ((main + theme::S4) / (TILE_MIN_WIDTH + theme::S4))
+        .floor()
+        .max(1.0);
+    // Whole pixels, rounded down so a full row never wraps.
+    ((main - theme::S4 * (n - 1.0)) / n)
+        .floor()
+        .max(TILE_MIN_WIDTH)
+}
 
 pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     match &app.model {
@@ -55,13 +73,20 @@ fn mm(v: f32) -> String {
 /// The large preview: the interactive 3D viewer once the part's mesh is
 /// loaded, the thumbnail until then. The flag says whether the viewer
 /// shows (it fills the well with less padding).
-fn preview_well<'a>(app: &'a App, p: Palette, pt: &PartInfo) -> (Element<'a, Message>, bool) {
+/// `width` is the most the still picture may take: [`PREVIEW_WIDTH`], or
+/// less when the main column is narrow, so the picture is never clipped.
+fn preview_well<'a>(
+    app: &'a App,
+    p: Palette,
+    pt: &PartInfo,
+    width: f32,
+) -> (Element<'a, Message>, bool) {
     let thumb = |label: Option<String>| -> Element<'a, Message> {
         let picture = preview::preview(
             app,
             p,
             ThumbTarget::Part(pt.id),
-            Look::still(PREVIEW_WIDTH, PREVIEW_HEIGHT - 2.0 * theme::S9).labelled(),
+            Look::still(width, PREVIEW_HEIGHT - 2.0 * theme::S9).labelled(),
         );
         match label {
             Some(l) => stack![
@@ -82,7 +107,7 @@ fn preview_well<'a>(app: &'a App, p: Palette, pt: &PartInfo) -> (Element<'a, Mes
             app,
             p,
             ThumbTarget::Part(pt.id),
-            Look::still(PREVIEW_WIDTH, PREVIEW_HEIGHT - 2.0 * theme::S9),
+            Look::still(width, PREVIEW_HEIGHT - 2.0 * theme::S9),
         );
         return (picture, false);
     }
@@ -249,7 +274,7 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
         ]
         .spacing(theme::S2),
     )
-    .padding([theme::S5, theme::S8])
+    .padding([theme::S5, GUTTER])
     .width(Length::Fill)
     .style(move |_| p.bar());
     let mut header = column![header];
@@ -300,8 +325,15 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
         }
         parts.join(" · ")
     });
+    // The main column's width: the part tiles fill it edge to edge, and
+    // the still preview shrinks to fit it.
+    let main_width =
+        app.window.width - theme::SIDEBAR_WIDTH - 1.0 - 2.0 * GUTTER - SIDE_WIDTH - GROUP_GAP;
+    let picture_w = PREVIEW_WIDTH
+        .min(main_width - 2.0 * theme::S5 - 2.0 * theme::S9)
+        .max(1.0);
     let (well, three_d) = match current {
-        Some(pt) => preview_well(app, p, pt),
+        Some(pt) => preview_well(app, p, pt, picture_w),
         None => (icons::placeholder().into(), false),
     };
     let preview = container(
@@ -323,12 +355,14 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
 
     let parts_size: u64 = d.parts.iter().map(|pt| pt.size).sum();
     let n = d.parts.len() as u64;
+    let tile_w = tile_width(main_width);
     let mut tiles = row![].spacing(theme::S4);
     for (i, pt) in d.parts.iter().enumerate() {
-        tiles = tiles.push(tile(app, p, pt, app.motion.part(i, part), i));
+        tiles = tiles.push(tile(app, p, pt, app.motion.part(i, part), i, tile_w));
     }
-    let mut main = column![
-        preview,
+    // A heading sits close to what it names and apart from the group
+    // before it.
+    let parts = column![
         widgets::section(
             p,
             t("model-parts"),
@@ -342,9 +376,9 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
             )),
         ),
         tiles.wrap().vertical_spacing(theme::S4),
-        organize::notes(&app.org, p, d.id),
     ]
-    .spacing(theme::S5);
+    .spacing(theme::S4);
+    let mut main = column![preview, parts, organize::notes(&app.org, p, d.id)].spacing(GROUP_GAP);
 
     if !d.assets.is_empty() {
         let mut files = column![].spacing(0);
@@ -354,13 +388,15 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
             }
             files = files.push(asset_row(app, p, &a.rel_path, a.size));
         }
-        main = main
-            .push(widgets::section(p, t("model-other-files"), None))
-            .push(
+        main = main.push(
+            column![
+                widgets::section(p, t("model-other-files"), None),
                 container(files)
                     .padding([theme::S2, theme::S5])
                     .style(move |_| p.pane(false, false)),
-            );
+            ]
+            .spacing(theme::S4),
+        );
     }
 
     // Side column: details.
@@ -412,8 +448,8 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
 
     let body = scrollable(
         row![main.width(Length::Fill), side]
-            .spacing(theme::S8)
-            .padding([theme::S8, theme::S8]),
+            .spacing(GROUP_GAP)
+            .padding([GROUP_GAP, GUTTER]),
     )
     .height(Length::Fill)
     .style(move |_, status| p.scrollbar(status));
@@ -440,7 +476,7 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
     let status = container(hints)
         .width(Length::Fill)
         .height(theme::STATUSBAR_HEIGHT)
-        .padding([0.0, theme::S7])
+        .padding([0.0, GUTTER])
         .align_y(Alignment::Center)
         .style(move |_| p.bar());
 
@@ -454,7 +490,7 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
             // "Attempt 4 saved" floats over the bottom of the side column.
             match app.prints.toast.as_deref() {
                 Some(m) => container(container(prints::toast(p, m)).width(SIDE_WIDTH))
-                    .padding(theme::S8)
+                    .padding([GROUP_GAP, GUTTER])
                     .align_bottom(Length::Fill)
                     .align_right(Length::Fill)
                     .into(),
@@ -474,18 +510,20 @@ fn tile<'a>(
     pt: &PartInfo,
     selected: f32,
     index: usize,
+    width: f32,
 ) -> Element<'a, Message> {
-    let inner = TILE_WIDTH - 2.0 * theme::S3 - 2.0 * theme::S4;
+    let inner = width - 2.0 * theme::S3 - 2.0 * theme::S4;
+    let well = (width * TILE_WELL_RATIO).round();
     let body = column![
         container(preview::preview(
             app,
             p,
             ThumbTarget::Part(pt.id),
-            Look::still(inner, TILE_WELL - 2.0 * theme::S4),
+            Look::still(inner, well - 2.0 * theme::S4),
         ))
         .padding(theme::S4)
         .width(Length::Fill)
-        .height(TILE_WELL)
+        .height(well)
         .style(move |_| p.well()),
         container(
             text(file_name(&pt.rel_path).to_owned())
@@ -503,7 +541,7 @@ fn tile<'a>(
     button(
         container(body)
             .padding(theme::S3)
-            .width(TILE_WIDTH)
+            .width(width)
             .clip(true)
             .style(move |_| p.pane_fade(selected, false)),
     )
@@ -746,7 +784,7 @@ fn missing_banner<'a>(
         .into()
     };
     container(content)
-        .padding([theme::S4, theme::S8])
+        .padding([theme::S4, GUTTER])
         .width(Length::Fill)
         .style(move |_| p.error_line())
         .into()
@@ -789,4 +827,22 @@ fn restore_button<'a>(app: &App, p: Palette, id: printdex_core::ModelId) -> Elem
         Palette::button_ghost,
         Some(Message::Restore(crate::restore_ui::Rx::OpenModel(id))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn part_tiles_fill_the_main_column() {
+        for main in [343.0_f32, 420.0, 599.0, 1000.0] {
+            let w = tile_width(main);
+            let n = ((main + theme::S4) / (w + theme::S4)).floor();
+            let row = n * w + (n - 1.0) * theme::S4;
+            assert!(w >= TILE_MIN_WIDTH, "{main}: {w}");
+            assert!(row <= main && main - row < n, "{main}: {n} × {w} = {row}");
+        }
+        // Too narrow for even one tile: the minimum, never less.
+        assert_eq!(tile_width(40.0), TILE_MIN_WIDTH);
+    }
 }

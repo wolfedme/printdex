@@ -585,7 +585,7 @@ pub fn model_panel<'a>(
     }
     Some(
         container(col)
-            .padding([theme::S5, theme::S8])
+            .padding([theme::S5, theme::S7])
             .width(Length::Fill)
             .style(move |_| p.bar())
             .into(),

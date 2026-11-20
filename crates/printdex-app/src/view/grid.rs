@@ -6,7 +6,9 @@ use printdex_core::{ModelHit, ThumbTarget, format_number};
 
 use crate::app::{App, GRID_PAD_X, GRID_PAD_Y, GridViewport, Message, grid_id};
 use crate::format::{group, parent_path};
-use crate::grid::{CHIP_LINE, COLUMN_GAP, GridMetrics, PANE_PADDING, ROW_GAP, STATUS_LINE};
+use crate::grid::{
+    CHIP_LINE, COLUMN_GAP, GridMetrics, NAME_LINES, PANE_PADDING, ROW_GAP, STATUS_LINE,
+};
 use crate::i18n::{Arg, t_args};
 use crate::icons::{self, Icon};
 use crate::theme::{self, Palette};
@@ -107,27 +109,29 @@ fn pane<'a>(app: &App, p: Palette, m: &GridMetrics, hit: &ModelHit) -> Element<'
         );
     }
 
+    // Name and meta read as one group under the well: the meta follows
+    // the name whether it takes one line or two, and the slack a short
+    // name leaves goes to the bottom of the pane, not between them.
     let folder = parent_path(&hit.rel_path);
-    let body = column![
-        well,
-        container(
-            row![
-                text(hit.name.clone())
-                    .size(theme::SIZE_BODY)
-                    .font(theme::FONT_STRONG)
-                    .line_height(1.3)
-                    .width(Length::Fill),
-                text(hit.number.map(format_number).unwrap_or_default())
-                    .size(theme::SIZE_DATA)
-                    .font(theme::FONT_DATA)
-                    .color(p.n.ink_3)
-                    .line_height(1.6)
-                    .wrapping(text::Wrapping::None),
-            ]
-            .spacing(theme::S3)
-        )
-        .height(34)
-        .clip(true),
+    let name = container(
+        row![
+            text(hit.name.clone())
+                .size(theme::SIZE_BODY)
+                .font(theme::FONT_STRONG)
+                .line_height(1.3)
+                .width(Length::Fill),
+            text(hit.number.map(format_number).unwrap_or_default())
+                .size(theme::SIZE_DATA)
+                .font(theme::FONT_DATA)
+                .color(p.n.ink_3)
+                .line_height(1.6)
+                .wrapping(text::Wrapping::None),
+        ]
+        .spacing(theme::S3),
+    )
+    .max_height(NAME_LINES)
+    .clip(true);
+    let meta = column![
         container(super::prints::card_chips(p, hit).unwrap_or_else(|| {
             text(folder.to_owned())
                 .size(theme::SIZE_DATA)
@@ -145,6 +149,7 @@ fn pane<'a>(app: &App, p: Palette, m: &GridMetrics, hit: &ModelHit) -> Element<'
             .clip(true),
     ]
     .spacing(theme::S2);
+    let body = column![well, column![name, meta].spacing(theme::S2)].spacing(theme::S4);
 
     let id = hit.id;
     let card = container(body)
