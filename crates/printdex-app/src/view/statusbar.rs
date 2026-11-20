@@ -43,10 +43,16 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
                 .size(theme::SIZE_CAPTION)
                 .font(theme::FONT_MEDIUM),
             Space::new().width(Length::Fill),
-            hint(p, "/", t("status-key-search")),
-            hint(p, "↑↓←→", t("status-key-move")),
-            hint(p, "Enter", t("status-key-open-model")),
-            hint(p, "Esc", t("status-key-clear")),
+            // Each key stays with its label; the hints sit apart from each
+            // other, as on the model view.
+            row![
+                hint(p, "/", t("status-key-search")),
+                hint(p, "↑↓←→", t("status-key-move")),
+                hint(p, "Enter", t("status-key-open-model")),
+                hint(p, "Esc", t("status-key-clear")),
+            ]
+            .spacing(theme::S6)
+            .align_y(Alignment::Center),
         ]
         .spacing(theme::S4)
         .align_y(Alignment::Center),
