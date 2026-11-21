@@ -36,7 +36,7 @@ pub const THUMB_WIDTH: u32 = 384;
 pub const THUMB_HEIGHT: u32 = 288;
 /// Bumped when the look of rendered thumbnails changes; old files are then
 /// simply ignored.
-const CACHE_VERSION: &str = "v1";
+const CACHE_VERSION: &str = "v2";
 /// Mesh memory allowed in flight across all jobs, in MiB.
 pub const BUDGET_MIB: u32 = 768;
 /// Largest folder image decoded for a cover.
@@ -52,6 +52,11 @@ const TOUCH_AFTER: Duration = Duration::from_secs(3600);
 /// Triangle budget of the "full detail" 3D preview. Beyond this, even full
 /// detail is decimated, so a 50M-triangle file can't exhaust GPU memory.
 pub const FULL_DETAIL_TRIANGLES: usize = 8_000_000;
+
+/// Largest 3D preview that gets smooth normals (about 0.2 s of welding on
+/// top of the load); full-detail meshes beyond it are drawn faceted, which
+/// at that density only shows when zoomed far in.
+pub const SMOOTH_PREVIEW_TRIANGLES: usize = 1_000_000;
 
 /// How much of a mesh the 3D preview loads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -72,6 +77,10 @@ pub struct Preview {
     pub triangles: u64,
     /// Whether `mesh` has fewer triangles than the file.
     pub decimated: bool,
+    /// Smooth corner normals for shading `mesh` (see
+    /// [`printdex_mesh::corner_normals`]); `None` for meshes so dense that
+    /// facets never show and welding would only slow the load.
+    pub normals: Option<Vec<printdex_mesh::PackedNormal>>,
     /// The model's material, for the viewer's colours.
     pub material: printdex_render::Material,
 }
@@ -349,7 +358,10 @@ impl ThumbnailService {
             let bounds = mesh.bounds().ok_or(ThumbFailure::Invalid)?;
             let triangles = mesh.triangles();
             let mesh = printdex_mesh::decimate(mesh, target);
+            let normals = (mesh.triangles() <= SMOOTH_PREVIEW_TRIANGLES)
+                .then(|| printdex_mesh::corner_normals(&mesh));
             Ok(Preview {
+                normals,
                 decimated: mesh.triangles() < triangles,
                 mesh,
                 dims: bounds.size(),
