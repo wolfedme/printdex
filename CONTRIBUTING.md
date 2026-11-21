@@ -6,9 +6,11 @@ Thanks for your interest in Printdex!
 and describe what you saw, what you expected, and (for bugs) your operating
 system and how your model library is stored (local disk, USB drive, NAS).
 
-**Pull requests from outside contributors are not being accepted yet.** This
+**Pull requests from outside contributors are not being accepted yet** (they are closed automatically). This
 keeps the licensing of the project flexible while it is young. This may
 change later; when it does, this file will say how to contribute code.
+
+Security problems: please report them privately, see [SECURITY.md](SECURITY.md).
 
 ## Maintainer notes
 

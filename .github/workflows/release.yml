@@ -46,7 +46,7 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       release: ${{ steps.v.outputs.release }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - id: v
         shell: bash
         run: |
@@ -73,13 +73,13 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: release
           save-if: ${{ github.event_name != 'pull_request' }}
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: "9.0.x"
       - run: dotnet tool install -g vpk --version "$VPK_VERSION"
@@ -105,7 +105,7 @@ jobs:
           (cd out && "./$(basename "$app")" --appimage-extract >/dev/null)
           out/squashfs-root/usr/bin/printdex --version
           rm -rf out/squashfs-root
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-linux
           path: out/*
@@ -116,13 +116,13 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: release
           save-if: ${{ github.event_name != 'pull_request' }}
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: "9.0.x"
       - run: dotnet tool install -g vpk --version "$env:VPK_VERSION"
@@ -141,7 +141,7 @@ jobs:
             --packDir stage --mainExe printdex-app.exe --runtime win-x64 \
             --icon packaging/icons/printdex.ico --outputDir out
           ls -la out
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-windows
           path: out/*
@@ -152,15 +152,15 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: release
           save-if: ${{ github.event_name != 'pull_request' }}
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: "9.0.x"
       - run: dotnet tool install -g vpk --version "$VPK_VERSION"
@@ -195,7 +195,7 @@ jobs:
           ln -s /Applications dmg/Applications
           hdiutil create -volname Printdex -srcfolder dmg -ov -format UDZO "out/Printdex-$version-osx.dmg"
           "$app/Contents/MacOS/printdex" --version
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-macos
           path: out/*
@@ -208,10 +208,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: release-*
           path: dist
@@ -219,7 +219,7 @@ jobs:
       - run: ls -la dist
       - name: Release notes
         id: notes
-        uses: orhun/git-cliff-action@v4
+        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4
         with:
           config: cliff.toml
           args: ${{ needs.version.outputs.release == 'true' && '--latest' || '--unreleased' }} --strip header
@@ -245,7 +245,7 @@ jobs:
           minisign -V -p packaging/minisign.pub -m "$(ls dist/*.nupkg | head -1)"
       - name: Draft the GitHub release
         if: needs.version.outputs.release == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           draft: true
           prerelease: ${{ contains(needs.version.outputs.version, '-') }}

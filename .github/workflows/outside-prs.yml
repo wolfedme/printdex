@@ -1,0 +1,31 @@
+name: outside pull requests
+
+# Printdex doesn't take outside code contributions yet (CONTRIBUTING.md).
+# Closes pull requests from anyone who isn't the owner, a collaborator or a
+# bot (Dependabot), with a friendly note pointing to issues instead.
+#
+# pull_request_target runs with this repository's token, so this workflow
+# never checks out or runs the pull request's code.
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close:
+    if: >-
+      github.event.pull_request.user.type != 'Bot' &&
+      !contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Comment and close
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr comment "$PR" --body "Thanks for your interest in Printdex! The project isn't accepting outside pull requests yet (see CONTRIBUTING.md), so this one is closed automatically. Bug reports and ideas are very welcome as issues."
+          gh pr close "$PR"
