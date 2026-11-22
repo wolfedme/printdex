@@ -378,7 +378,15 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
         tiles.wrap().vertical_spacing(theme::S4),
     ]
     .spacing(theme::S4);
-    let mut main = column![preview, parts, organize::notes(&app.org, p, d.id)].spacing(GROUP_GAP);
+    let mut main = column![
+        preview,
+        parts,
+        organize::notes(&app.org, p, d.id, super::sync::notes_device(app, d.id))
+    ]
+    .spacing(GROUP_GAP);
+    if let Some(e) = super::sync::edited_elsewhere(app, p, d.id) {
+        main = main.push(e);
+    }
 
     if !d.assets.is_empty() {
         let mut files = column![].spacing(0);

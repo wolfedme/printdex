@@ -70,6 +70,41 @@ pub enum CoreError {
     Migrate(#[from] sqlx::migrate::MigrateError),
     #[error("backup: {0}")]
     Backup(#[from] BackupError),
+    #[error("sync: {0}")]
+    Sync(#[from] SyncError),
+}
+
+/// Why a sync could not run or a file in a sync space was skipped.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SyncError {
+    #[error("a file in the sync space is cut short")]
+    Truncated,
+    #[error("a file in the sync space is damaged")]
+    Corrupt,
+    #[error("the sync space was written by a newer Printdex (format {0})")]
+    NewerFormat(u32),
+    #[error("wrong sync passphrase")]
+    WrongPassphrase,
+    #[error("the sync passphrase is needed")]
+    PassphraseNeeded,
+    #[error("the sync space cannot be written")]
+    ReadOnly,
+    #[error("the sync space rejected the credentials")]
+    Credentials,
+    #[error("the sync space cannot be reached: {0}")]
+    Unreachable(String),
+    #[error("the sync space is full")]
+    Full,
+    #[error("sync space not found")]
+    SpaceNotFound,
+    #[error("this library is not linked to that sync space")]
+    NotLinked,
+    #[error("this library is already linked to that sync space")]
+    AlreadyLinked,
+    #[error("this device was seen too recently to be forgotten")]
+    DeviceRecent,
+    #[error("{0}")]
+    Storage(String),
 }
 
 /// Why a backup or restore could not run, grouped by what the user can do

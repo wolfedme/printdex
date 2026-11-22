@@ -110,6 +110,14 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
 }
 
 pub(super) fn error_banner<'a>(p: Palette, e: String) -> Element<'a, Message> {
+    error_banner_with(p, e, Message::Backup(Bx::DismissError))
+}
+
+pub(super) fn error_banner_with<'a>(
+    p: Palette,
+    e: String,
+    dismiss: Message,
+) -> Element<'a, Message> {
     container(
         row![
             icons::icon(Icon::Alert, theme::ICON, p.status.fail),
@@ -117,7 +125,7 @@ pub(super) fn error_banner<'a>(p: Palette, e: String) -> Element<'a, Message> {
                 .size(theme::SIZE_BODY)
                 .color(p.n.ink)
                 .width(Length::Fill),
-            small_button(p, t("backup-dismiss"), Message::Backup(Bx::DismissError)),
+            small_button(p, t("backup-dismiss"), dismiss),
         ]
         .spacing(theme::S4)
         .align_y(Alignment::Center),
@@ -270,114 +278,14 @@ fn setup<'a>(app: &'a App, p: Palette, f: &'a Form) -> Element<'a, Message> {
         segmented(p, &kinds, kind, |k| Message::Backup(Bx::Kind(k))),
     ]
     .spacing(theme::S4);
-    place = match kind {
-        Kind::Folder => place.push(
-            row![
-                container(field(
-                    p,
-                    t("backup-field-folder"),
-                    "/media/backup/printdex",
-                    &f.path,
-                    Field::Path
-                ))
-                .width(Length::Fill),
-                small_button(p, t("backup-choose"), Message::Backup(Bx::PickFolder)),
-            ]
-            .spacing(theme::S3)
-            .align_y(Alignment::Center),
-        ),
-        Kind::S3 => place
-            .push(field(
-                p,
-                t("backup-field-endpoint"),
-                "https://s3.eu-central-1.amazonaws.com",
-                &f.endpoint,
-                Field::Endpoint,
-            ))
-            .push(field(
-                p,
-                t("backup-field-bucket"),
-                "",
-                &f.bucket,
-                Field::Bucket,
-            ))
-            .push(field(
-                p,
-                t("backup-field-region"),
-                "auto",
-                &f.region,
-                Field::Region,
-            ))
-            .push(field(
-                p,
-                t("backup-field-prefix"),
-                "printdex",
-                &f.prefix,
-                Field::Prefix,
-            ))
-            .push(field(
-                p,
-                t("backup-field-key-id"),
-                "",
-                &f.key_id,
-                Field::KeyId,
-            ))
-            .push(field(
-                p,
-                t("backup-field-secret-key"),
-                "",
-                &f.secret,
-                Field::Secret,
-            )),
-        Kind::WebDav => place
-            .push(field(
-                p,
-                t("backup-field-url"),
-                "https://cloud.example.com/remote.php/dav/files/me/printdex",
-                &f.url,
-                Field::Url,
-            ))
-            .push(field(p, t("backup-field-user"), "", &f.user, Field::User))
-            .push(field(
-                p,
-                t("backup-field-password"),
-                "",
-                &f.secret,
-                Field::Secret,
-            )),
-        Kind::Sftp => place
-            .push(field(
-                p,
-                t("backup-field-host"),
-                "nas.local",
-                &f.host,
-                Field::Host,
-            ))
-            .push(field(p, t("backup-field-port"), "22", &f.port, Field::Port))
-            .push(field(p, t("backup-field-user"), "", &f.user, Field::User))
-            .push(field(
-                p,
-                t("backup-field-remote-folder"),
-                "/volume1/backups/printdex",
-                &f.sftp_path,
-                Field::SftpPath,
-            ))
-            .push(
-                row![
-                    container(field(
-                        p,
-                        t("backup-field-key-file"),
-                        &t("backup-key-agent"),
-                        &f.key_file,
-                        Field::KeyFile
-                    ))
-                    .width(Length::Fill),
-                    small_button(p, t("backup-choose"), Message::Backup(Bx::PickKeyFile)),
-                ]
-                .spacing(theme::S3)
-                .align_y(Alignment::Center),
-            ),
-    };
+    place = place.push(target_fields(
+        p,
+        f,
+        |f, v| Message::Backup(Bx::Input(f, v)),
+        Message::Backup(Bx::PickFolder),
+        Message::Backup(Bx::PickKeyFile),
+        "/media/backup/printdex",
+    ));
     let (probe_text, probe_color) = match &f.probe {
         Probe::None => (String::new(), p.n.ink_2),
         Probe::Testing => (t("backup-testing"), p.n.ink_2),
@@ -514,6 +422,134 @@ fn setup<'a>(app: &'a App, p: Palette, f: &'a Form) -> Element<'a, Message> {
         .width(Length::Fill)
         .style(move |_| p.pane(false, false))
         .into()
+}
+
+/// The fields of a folder, S3, WebDAV or SFTP place (backup targets and
+/// sync spaces share them).
+pub(super) fn target_fields<'a>(
+    p: Palette,
+    f: &'a Form,
+    input: fn(Field, String) -> Message,
+    pick_folder: Message,
+    pick_key: Message,
+    folder_hint: &'a str,
+) -> Element<'a, Message> {
+    let kind = f.kind.unwrap_or(Kind::Folder);
+    let place = column![].spacing(theme::S4);
+    let field = |label: String, placeholder: &str, value: &'a str, fld: Field| {
+        field_with(p, label, placeholder, value, fld, input)
+    };
+    match kind {
+        Kind::Folder => place.push(
+            row![
+                container(field(
+                    t("backup-field-folder"),
+                    folder_hint,
+                    &f.path,
+                    Field::Path
+                ))
+                .width(Length::Fill),
+                small_button(p, t("backup-choose"), pick_folder),
+            ]
+            .spacing(theme::S3)
+            .align_y(Alignment::Center),
+        ),
+        Kind::S3 => place
+            .push(field(
+                t("backup-field-endpoint"),
+                "https://s3.eu-central-1.amazonaws.com",
+                &f.endpoint,
+                Field::Endpoint,
+            ))
+            .push(field(
+                t("backup-field-bucket"),
+                "",
+                &f.bucket,
+                Field::Bucket,
+            ))
+            .push(field(
+                t("backup-field-region"),
+                "auto",
+                &f.region,
+                Field::Region,
+            ))
+            .push(field(
+                t("backup-field-prefix"),
+                "printdex",
+                &f.prefix,
+                Field::Prefix,
+            ))
+            .push(field(t("backup-field-key-id"), "", &f.key_id, Field::KeyId))
+            .push(field(
+                t("backup-field-secret-key"),
+                "",
+                &f.secret,
+                Field::Secret,
+            )),
+        Kind::WebDav => place
+            .push(field(
+                t("backup-field-url"),
+                "https://cloud.example.com/remote.php/dav/files/me/printdex",
+                &f.url,
+                Field::Url,
+            ))
+            .push(field(t("backup-field-user"), "", &f.user, Field::User))
+            .push(field(
+                t("backup-field-password"),
+                "",
+                &f.secret,
+                Field::Secret,
+            )),
+        Kind::Sftp => place
+            .push(field(
+                t("backup-field-host"),
+                "nas.local",
+                &f.host,
+                Field::Host,
+            ))
+            .push(field(t("backup-field-port"), "22", &f.port, Field::Port))
+            .push(field(t("backup-field-user"), "", &f.user, Field::User))
+            .push(field(
+                t("backup-field-remote-folder"),
+                "/volume1/backups/printdex",
+                &f.sftp_path,
+                Field::SftpPath,
+            ))
+            .push(
+                row![
+                    container(field(
+                        t("backup-field-key-file"),
+                        &t("backup-key-agent"),
+                        &f.key_file,
+                        Field::KeyFile
+                    ))
+                    .width(Length::Fill),
+                    small_button(p, t("backup-choose"), pick_key),
+                ]
+                .spacing(theme::S3)
+                .align_y(Alignment::Center),
+            ),
+    }
+    .into()
+}
+
+fn field_with<'a>(
+    p: Palette,
+    label: String,
+    placeholder: &str,
+    value: &str,
+    f: Field,
+    input_msg: fn(Field, String) -> Message,
+) -> Element<'a, Message> {
+    let secure = matches!(f, Field::Secret | Field::Passphrase | Field::Passphrase2);
+    input(
+        p,
+        label,
+        placeholder,
+        value,
+        move |v| input_msg(f, v),
+        secure,
+    )
 }
 
 fn target_summary(t_: &Target) -> (String, String) {

@@ -385,6 +385,7 @@ fn entry<'a>(
     if let Some(printer) = &a.settings.printer {
         meta.push(printer.clone());
     }
+
     let head = row![
         icons::icon(icon, theme::ICON_DENSE, color),
         text(word)
@@ -413,8 +414,16 @@ fn entry<'a>(
     .spacing(theme::S3)
     .align_y(Alignment::Center);
     let mut col = column![head].spacing(theme::S3);
-    if !a.settings.is_empty() || a.duration_min.is_some() {
-        col = col.push(setting_chips(p, &a.settings, a.duration_min));
+    let device = super::sync::attempt_device(app, a.id);
+    if !a.settings.is_empty() || a.duration_min.is_some() || device.is_some() {
+        let mut chips = row![setting_chips(p, &a.settings, a.duration_min)]
+            .spacing(theme::S3)
+            .align_y(Alignment::Center);
+        if let Some(d) = device {
+            // Logged or last changed on another computer.
+            chips = chips.push(text(d).size(theme::SIZE_CAPTION).color(p.n.ink_3));
+        }
+        col = col.push(chips);
     }
     if !a.notes.trim().is_empty() {
         col = col.push(

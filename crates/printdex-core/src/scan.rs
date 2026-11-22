@@ -213,6 +213,7 @@ pub(crate) fn clone_error(e: &CoreError) -> CoreError {
         CoreError::AlreadyScanning(id) => CoreError::AlreadyScanning(*id),
         CoreError::Cancelled => CoreError::Cancelled,
         CoreError::Backup(b) => CoreError::Backup(b.clone()),
+        CoreError::Sync(s) => CoreError::Sync(s.clone()),
         CoreError::NameInvalid => CoreError::NameInvalid,
         CoreError::NameTaken(n) => CoreError::NameTaken(n.clone()),
         CoreError::TargetOffline => CoreError::TargetOffline,

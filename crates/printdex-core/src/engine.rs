@@ -58,6 +58,8 @@ pub struct Engine {
     pub(crate) cache_dir: PathBuf,
     /// Backup secrets (session and OS credential store).
     pub(crate) secrets: Arc<crate::backup::secrets::Store>,
+    /// Sync jobs, keys and the changes waiting to be published.
+    pub(crate) sync: Arc<crate::sync::run::SyncState>,
 }
 
 /// Removes a library from the "scanning" set on every exit path. Holds the
@@ -148,6 +150,7 @@ impl Engine {
             backup: Arc::new(crate::backup::run::BackupState::default()),
             cache_dir: cache_dir.to_path_buf(),
             secrets: Arc::new(crate::backup::secrets::Store::default()),
+            sync: Arc::new(crate::sync::run::SyncState::default()),
         };
         match engine.reconcile_ops().await {
             Ok(names) => *engine.recovered.lock().unwrap_or_else(|p| p.into_inner()) = names,
@@ -282,7 +285,7 @@ impl Engine {
             writer: &self.sidecars,
             install: self.install,
         };
-        match subtrees {
+        let summary = match subtrees {
             None => {
                 scan_library(
                     self.fs.clone(),
@@ -306,7 +309,16 @@ impl Engine {
                 )
                 .await
             }
+        };
+        if summary.is_ok()
+            && let Ok(spaces) = self.db.spaces_of_library(id).await
+            && !spaces.is_empty()
+        {
+            // New models may be ones another install has data for.
+            self.sync.rematch_all(spaces);
+            self.sync.poke.notify_one();
         }
+        summary
     }
 
     /// Takes library `id` for a scan or a file action: no other scan or

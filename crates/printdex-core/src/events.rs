@@ -95,4 +95,23 @@ pub enum EngineEvent {
     },
     /// What needs the user's attention now (empty: all is well).
     BackupNeedsAttention(Vec<Attention>),
+    SyncStarted {
+        space: i64,
+    },
+    SyncFinished {
+        space: i64,
+        /// Records this install published.
+        sent: usize,
+        /// Records taken from other installs.
+        applied: usize,
+    },
+    SyncFailed {
+        space: i64,
+        error: Arc<CoreError>,
+    },
+    /// Models another install has that this computer doesn't (yet).
+    SyncParked {
+        space: i64,
+        count: usize,
+    },
 }

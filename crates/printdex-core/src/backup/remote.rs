@@ -50,22 +50,26 @@ fn backend_err(what: &'static str, err: opendal::Error) -> Box<RusticError> {
     RusticError::with_source(ErrorKind::Backend, what, err)
 }
 
+/// An async OpenDAL operator for `builder` with retries and an optional
+/// upload limit. Backup wraps it in a blocking operator; sync uses it as is.
+pub(crate) fn layered_operator(
+    builder: impl opendal::Builder,
+    throttle: Option<Throttle>,
+) -> Result<opendal::Operator, opendal::Error> {
+    // Registers the reqwest HTTP transport (once per process).
+    opendal::install_default();
+    let mut op = opendal::Operator::new(builder)?
+        .layer(RetryLayer::new().with_max_times(RETRIES).with_jitter());
+    if let Some(Throttle(bps)) = throttle {
+        op = op.layer(ThrottleLayer::new(bps.max(1024), bps.max(1024)));
+    }
+    Ok(op)
+}
+
 impl RemoteBackend {
-    /// Wraps an OpenDAL service builder.
-    pub fn new(
-        builder: impl opendal::Builder,
-        location: String,
-        throttle: Option<Throttle>,
-    ) -> RusticResult<Self> {
+    /// Wraps a layered operator (see [`layered_operator`]).
+    pub fn from_operator(op: opendal::Operator, location: String) -> RusticResult<Self> {
         let _guard = runtime().enter();
-        // Registers the reqwest HTTP transport (once per process).
-        opendal::install_default();
-        let mut op = opendal::Operator::new(builder)
-            .map_err(|e| backend_err("Setting up the backup target failed.", e))?
-            .layer(RetryLayer::new().with_max_times(RETRIES).with_jitter());
-        if let Some(Throttle(bps)) = throttle {
-            op = op.layer(ThrottleLayer::new(bps.max(1024), bps.max(1024)));
-        }
         let op = Operator::new(op)
             .map_err(|e| backend_err("Setting up the backup target failed.", e))?;
         Ok(Self { op, location })

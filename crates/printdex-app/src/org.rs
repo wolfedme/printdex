@@ -203,7 +203,7 @@ where
 
 impl App {
     /// The model shown in the model view.
-    fn open_model(&self) -> Option<ModelId> {
+    pub(crate) fn open_model(&self) -> Option<ModelId> {
         match self.screen {
             Screen::Model(id) => Some(id),
             _ => None,
@@ -282,7 +282,10 @@ impl App {
                             None => data.preview_material(),
                         };
                         self.org.data = Some((id, *data));
-                        return self.viewer.set_material(material).map(Message::Viewer);
+                        return Task::batch([
+                            self.viewer.set_material(material).map(Message::Viewer),
+                            self.load_model_sync(id),
+                        ]);
                     }
                     Ok(None) => self.org.data = None,
                     Err(e) => self.show_error(&e),

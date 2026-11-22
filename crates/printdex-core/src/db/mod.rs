@@ -11,6 +11,7 @@ pub(crate) mod organize;
 mod prints;
 mod search;
 mod sidecars;
+pub(crate) mod sync;
 mod thumbs;
 
 use std::path::{Path, PathBuf};
@@ -34,6 +35,7 @@ pub use search::{
     to_fts_query,
 };
 pub use sidecars::{SidecarState, SidecarTarget};
+pub use sync::{DeviceRow, EditEntry, FieldRow, SpaceKind, SpaceRow};
 pub use thumbs::{IMAGE_EXTENSIONS, ImageSource, ModelSources, PartSource, render_material};
 
 /// Handle to the Printdex database. Cheap to clone.

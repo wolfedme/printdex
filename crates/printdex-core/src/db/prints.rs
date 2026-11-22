@@ -242,6 +242,42 @@ impl Db {
         Ok(true)
     }
 
+    /// Writes an attempt that sync merged, whatever the stored one's time.
+    /// `false` when the attempt belongs to another model or is invalid.
+    pub(crate) async fn apply_attempt(&self, model: ModelId, a: &Attempt) -> Result<bool> {
+        if check_attempt(&a.settings, a.duration_min, &a.notes).is_err() {
+            return Ok(false);
+        }
+        let mut tx = self.writer().begin().await?;
+        ensure_model(&mut tx, model).await?;
+        let owner = sqlx::query_scalar!(
+            r#"SELECT model_id as "m!: ModelId" FROM attempts WHERE id = ?"#,
+            a.id
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        if owner.is_some_and(|m| m != model) {
+            return Ok(false);
+        }
+        write_attempt(
+            &mut tx,
+            model,
+            a.id,
+            &AttemptFields {
+                printed_at: a.printed_at,
+                result: a.result,
+                settings: &a.settings,
+                duration_min: a.duration_min,
+                notes: &a.notes,
+                parts: &a.parts,
+            },
+            a.updated_at,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
     /// Deletes an attempt. Returns its model and the photo files to remove.
     pub async fn delete_attempt(&self, id: AttemptId) -> Result<(ModelId, Vec<PhotoRef>)> {
         let mut tx = self.writer().begin().await?;
