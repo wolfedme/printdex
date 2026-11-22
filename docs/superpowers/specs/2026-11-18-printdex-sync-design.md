@@ -1,6 +1,6 @@
 # Printdex two-way sync: design
 
-Status: draft for Max's review (issue #105). Post-MVP; builds on the v1 design (§6 data model, sidecars) and the backup design (targets, secrets).
+Status: approved by Max 2026-11-22 (issue #105). Post-MVP; builds on the v1 design (§6 data model, sidecars) and the backup design (targets, secrets).
 
 ## 1. Intent
 
