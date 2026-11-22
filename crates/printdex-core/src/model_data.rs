@@ -486,11 +486,18 @@ impl ModelData {
     }
 
     /// Like [`preview_material`](Self::preview_material), falling back to
-    /// the material named in `rel_path` (the part on show).
-    pub fn preview_material_at(&self, rel_path: &str) -> printdex_render::Material {
+    /// the part on show: the material its file's slicer settings name
+    /// (`file_material`), else a material word in its `rel_path`.
+    pub fn preview_material_at(
+        &self,
+        rel_path: &str,
+        file_material: Option<&Material>,
+    ) -> printdex_render::Material {
         match self.preview_material() {
             printdex_render::Material::Unknown => crate::db::render_material(
-                Material::infer_from_path(rel_path)
+                file_material
+                    .cloned()
+                    .or_else(|| Material::infer_from_path(rel_path))
                     .map(|m| m.key())
                     .as_deref(),
             ),

@@ -7,6 +7,7 @@ use crate::error::Result;
 use crate::grouping::ModelKind;
 use crate::identity::{Arrival, Candidate, Key, match_moves};
 use crate::ids::{AssetId, LibraryId, ModelId, PartId};
+use crate::model_data::Material;
 use crate::scan::{ApplyStats, Moved, ScanWrite};
 use crate::time::now_ms;
 use crate::walk::FileKind;
@@ -21,6 +22,8 @@ pub struct KnownFile {
     pub size: u64,
     pub mtime_ns: i64,
     pub fp_hash: Option<u64>,
+    /// Fingerprint hash the 3MF material was read at.
+    pub material_fp: Option<u64>,
     pub is_part: bool,
     /// Seen by the last scan that reached it (`missing_since IS NULL`).
     pub present: bool,
@@ -76,6 +79,8 @@ enum Op<'a> {
         size: i64,
         mtime_ns: i64,
         fp_hash: Option<i64>,
+        /// The 3MF material read this scan, if it was read.
+        material: Option<Option<&'a str>>,
     },
     UpdatePart {
         id: PartId,
@@ -85,6 +90,7 @@ enum Op<'a> {
         size: i64,
         mtime_ns: i64,
         fp_hash: Option<i64>,
+        material: Option<Option<&'a str>>,
     },
     InsertAsset {
         id: AssetId,
@@ -146,7 +152,7 @@ impl Db {
         let mut out = Vec::new();
         for (lo, hi) in scope_ranges(scope) {
             let parts = sqlx::query!(
-                r#"SELECT rel_path, size, mtime_ns, fp_hash, missing_since FROM parts
+                r#"SELECT rel_path, size, mtime_ns, fp_hash, material_fp, missing_since FROM parts
                    WHERE library_id = ? AND rel_path >= ? AND rel_path < ?"#,
                 lib,
                 lo,
@@ -168,6 +174,7 @@ impl Db {
                 size: r.size as u64,
                 mtime_ns: r.mtime_ns,
                 fp_hash: r.fp_hash.map(|h| h as u64),
+                material_fp: r.material_fp.map(|h| h as u64),
                 is_part: true,
                 present: r.missing_since.is_none(),
             }));
@@ -176,6 +183,7 @@ impl Db {
                 size: r.size as u64,
                 mtime_ns: r.mtime_ns,
                 fp_hash: None,
+                material_fp: None,
                 is_part: false,
                 present: r.missing_since.is_none(),
             }));
@@ -386,6 +394,7 @@ impl Db {
                 let format = format.as_str();
                 let size = file.size as i64;
                 let fp_hash = write.fingerprints.get(&i).map(|f| f.hash as i64);
+                let material = write.materials.get(&i).map(|m| m.as_deref());
                 match parts_by_path.get(file.rel_path.as_str()) {
                     Some(row) => {
                         seen_parts.insert(row.id);
@@ -395,6 +404,7 @@ impl Db {
                             || row.size != size
                             || row.mtime_ns != file.mtime_ns
                             || row.fp_hash != new_hash
+                            || material.is_some()
                             || row.missing_since.is_some();
                         if changed {
                             ops.push(Op::UpdatePart {
@@ -405,6 +415,7 @@ impl Db {
                                 size,
                                 mtime_ns: file.mtime_ns,
                                 fp_hash: new_hash,
+                                material,
                             });
                         }
                     }
@@ -423,6 +434,7 @@ impl Db {
                                     size,
                                     mtime_ns: file.mtime_ns,
                                     fp_hash: fp_hash.or(row.fp_hash),
+                                    material,
                                 });
                             }
                             None => ops.push(Op::InsertPart {
@@ -433,6 +445,7 @@ impl Db {
                                 size,
                                 mtime_ns: file.mtime_ns,
                                 fp_hash,
+                                material,
                             }),
                         }
                     }
@@ -529,12 +542,16 @@ impl Db {
                         size,
                         mtime_ns,
                         fp_hash,
+                        material,
                     } => {
+                        let (read, file_material) = (material.is_some(), material.flatten());
+                        let material_fp = fp_hash.filter(|_| read);
                         sqlx::query!(
                             "INSERT INTO parts (id, model_id, library_id, rel_path, format, size, mtime_ns,
-                                                fp_hash, created_at, updated_at)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                            id, model, lib, rel_path, format, size, mtime_ns, fp_hash, now, now
+                                                fp_hash, file_material, material_fp, created_at, updated_at)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            id, model, lib, rel_path, format, size, mtime_ns, fp_hash, file_material,
+                            material_fp, now, now
                         )
                         .execute(&mut *tx)
                         .await?;
@@ -547,12 +564,20 @@ impl Db {
                         size,
                         mtime_ns,
                         fp_hash,
+                        material,
                     } => {
+                        // Unread this scan: keep what was read before.
+                        let (read, file_material) = (material.is_some(), material.flatten());
                         sqlx::query!(
-                            "UPDATE parts SET model_id = ?, rel_path = ?, format = ?, size = ?, mtime_ns = ?,
-                                              fp_hash = ?, missing_since = NULL, updated_at = ?
-                             WHERE id = ?",
-                            model, rel_path, format, size, mtime_ns, fp_hash, now, id
+                            "UPDATE parts SET model_id = ?1, rel_path = ?2, format = ?3, size = ?4,
+                                              mtime_ns = ?5, fp_hash = ?6, missing_since = NULL,
+                                              updated_at = ?7,
+                                              file_material = CASE WHEN ?8 THEN ?9 ELSE file_material END,
+                                              material_fp = CASE WHEN ?8 THEN ?6 ELSE material_fp END,
+                                              path_material = CASE WHEN rel_path IS ?2 THEN path_material END
+                             WHERE id = ?10",
+                            model, rel_path, format, size, mtime_ns, fp_hash, now, read,
+                            file_material, id
                         )
                         .execute(&mut *tx)
                         .await?;
@@ -622,6 +647,33 @@ impl Db {
             }
             tx.commit().await?;
         }
+        self.fill_path_materials().await?;
         Ok(stats)
+    }
+
+    /// Looks up the material word in the path of every part that has not
+    /// been looked at since it was added or moved.
+    pub(crate) async fn fill_path_materials(&self) -> Result<()> {
+        loop {
+            let rows = sqlx::query!(
+                r#"SELECT id as "id!: PartId", rel_path FROM parts
+                   WHERE path_material IS NULL LIMIT 5000"#
+            )
+            .fetch_all(self.writer())
+            .await?;
+            if rows.is_empty() {
+                return Ok(());
+            }
+            let mut tx = self.writer().begin().await?;
+            for r in rows {
+                let key = Material::infer_from_path(&r.rel_path)
+                    .map(|m| m.key())
+                    .unwrap_or_default();
+                sqlx::query!("UPDATE parts SET path_material = ? WHERE id = ?", key, r.id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            tx.commit().await?;
+        }
     }
 }

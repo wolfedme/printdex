@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE parts SET path_material = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "33bf6223d3fc3f30d506127b31fbb127b3264e3768812e9f2f611f7796f2314b"
+}

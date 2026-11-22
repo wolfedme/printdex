@@ -275,7 +275,8 @@ impl Db {
         .await?;
         for sql in [
             "UPDATE parts SET
-               library_id = ?1, rel_path = ?2 || substr(rel_path, length(?3) + 1), updated_at = ?4
+               library_id = ?1, rel_path = ?2 || substr(rel_path, length(?3) + 1), updated_at = ?4,
+               path_material = NULL
              WHERE model_id = ?5 AND (rel_path = ?3 OR substr(rel_path, 1, length(?3) + 1) = ?3 || '/')",
             "UPDATE assets SET
                library_id = ?1, rel_path = ?2 || substr(rel_path, length(?3) + 1), updated_at = ?4
@@ -291,6 +292,7 @@ impl Db {
             .await?;
         }
         tx.commit().await?;
+        self.fill_path_materials().await?;
         self.assign_numbers(to_lib).await?;
         Ok(())
     }

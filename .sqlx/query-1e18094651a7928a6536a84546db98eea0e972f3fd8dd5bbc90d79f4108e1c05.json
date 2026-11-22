@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!: PartId\", rel_path FROM parts\n                   WHERE path_material IS NULL LIMIT 5000",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: PartId",
+        "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "rel_path",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "rel_path"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "1e18094651a7928a6536a84546db98eea0e972f3fd8dd5bbc90d79f4108e1c05"
+}

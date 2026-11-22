@@ -2287,6 +2287,7 @@ mod tests {
                     size: 10,
                     dims: None,
                     triangles: None,
+                    material: None,
                 })
                 .collect(),
             assets: vec![],

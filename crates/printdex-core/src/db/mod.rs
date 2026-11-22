@@ -68,11 +68,14 @@ impl Db {
         let photo_dir = path
             .parent()
             .map_or_else(|| PathBuf::from("photos"), |p| p.join("photos"));
-        Ok(Db {
+        let db = Db {
             writer,
             reader,
             photo_dir,
-        })
+        };
+        // Parts from before path materials were stored (migration 0008).
+        db.fill_path_materials().await?;
+        Ok(db)
     }
 
     /// The single writer pool. Every write goes through it.

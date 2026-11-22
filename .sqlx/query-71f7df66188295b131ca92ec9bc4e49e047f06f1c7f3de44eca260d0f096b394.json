@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO parts (id, model_id, library_id, rel_path, format, size, mtime_ns,\n                                                fp_hash, file_material, material_fp, created_at, updated_at)\n                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 12
+    },
+    "nullable": []
+  },
+  "hash": "71f7df66188295b131ca92ec9bc4e49e047f06f1c7f3de44eca260d0f096b394"
+}

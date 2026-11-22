@@ -1,22 +1,11 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id as \"id!: PartId\", rel_path, format, size, mtime_ns, fp_hash FROM parts\n               WHERE model_id = ? AND missing_since IS NULL ORDER BY rel_path",
+  "query": "SELECT rel_path, size, mtime_ns, fp_hash, material_fp, missing_since FROM parts\n                   WHERE library_id = ? AND rel_path >= ? AND rel_path < ?",
   "describe": {
     "columns": [
       {
-        "name": "id!: PartId",
-        "ordinal": 0,
-        "type_info": "Blob",
-        "origin": {
-          "Table": {
-            "table": "parts",
-            "name": "id"
-          }
-        }
-      },
-      {
         "name": "rel_path",
-        "ordinal": 1,
+        "ordinal": 0,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -26,19 +15,8 @@
         }
       },
       {
-        "name": "format",
-        "ordinal": 2,
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "parts",
-            "name": "format"
-          }
-        }
-      },
-      {
         "name": "size",
-        "ordinal": 3,
+        "ordinal": 1,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -49,7 +27,7 @@
       },
       {
         "name": "mtime_ns",
-        "ordinal": 4,
+        "ordinal": 2,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -60,7 +38,7 @@
       },
       {
         "name": "fp_hash",
-        "ordinal": 5,
+        "ordinal": 3,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -68,19 +46,41 @@
             "name": "fp_hash"
           }
         }
+      },
+      {
+        "name": "material_fp",
+        "ordinal": 4,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "material_fp"
+          }
+        }
+      },
+      {
+        "name": "missing_since",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "missing_since"
+          }
+        }
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 3
     },
     "nullable": [
+      false,
+      false,
+      false,
       true,
-      false,
-      false,
-      false,
-      false,
+      true,
       true
     ]
   },
-  "hash": "b53a91c3ed4fa65d28219f171cd2f6b1bca8a960bf3338251a93d64b4fff92b7"
+  "hash": "ac56cf3388291fde13aaf4a381a215e9f1558793eef26e5b2af080ac3e750c89"
 }

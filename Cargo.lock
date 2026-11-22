@@ -4873,6 +4873,7 @@ version = "0.1.0"
 dependencies = [
  "fastrand",
  "quick-xml 0.41.0",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "zip",
