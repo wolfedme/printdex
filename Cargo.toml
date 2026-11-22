@@ -57,6 +57,12 @@ rustic_backend = { version = "0.8", default-features = false }
 opendal = { version = "0.59", default-features = false, features = ["blocking", "http-transport-reqwest", "executors-tokio", "layers-retry", "layers-throttle", "services-s3", "services-webdav"] }
 bytes = "1"
 keyring = "4"
+# Sync: passphrase key (already in the tree via rustic), sealed batches,
+# compressed logs, default device name.
+scrypt = { version = "0.12", default-features = false }
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc", "getrandom"] }
+zstd = { version = "0.14", default-features = false }
+gethostname = "1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

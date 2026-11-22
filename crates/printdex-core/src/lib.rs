@@ -20,6 +20,7 @@ pub mod monitor;
 pub mod photos;
 pub mod scan;
 pub mod sidecar;
+pub mod sync;
 pub mod thumbs;
 pub mod time;
 mod user_data;
@@ -31,7 +32,7 @@ pub use db::{
     Scope, SearchFilter, Smart, SmartCounts, SortOrder, Stats, format_number,
 };
 pub use engine::{Engine, LibraryStatus};
-pub use error::{BackupError, CoreError, Result};
+pub use error::{BackupError, CoreError, Result, SyncError};
 pub use events::{EngineEvent, ScanPhase};
 pub use file_ops::{OpKind, OpState, OpSummary};
 pub use grouping::ModelKind;

@@ -23,7 +23,7 @@ use rustic_core::{
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use super::remote::{RemoteBackend, Throttle};
+use super::remote::{RemoteBackend, Throttle, layered_operator};
 use crate::error::{BackupError, CoreError, Result};
 
 /// A file in a snapshot: path (relative to what was asked for) and size.
@@ -395,9 +395,28 @@ fn remote_backend(
     secrets: &TargetSecrets,
     opts: &RepoOptions,
 ) -> Result<RemoteBackend> {
-    let throttle = opts.throttle.map(Throttle);
+    let (op, location) = operator(target, secrets, opts.throttle.map(Throttle))?;
+    RemoteBackend::from_operator(op, location).map_err(classify)
+}
+
+/// The async OpenDAL operator for a remote target and its display
+/// location (shared by backup and sync). Folders have none.
+pub(crate) fn operator(
+    target: &Target,
+    secrets: &TargetSecrets,
+    throttle: Option<Throttle>,
+) -> Result<(opendal::Operator, String)> {
     let secret = secrets.secret.clone().unwrap_or_default();
-    let be = match target {
+    let built = |r: std::result::Result<opendal::Operator, opendal::Error>, loc: String| {
+        r.map(|op| (op, loc)).map_err(|e| {
+            classify(rustic_core::RusticError::with_source(
+                rustic_core::ErrorKind::Backend,
+                "Setting up the target failed.",
+                e,
+            ))
+        })
+    };
+    let out = match target {
         Target::Folder { .. } => return Err(BackupError::TargetInvalid.into()),
         Target::S3 {
             endpoint,
@@ -415,15 +434,17 @@ fn remote_backend(
                 .root(&format!("/{}", prefix.trim_matches('/')))
                 .disable_config_load()
                 .disable_ec2_metadata();
-            RemoteBackend::new(b, format!("s3:{endpoint}/{bucket}/{prefix}"), throttle)
-                .map_err(classify)?
+            built(
+                layered_operator(b, throttle),
+                format!("s3:{endpoint}/{bucket}/{prefix}"),
+            )?
         }
         Target::WebDav { url, user } => {
             let b = opendal::services::Webdav::default()
                 .endpoint(url)
                 .username(user)
                 .password(&secret);
-            RemoteBackend::new(b, format!("webdav:{url}"), throttle).map_err(classify)?
+            built(layered_operator(b, throttle), format!("webdav:{url}"))?
         }
         #[cfg(unix)]
         Target::Sftp {
@@ -441,13 +462,15 @@ fn remote_backend(
             if let Some(k) = key_file.as_ref().and_then(|k| k.to_str()) {
                 b = b.key(k);
             }
-            RemoteBackend::new(b, format!("sftp:{user}@{host}:{path}"), throttle)
-                .map_err(classify)?
+            built(
+                layered_operator(b, throttle),
+                format!("sftp:{user}@{host}:{path}"),
+            )?
         }
         #[cfg(not(unix))]
         Target::Sftp { .. } => return Err(BackupError::Unsupported.into()),
     };
-    Ok(be)
+    Ok(out)
 }
 
 /// Writes and removes a small file at the target, to check it can be

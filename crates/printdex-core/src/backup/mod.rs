@@ -4,7 +4,7 @@
 
 pub mod config;
 mod data;
-mod remote;
+pub(crate) mod remote;
 pub mod repo;
 pub mod restore;
 pub(crate) mod run;
