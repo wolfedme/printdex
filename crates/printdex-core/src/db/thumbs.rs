@@ -67,11 +67,16 @@ pub fn render_material(key: Option<&str>) -> printdex_render::Material {
 }
 
 /// The preview ramp for a model's recipe (or last print) material, else
-/// the material named in the part's path, so a fresh library still reads
-/// by material.
-fn preview_material(key: Option<&str>, rel_path: &str) -> printdex_render::Material {
+/// the part's own: what its 3MF slicer settings name, else a material word
+/// in its path, so a fresh library still reads by material.
+fn preview_material(
+    key: Option<&str>,
+    file_material: Option<&str>,
+    rel_path: &str,
+) -> printdex_render::Material {
     ramp(
-        key.and_then(crate::model_data::Material::parse)
+        key.or(file_material)
+            .and_then(crate::model_data::Material::parse)
             .or_else(|| crate::model_data::Material::infer_from_path(rel_path)),
     )
 }
@@ -90,6 +95,7 @@ impl Db {
     pub async fn part_source(&self, id: PartId) -> Result<Option<PartSource>> {
         let row = sqlx::query!(
             r#"SELECT l.path as lib_path, p.rel_path, p.format, p.size, p.mtime_ns, p.fp_hash,
+                      p.file_material,
                       coalesce((SELECT r.material FROM recipes r WHERE r.model_id = p.model_id),
                                (SELECT a.material FROM attempts a WHERE a.model_id = p.model_id
                                   AND a.material IS NOT NULL ORDER BY a.printed_at DESC, a.id DESC LIMIT 1))
@@ -107,7 +113,11 @@ impl Db {
             size: u64::try_from(r.size).unwrap_or(0),
             mtime_ns: r.mtime_ns,
             fp_hash: r.fp_hash.map(|h| h as u64),
-            material: preview_material(r.material.as_deref(), &r.rel_path),
+            material: preview_material(
+                r.material.as_deref(),
+                r.file_material.as_deref(),
+                &r.rel_path,
+            ),
         }))
     }
 
@@ -130,7 +140,8 @@ impl Db {
             return Ok(None);
         };
         let parts = sqlx::query!(
-            r#"SELECT id as "id!: PartId", rel_path, format, size, mtime_ns, fp_hash FROM parts
+            r#"SELECT id as "id!: PartId", rel_path, format, size, mtime_ns, fp_hash, file_material
+               FROM parts
                WHERE model_id = ? AND missing_since IS NULL ORDER BY rel_path"#,
             id
         )
@@ -144,7 +155,11 @@ impl Db {
             size: u64::try_from(r.size).unwrap_or(0),
             mtime_ns: r.mtime_ns,
             fp_hash: r.fp_hash.map(|h| h as u64),
-            material: preview_material(lib.material.as_deref(), &r.rel_path),
+            material: preview_material(
+                lib.material.as_deref(),
+                r.file_material.as_deref(),
+                &r.rel_path,
+            ),
         })
         .collect();
         let images = sqlx::query!(

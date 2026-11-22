@@ -18,7 +18,7 @@ mod threemf;
 
 pub use decimate::{PREVIEW_TRIANGLES, decimate};
 pub use normals::{CREASE_DEGREES, PackedNormal, corner_normals, pack, unpack};
-pub use threemf::thumbnail as threemf_thumbnail;
+pub use threemf::{filament as threemf_filament, thumbnail as threemf_thumbnail};
 
 /// Buffer size for file reads: large enough that slow network shares see
 /// few round trips.

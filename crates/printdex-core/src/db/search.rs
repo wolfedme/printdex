@@ -99,7 +99,8 @@ pub struct SearchFilter {
     pub formats: Vec<PrintableFormat>,
     /// `Some(true)`: two or more present parts; `Some(false)`: at most one.
     pub multi_part: Option<bool>,
-    /// Keep models whose material (recipe, else latest attempt) is one of
+    /// Keep models whose material (recipe, else latest attempt; without
+    /// either, any part's 3MF slicer material or path word) is one of
     /// these. Empty keeps every model.
     pub materials: Vec<Material>,
 }
@@ -243,12 +244,23 @@ fn push_from_where(
             .push_bind(multi);
     }
     if !filter.materials.is_empty() {
-        q.push(format!(" AND {} IN (", material_sql()));
+        // The recipe's (else latest print's) material decides; a model
+        // with neither matches by what its parts' 3MF settings or paths name.
+        let mat = material_sql();
+        q.push(format!(" AND CASE WHEN {mat} IS NOT NULL THEN {mat} IN ("));
         let mut sep = q.separated(", ");
-        for mat in &filter.materials {
-            sep.push_bind(mat.key());
+        for m in &filter.materials {
+            sep.push_bind(m.key());
         }
-        q.push(")");
+        q.push(
+            ") ELSE EXISTS (SELECT 1 FROM parts p WHERE p.model_id = m.id AND p.missing_since IS NULL \
+             AND coalesce(p.file_material, nullif(p.path_material, '')) IN (",
+        );
+        let mut sep = q.separated(", ");
+        for m in &filter.materials {
+            sep.push_bind(m.key());
+        }
+        q.push(")) END");
     }
 }
 

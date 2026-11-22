@@ -4,6 +4,7 @@ use crate::db::Db;
 use crate::error::Result;
 use crate::grouping::ModelKind;
 use crate::ids::{AssetId, LibraryId, ModelId, PartId};
+use crate::model_data::Material;
 use crate::walk::PrintableFormat;
 
 /// A printable file of a model.
@@ -18,6 +19,8 @@ pub struct PartInfo {
     pub dims: Option<[f32; 3]>,
     /// Triangle count, once the file has been measured.
     pub triangles: Option<u64>,
+    /// The material the file's own (3MF slicer) settings name.
+    pub material: Option<Material>,
 }
 
 /// A non-printable file of a model (image, PDF, readme…).
@@ -88,7 +91,8 @@ impl Db {
                       CASE WHEN measured_fp IS fp_hash THEN dim_x END as "dim_x?: f64",
                       CASE WHEN measured_fp IS fp_hash THEN dim_y END as "dim_y?: f64",
                       CASE WHEN measured_fp IS fp_hash THEN dim_z END as "dim_z?: f64",
-                      CASE WHEN measured_fp IS fp_hash THEN triangles END as "triangles?: i64"
+                      CASE WHEN measured_fp IS fp_hash THEN triangles END as "triangles?: i64",
+                      file_material
                FROM parts
                WHERE model_id = ? AND (missing_since IS NULL OR ?) ORDER BY rel_path"#,
             id,
@@ -107,6 +111,7 @@ impl Db {
                 _ => None,
             },
             triangles: r.triangles.and_then(|t| u64::try_from(t).ok()),
+            material: r.file_material.as_deref().and_then(Material::parse),
         })
         .collect();
         let assets = sqlx::query!(

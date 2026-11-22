@@ -1,11 +1,22 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT rel_path, size, mtime_ns, fp_hash, missing_since FROM parts\n                   WHERE library_id = ? AND rel_path >= ? AND rel_path < ?",
+  "query": "SELECT id as \"id!: PartId\", rel_path, format, size, mtime_ns, fp_hash, file_material\n               FROM parts\n               WHERE model_id = ? AND missing_since IS NULL ORDER BY rel_path",
   "describe": {
     "columns": [
       {
-        "name": "rel_path",
+        "name": "id!: PartId",
         "ordinal": 0,
+        "type_info": "Blob",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "rel_path",
+        "ordinal": 1,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -15,8 +26,19 @@
         }
       },
       {
+        "name": "format",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "format"
+          }
+        }
+      },
+      {
         "name": "size",
-        "ordinal": 1,
+        "ordinal": 3,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -27,7 +49,7 @@
       },
       {
         "name": "mtime_ns",
-        "ordinal": 2,
+        "ordinal": 4,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -38,7 +60,7 @@
       },
       {
         "name": "fp_hash",
-        "ordinal": 3,
+        "ordinal": 5,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -48,21 +70,23 @@
         }
       },
       {
-        "name": "missing_since",
-        "ordinal": 4,
-        "type_info": "Integer",
+        "name": "file_material",
+        "ordinal": 6,
+        "type_info": "Text",
         "origin": {
           "Table": {
             "table": "parts",
-            "name": "missing_since"
+            "name": "file_material"
           }
         }
       }
     ],
     "parameters": {
-      "Right": 3
+      "Right": 1
     },
     "nullable": [
+      true,
+      false,
       false,
       false,
       false,
@@ -70,5 +94,5 @@
       true
     ]
   },
-  "hash": "63ecd9d23cb3826514d3ec11e24233ad4db005b1c034401dfa246f5cd519a93a"
+  "hash": "59aa89db1f3c9054cfd4bf8ef8130d07d5b3a4a990b718a20d7a73045c25d77b"
 }

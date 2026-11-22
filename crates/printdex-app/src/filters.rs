@@ -11,8 +11,9 @@ pub enum Chip {
     Format(PrintableFormat),
     /// Single-file models (`false`) or multi-part models (`true`).
     MultiPart(bool),
-    /// Models whose material (recipe, else latest attempt) is this one.
-    /// Several material chips match any of them.
+    /// Models whose material (recipe, else latest attempt; without either,
+    /// what a part's 3MF settings or path name) is this one. Several
+    /// material chips match any of them.
     Material(MatChip),
 }
 

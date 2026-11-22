@@ -278,7 +278,9 @@ impl App {
                     Ok(Some(data)) => {
                         self.org.notes_md = markdown::parse(&data.notes).collect();
                         let material = match self.current_part() {
-                            Some(pt) => data.preview_material_at(&pt.rel_path),
+                            Some(pt) => {
+                                data.preview_material_at(&pt.rel_path, pt.material.as_ref())
+                            }
                             None => data.preview_material(),
                         };
                         self.org.data = Some((id, *data));

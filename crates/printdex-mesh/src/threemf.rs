@@ -435,6 +435,132 @@ fn thumbnail_from<R: Read + Seek>(
     Ok(None)
 }
 
+/// Largest slicer config entry read for the filament, in bytes.
+const MAX_CONFIG: u64 = 8 << 20;
+
+/// The filament type a slicer saved in the 3MF package `reader` ("PLA",
+/// "PETG-CF", as written), for the first object's extruder. Reads only
+/// small config entries, never the model:
+///
+/// - Bambu Studio / OrcaSlicer: the sliced plate's filaments in
+///   `Metadata/slice_info.config`, else `filament_type` in
+///   `Metadata/project_settings.config`;
+/// - PrusaSlicer: `filament_type` in `Metadata/Slic3r_PE.config`.
+///
+/// `None` when the package names no filament.
+pub fn filament<R: Read + Seek>(reader: R, limits: Limits) -> Result<Option<String>> {
+    let mut zip =
+        zip::ZipArchive::new(BufReader::with_capacity(1 << 16, reader)).map_err(zip_err)?;
+    let cap = limits.max_entry_bytes.min(MAX_CONFIG);
+    let entry = |zip: &mut zip::ZipArchive<_>, name: &str| -> Result<Option<Vec<u8>>> {
+        match entry_name(zip, name) {
+            Some(n) => read_entry(zip, &n, cap).map(Some),
+            None => Ok(None),
+        }
+    };
+    if let Some(bytes) = entry(&mut zip, "Metadata/slice_info.config")?
+        && let Some(t) = slice_info_filament(&bytes)
+    {
+        return Ok(Some(t));
+    }
+    if let Some(bytes) = entry(&mut zip, "Metadata/project_settings.config")? {
+        let extruder = entry(&mut zip, "Metadata/model_settings.config")?
+            .and_then(|b| first_object_extruder(&b))
+            .unwrap_or(1);
+        if let Some(t) = project_filament(&bytes, extruder) {
+            return Ok(Some(t));
+        }
+    }
+    if let Some(bytes) = entry(&mut zip, "Metadata/Slic3r_PE.config")? {
+        let extruder = entry(&mut zip, "Metadata/Slic3r_PE_model.config")?
+            .and_then(|b| first_object_extruder(&b))
+            .unwrap_or(1);
+        if let Some(t) = prusa_filament(&bytes, extruder) {
+            return Ok(Some(t));
+        }
+    }
+    Ok(None)
+}
+
+/// A usable filament name: trimmed, not blank.
+fn clean(s: &str) -> Option<String> {
+    let s = s.trim();
+    (!s.is_empty()).then(|| s.to_owned())
+}
+
+/// The `n`th (1-based) entry, else the first.
+fn pick(list: Vec<String>, n: usize) -> Option<String> {
+    let i = if n >= 1 && n <= list.len() { n - 1 } else { 0 };
+    list.into_iter().nth(i).and_then(|s| clean(&s))
+}
+
+/// `type` of the first `<filament>` a sliced plate uses.
+fn slice_info_filament(xml: &[u8]) -> Option<String> {
+    let mut reader = quick_xml::Reader::from_reader(xml);
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e) | Event::Empty(e)) if e.local_name().as_ref() == b"filament" => {
+                if let Some(t) = attr(&e, b"type").and_then(|t| clean(&t)) {
+                    return Some(t);
+                }
+            }
+            Ok(Event::Eof) | Err(_) => return None,
+            _ => {}
+        }
+        buf.clear();
+    }
+}
+
+/// The extruder (1-based) set on the first object, not on one of its parts:
+/// `<object><metadata key="extruder" value="2"/>…`.
+fn first_object_extruder(xml: &[u8]) -> Option<usize> {
+    let mut reader = quick_xml::Reader::from_reader(xml);
+    let mut buf = Vec::new();
+    let mut in_object = false;
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e) | Event::Empty(e)) => match e.local_name().as_ref() {
+                b"object" => in_object = true,
+                // Past the object's own settings.
+                b"part" | b"volume" if in_object => return None,
+                b"metadata" if in_object && attr(&e, b"key").as_deref() == Some("extruder") => {
+                    return num::<usize>(&e, b"value").map(|n| n.max(1));
+                }
+                _ => {}
+            },
+            Ok(Event::End(e)) if e.local_name().as_ref() == b"object" => return None,
+            Ok(Event::Eof) | Err(_) => return None,
+            _ => {}
+        }
+        buf.clear();
+    }
+}
+
+/// `filament_type` from Bambu/Orca's JSON project settings.
+fn project_filament(json: &[u8], extruder: usize) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_slice(json).ok()?;
+    let list = match v.get("filament_type")? {
+        serde_json::Value::Array(a) => a
+            .iter()
+            .filter_map(|x| x.as_str().map(str::to_owned))
+            .collect(),
+        serde_json::Value::String(s) => vec![s.clone()],
+        _ => return None,
+    };
+    pick(list, extruder)
+}
+
+/// `; filament_type = PLA;PETG` from PrusaSlicer's config.
+fn prusa_filament(text: &[u8], extruder: usize) -> Option<String> {
+    let text = String::from_utf8_lossy(text);
+    let value = text.lines().find_map(|l| {
+        let (k, v) = l.trim_start_matches(';').split_once('=')?;
+        (k.trim() == "filament_type").then_some(v)
+    })?;
+    pick(value.split(';').map(str::to_owned).collect(), extruder)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -653,5 +779,76 @@ mod tests {
         // Not a zip at all.
         let junk: Vec<u8> = (0..500).map(|_| rng.u8(..)).collect();
         assert!(zip::ZipArchive::new(Cursor::new(junk)).is_err());
+    }
+
+    fn filament_of(entries: &[(&str, &[u8])]) -> Option<String> {
+        let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let opts = zip::write::SimpleFileOptions::default();
+        for (name, bytes) in entries {
+            w.start_file(*name, opts).unwrap();
+            w.write_all(bytes).unwrap();
+        }
+        let bytes = w.finish().unwrap().into_inner();
+        filament(Cursor::new(bytes), Limits::default()).unwrap()
+    }
+
+    #[test]
+    fn filament_from_bambu_project_uses_object_extruder() {
+        let settings = br#"{"filament_type": ["PLA", "PETG", "TPU"], "layer_height": "0.2"}"#;
+        let model = br#"<config><object id="2"><metadata key="name" value="Clip"/><metadata key="extruder" value="2"/>
+<part id="1"><metadata key="extruder" value="3"/></part></object></config>"#;
+        assert_eq!(
+            filament_of(&[
+                ("Metadata/project_settings.config", settings),
+                ("Metadata/model_settings.config", model),
+            ]),
+            Some("PETG".into())
+        );
+        assert_eq!(
+            filament_of(&[("Metadata/project_settings.config", settings)]),
+            Some("PLA".into())
+        );
+    }
+
+    #[test]
+    fn sliced_plate_filament_wins() {
+        let settings = br#"{"filament_type": ["PLA"]}"#;
+        let slice = br##"<config><plate><metadata key="index" value="1"/>
+<filament id="1" tray_info_idx="GFL99" type="ASA" color="#FFFFFF" used_m="1.2" used_g="3.4"/></plate></config>"##;
+        assert_eq!(
+            filament_of(&[
+                ("Metadata/project_settings.config", settings),
+                ("Metadata/slice_info.config", slice),
+            ]),
+            Some("ASA".into())
+        );
+    }
+
+    #[test]
+    fn filament_from_prusaslicer_config() {
+        let config = b"; generated by PrusaSlicer\n; filament_settings_id = \"Prusament PETG\"\n; filament_type = PETG;PLA\n; layer_height = 0.2\n";
+        let model = br#"<config><object id="1" instances_count="1"><metadata type="object" key="extruder" value="2"/>
+<volume firstid="0" lastid="3"><metadata type="volume" key="extruder" value="1"/></volume></object></config>"#;
+        assert_eq!(
+            filament_of(&[("Metadata/Slic3r_PE.config", config)]),
+            Some("PETG".into())
+        );
+        assert_eq!(
+            filament_of(&[
+                ("Metadata/Slic3r_PE.config", config),
+                ("Metadata/Slic3r_PE_model.config", model),
+            ]),
+            Some("PLA".into())
+        );
+    }
+
+    #[test]
+    fn no_filament_without_slicer_config() {
+        assert_eq!(filament_of(&[("3D/3dmodel.model", b"<model/>")]), None);
+        assert_eq!(
+            filament_of(&[("Metadata/project_settings.config", b"not json")]),
+            None
+        );
+        assert!(filament(Cursor::new(b"not a zip".to_vec()), Limits::default()).is_err());
     }
 }

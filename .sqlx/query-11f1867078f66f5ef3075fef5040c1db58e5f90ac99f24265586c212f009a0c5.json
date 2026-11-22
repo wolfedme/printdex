@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT l.path as lib_path, p.rel_path, p.format, p.size, p.mtime_ns, p.fp_hash,\n                      coalesce((SELECT r.material FROM recipes r WHERE r.model_id = p.model_id),\n                               (SELECT a.material FROM attempts a WHERE a.model_id = p.model_id\n                                  AND a.material IS NOT NULL ORDER BY a.printed_at DESC, a.id DESC LIMIT 1))\n                        as \"material?: String\"\n               FROM parts p JOIN libraries l ON l.id = p.library_id\n               WHERE p.id = ? AND p.missing_since IS NULL",
+  "query": "SELECT l.path as lib_path, p.rel_path, p.format, p.size, p.mtime_ns, p.fp_hash,\n                      p.file_material,\n                      coalesce((SELECT r.material FROM recipes r WHERE r.model_id = p.model_id),\n                               (SELECT a.material FROM attempts a WHERE a.model_id = p.model_id\n                                  AND a.material IS NOT NULL ORDER BY a.printed_at DESC, a.id DESC LIMIT 1))\n                        as \"material?: String\"\n               FROM parts p JOIN libraries l ON l.id = p.library_id\n               WHERE p.id = ? AND p.missing_since IS NULL",
   "describe": {
     "columns": [
       {
@@ -70,8 +70,19 @@
         }
       },
       {
-        "name": "material?: String",
+        "name": "file_material",
         "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "parts",
+            "name": "file_material"
+          }
+        }
+      },
+      {
+        "name": "material?: String",
+        "ordinal": 7,
         "type_info": "Text",
         "origin": "Expression"
       }
@@ -86,8 +97,9 @@
       false,
       false,
       true,
+      true,
       true
     ]
   },
-  "hash": "9a526b69d999fd6b9cf8a9b69c83797f64b95efc804601d922620880b35a7a96"
+  "hash": "11f1867078f66f5ef3075fef5040c1db58e5f90ac99f24265586c212f009a0c5"
 }

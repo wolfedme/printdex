@@ -17,7 +17,9 @@ use crate::events::{EngineEvent, ScanPhase};
 use crate::fingerprint::{Fingerprint, fingerprint_with};
 use crate::fs::Fs;
 use crate::grouping::{ModelGroup, Opaque, group_models_with};
+use crate::model_data::Material;
 use crate::time::now_ms;
+use crate::walk::PrintableFormat;
 use crate::walk::{FileEntry, FileKind, SkipReason, classify, root_readable, walk_from};
 
 /// Files fingerprinted per CPU-pool job (one progress event each).
@@ -28,6 +30,9 @@ pub struct ScanWrite {
     pub files: Vec<FileEntry>,
     /// Index into `files`; only new or changed parts.
     pub fingerprints: HashMap<usize, Fingerprint>,
+    /// Index into `files`: the material key read from each fingerprinted
+    /// 3MF (`None` when it names none).
+    pub materials: HashMap<usize, Option<String>>,
     pub groups: Vec<ModelGroup>,
     /// Relative paths (folders or files) the scan could not read this round.
     /// Existing rows at, under or containing them are not marked missing.
@@ -90,26 +95,41 @@ pub fn needs_fingerprint(known: &HashMap<&str, &KnownFile>, entry: &FileEntry) -
     }
     match known.get(entry.rel_path.as_str()) {
         None => true,
-        Some(k) => k.size != entry.size || k.mtime_ns != entry.mtime_ns || k.fp_hash.is_none(),
+        Some(k) => {
+            k.size != entry.size
+                || k.mtime_ns != entry.mtime_ns
+                || k.fp_hash.is_none()
+                // A 3MF whose slicer material was never read (older database).
+                || (entry.kind == FileKind::Printable(PrintableFormat::ThreeMf)
+                    && k.material_fp != k.fp_hash)
+        }
     }
 }
 
-/// Fingerprints `files[i]` for each `i` in `which` on the rayon pool.
-/// Returns the successes and the indices that failed (vanished, truncated,
-/// unreadable).
+/// Fingerprints `files[i]` for each `i` in `which` on the rayon pool, and
+/// reads the slicer's filament from each 3MF among them. Returns the
+/// fingerprints, the 3MF materials (key, `None` when the file names none)
+/// and the indices that failed (vanished, truncated, unreadable).
 pub(crate) async fn fingerprint_entries(
     fs: Arc<dyn Fs>,
     root: &Path,
     files: &[FileEntry],
     which: &[usize],
-) -> (HashMap<usize, Fingerprint>, Vec<usize>) {
-    let jobs: Vec<(usize, PathBuf, u64)> = which
+) -> (
+    HashMap<usize, Fingerprint>,
+    HashMap<usize, Option<String>>,
+    Vec<usize>,
+) {
+    let jobs: Vec<(usize, PathBuf, u64, bool)> = which
         .iter()
-        .map(|&i| (i, root.join(&files[i].rel_path), files[i].size))
+        .map(|&i| {
+            let is_3mf = files[i].kind == FileKind::Printable(PrintableFormat::ThreeMf);
+            (i, root.join(&files[i].rel_path), files[i].size, is_3mf)
+        })
         .collect();
     let results = run_cpu(move || {
         jobs.into_par_iter()
-            .map(|(i, path, walked_size)| {
+            .map(|(i, path, walked_size, is_3mf)| {
                 // A file rewritten between the walk and now would store the
                 // walk's size next to the new content's hash: count it as
                 // failed, the next scan picks it up.
@@ -123,23 +143,48 @@ pub(crate) async fn fingerprint_entries(
                 if let Err(e) = &r {
                     tracing::warn!(path = %path.display(), error = %e, "cannot fingerprint file, skipping");
                 }
-                (i, r.ok())
+                let material = (is_3mf && r.is_ok()).then(|| threemf_material(&*fs, &path));
+                (i, r.ok(), material)
             })
             .collect::<Vec<_>>()
     })
     .await;
     let mut ok = HashMap::with_capacity(results.len());
+    let mut materials = HashMap::new();
     let mut failed = Vec::new();
-    for (i, r) in results {
+    for (i, r, material) in results {
         match r {
             Some(fp) => {
                 ok.insert(i, fp);
+                if let Some(m) = material {
+                    materials.insert(i, m);
+                }
             }
             None => failed.push(i),
         }
     }
     failed.sort_unstable();
-    (ok, failed)
+    (ok, materials, failed)
+}
+
+/// The material key the 3MF at `path` names in its slicer settings, when it
+/// is one Printdex knows. A package that cannot be read names none.
+fn threemf_material(fs: &dyn Fs, path: &Path) -> Option<String> {
+    let raw = fs
+        .open(path)
+        .map_err(printdex_mesh::MeshError::from)
+        .and_then(|f| printdex_mesh::threemf_filament(f, printdex_mesh::Limits::default()));
+    match raw {
+        Ok(name) => name
+            .as_deref()
+            .and_then(Material::parse)
+            .filter(|m| !matches!(m, Material::Other(_)))
+            .map(|m| m.key()),
+        Err(e) => {
+            tracing::debug!(path = %path.display(), error = %e, "cannot read 3MF filament");
+            None
+        }
+    }
 }
 
 /// Scans `lib` and writes the result. Emits `ScanStarted`, `ScanProgress`
@@ -350,14 +395,16 @@ async fn run_scan_with(
         .collect();
 
     let mut fingerprints = HashMap::with_capacity(which.len());
+    let mut materials = HashMap::new();
     let mut failed = Vec::new();
     progress(ScanPhase::Fingerprinting, 0, which.len());
     for (n, chunk) in which.chunks(FINGERPRINT_CHUNK).enumerate() {
         if cancel.is_cancelled() {
             return Err(CoreError::Cancelled);
         }
-        let (ok, bad) = fingerprint_entries(fs.clone(), &lib.path, &files, chunk).await;
+        let (ok, mats, bad) = fingerprint_entries(fs.clone(), &lib.path, &files, chunk).await;
         fingerprints.extend(ok);
+        materials.extend(mats);
         failed.extend(bad);
         let done = (n * FINGERPRINT_CHUNK + chunk.len()).min(which.len());
         progress(ScanPhase::Fingerprinting, done, which.len());
@@ -370,6 +417,7 @@ async fn run_scan_with(
         keep.extend(failed.iter().map(|&i| files[i].rel_path.clone()));
         let failed: std::collections::HashSet<usize> = failed.iter().copied().collect();
         let mut remap = HashMap::with_capacity(fingerprints.len());
+        let mut remap_materials = HashMap::with_capacity(materials.len());
         let mut kept = Vec::with_capacity(files.len() - failed.len());
         for (i, f) in files.into_iter().enumerate() {
             if failed.contains(&i) {
@@ -378,10 +426,14 @@ async fn run_scan_with(
             if let Some(fp) = fingerprints.remove(&i) {
                 remap.insert(kept.len(), fp);
             }
+            if let Some(m) = materials.remove(&i) {
+                remap_materials.insert(kept.len(), m);
+            }
             kept.push(f);
         }
         files = kept;
         fingerprints = remap;
+        materials = remap_materials;
     }
 
     if cancel.is_cancelled() {
@@ -416,6 +468,7 @@ async fn run_scan_with(
             ScanWrite {
                 files,
                 fingerprints,
+                materials,
                 groups,
                 keep,
                 scope,
@@ -772,7 +825,7 @@ mod tests {
             .unwrap();
         fs::remove_file(f.root.join("Orc/orc.3mf")).unwrap();
         let all: Vec<usize> = (0..walked.files.len()).collect();
-        let (ok, failed) = fingerprint_entries(real(), &f.root, &walked.files, &all).await;
+        let (ok, _, failed) = fingerprint_entries(real(), &f.root, &walked.files, &all).await;
         assert_eq!(failed, [gone]);
         assert_eq!(ok.len(), 2);
         let s = f.scan().await;
@@ -795,7 +848,7 @@ mod tests {
         )
         .unwrap();
         let all: Vec<usize> = (0..walked.files.len()).collect();
-        let (ok, failed) = fingerprint_entries(real(), &f.root, &walked.files, &all).await;
+        let (ok, _, failed) = fingerprint_entries(real(), &f.root, &walked.files, &all).await;
         assert_eq!(failed, [grown]);
         assert!(!ok.contains_key(&grown));
     }
@@ -1002,6 +1055,7 @@ mod tests {
             size: 1,
             mtime_ns: 1,
             fp_hash: Some(7),
+            material_fp: None,
             is_part: true,
             present: true,
         };
@@ -1020,5 +1074,137 @@ mod tests {
             ..e
         };
         assert!(!needs_fingerprint(&known, &asset));
+        // A 3MF is read once more until its slicer material has been read.
+        let threemf = FileEntry {
+            kind: FileKind::Printable(PrintableFormat::ThreeMf),
+            ..e.clone()
+        };
+        assert!(needs_fingerprint(&known, &threemf));
+        let read = KnownFile {
+            material_fp: Some(7),
+            ..k.clone()
+        };
+        known.insert("a.stl", &read);
+        assert!(!needs_fingerprint(&known, &threemf));
+    }
+
+    /// A 3MF package whose Bambu/Orca project settings name `filament`.
+    fn threemf_with(filament: &str) -> Vec<u8> {
+        use std::io::Write;
+        let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        w.start_file(
+            "Metadata/project_settings.config",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .unwrap();
+        write!(w, r#"{{"filament_type": ["{filament}"]}}"#).unwrap();
+        w.finish().unwrap().into_inner()
+    }
+
+    async fn materials(f: &Fixture) -> Vec<(String, Option<String>, Option<String>)> {
+        sqlx::query_as("SELECT rel_path, file_material, path_material FROM parts ORDER BY rel_path")
+            .fetch_all(f.db.reader())
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn scan_reads_3mf_slicer_material_and_path_words() {
+        let f = Fixture::new(&["Clips/clip_PETG.stl", "Plain/plate.stl"]).await;
+        write(&f.root, "Box/box.3mf", &threemf_with("ASA"));
+        write(&f.root, "TPU/odd.3mf", b"not a zip");
+        f.scan().await;
+        assert_eq!(
+            materials(&f).await,
+            vec![
+                (
+                    "Box/box.3mf".into(),
+                    Some("asa".into()),
+                    Some(String::new())
+                ),
+                ("Clips/clip_PETG.stl".into(), None, Some("petg".into())),
+                ("Plain/plate.stl".into(), None, Some(String::new())),
+                ("TPU/odd.3mf".into(), None, Some("tpu".into())),
+            ]
+        );
+        // Read once: an unchanged rescan reads nothing again.
+        assert_eq!(f.scan().await.fingerprinted, 0);
+
+        // A rewritten 3MF is read again.
+        write(&f.root, "Box/box.3mf", &threemf_with("PLA+"));
+        let file = fs::File::options()
+            .write(true)
+            .open(f.root.join("Box/box.3mf"))
+            .unwrap();
+        file.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(5))
+            .unwrap();
+        f.scan().await;
+        assert_eq!(materials(&f).await[0].1.as_deref(), Some("pla"));
+    }
+
+    #[tokio::test]
+    async fn older_3mf_rows_get_their_material_on_the_next_scan() {
+        let f = Fixture::new(&[]).await;
+        write(&f.root, "Box/box.3mf", &threemf_with("PETG"));
+        f.scan().await;
+        // As a database from before migration 0008 left it.
+        sqlx::query(
+            "UPDATE parts SET file_material = NULL, material_fp = NULL, path_material = NULL",
+        )
+        .execute(f.db.writer())
+        .await
+        .unwrap();
+        f.db.fill_path_materials().await.unwrap();
+        assert_eq!(f.scan().await.fingerprinted, 1);
+        assert_eq!(
+            materials(&f).await,
+            vec![(
+                "Box/box.3mf".into(),
+                Some("petg".into()),
+                Some(String::new())
+            )]
+        );
+        assert_eq!(f.scan().await.fingerprinted, 0);
+    }
+
+    #[tokio::test]
+    async fn material_filter_matches_inferred_material() {
+        use crate::db::{Scope, SearchFilter, SortOrder};
+        let f = Fixture::new(&["Clips/clip_PETG.stl", "Plain/plate.stl"]).await;
+        write(&f.root, "Box/box.3mf", &threemf_with("ASA"));
+        f.scan().await;
+        let names = |m: Vec<Material>| {
+            let db = f.db.clone();
+            async move {
+                let filter = SearchFilter {
+                    materials: m,
+                    ..SearchFilter::default()
+                };
+                let hits = db
+                    .search_models_in(&Scope::All, "", &filter, SortOrder::Name, 50)
+                    .await
+                    .unwrap();
+                let n = db.count_models(&Scope::All, "", &filter).await.unwrap();
+                assert_eq!(n as usize, hits.len());
+                hits.into_iter().map(|h| h.name).collect::<Vec<_>>()
+            }
+        };
+        assert_eq!(names(vec![Material::Petg]).await, vec!["Clips"]);
+        assert_eq!(names(vec![Material::Asa]).await, vec!["Box"]);
+        assert_eq!(
+            names(vec![Material::Asa, Material::Petg]).await,
+            vec!["Box", "Clips"]
+        );
+        assert!(names(vec![Material::Pla]).await.is_empty());
+
+        // A recipe's material decides over what the files say.
+        let clips = f.model("Clips").await.0;
+        sqlx::query("INSERT INTO recipes (model_id, material, created_at, updated_at) VALUES (?, 'pla', 1, 1)")
+            .bind(clips)
+            .execute(f.db.writer())
+            .await
+            .unwrap();
+        assert!(names(vec![Material::Petg]).await.is_empty());
+        assert_eq!(names(vec![Material::Pla]).await, vec!["Clips"]);
     }
 }
