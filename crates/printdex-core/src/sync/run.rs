@@ -167,6 +167,30 @@ impl Engine {
         Ok(())
     }
 
+    /// Whether sync runs (Settings › Sync "On"). On until turned off.
+    pub async fn sync_enabled(&self) -> Result<bool> {
+        Ok(self.db.sync_meta("enabled").await?.as_deref() != Some("0"))
+    }
+
+    /// Turns sync on or off. Off keeps the spaces and the local data;
+    /// changes made meanwhile go out when it is turned on again.
+    pub async fn set_sync_enabled(&self, on: bool) -> Result<()> {
+        self.db
+            .set_sync_meta("enabled", if on { "1" } else { "0" })
+            .await?;
+        if on {
+            self.sync.poke.notify_one();
+        }
+        Ok(())
+    }
+
+    /// How many changed models wait for the next sync.
+    pub async fn sync_queued(&self) -> Result<usize> {
+        let mut ids: HashSet<ModelId> = lock(&self.sync.dirty).clone();
+        ids.extend(self.db.sync_dirty().await?);
+        Ok(ids.len())
+    }
+
     /// Compacts after `n` records instead of [`SNAPSHOT_AFTER`] (tests).
     #[doc(hidden)]
     pub fn set_sync_snapshot_after(&self, n: u64) {
@@ -273,6 +297,9 @@ impl Engine {
     /// [`EngineEvent::SyncFailed`] and their `last_error`.
     pub async fn sync_now(&self) -> Result<Vec<SyncReport>> {
         let _guard = self.sync.running.lock().await;
+        if !self.sync_enabled().await? {
+            return Ok(Vec::new());
+        }
         let spaces = self.db.sync_spaces().await?;
         if spaces.is_empty() {
             return Ok(Vec::new());

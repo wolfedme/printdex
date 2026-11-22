@@ -597,3 +597,42 @@ async fn compaction_keeps_new_installs_whole() {
         .unwrap();
     assert_eq!(d.tags.len(), 3);
 }
+
+#[tokio::test]
+async fn off_switch_holds_changes_until_on() {
+    let fx = OwnCopies::new("").await;
+    let da = fx.a.model("dragon").await;
+    let db = fx.b.model("dragon").await;
+    assert!(fx.a.engine.sync_enabled().await.unwrap());
+    fx.a.engine.set_sync_enabled(false).await.unwrap();
+    fx.a.engine.set_notes(da, "held back").await.unwrap();
+    fx.round().await;
+    let d = fx.b.engine.model_data(db).await.unwrap().unwrap();
+    assert_eq!(d.notes, "");
+    fx.a.engine.set_sync_enabled(true).await.unwrap();
+    fx.round().await;
+    let d = fx.b.engine.model_data(db).await.unwrap().unwrap();
+    assert_eq!(d.notes, "held back");
+}
+
+#[tokio::test]
+async fn attribution_names_the_other_device() {
+    let fx = OwnCopies::new("").await;
+    fx.b.engine.set_device_name("Laptop").await.unwrap();
+    let da = fx.a.model("dragon").await;
+    let db = fx.b.model("dragon").await;
+    fx.b.engine.set_notes(db, "from the laptop").await.unwrap();
+    let att =
+        fx.b.engine
+            .log_attempt(db, &attempt("laptop print"))
+            .await
+            .unwrap();
+    fx.round().await;
+    let who = fx.a.engine.sync_attribution(da).await.unwrap();
+    assert_eq!(who.notes.as_deref(), Some("Laptop"));
+    assert_eq!(who.attempts.get(&att).map(String::as_str), Some("Laptop"));
+    // Edited here and not synced yet: no longer the laptop's.
+    fx.a.engine.set_notes(da, "mine now").await.unwrap();
+    let who = fx.a.engine.sync_attribution(da).await.unwrap();
+    assert_eq!(who.notes, None);
+}

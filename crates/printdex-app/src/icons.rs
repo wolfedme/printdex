@@ -62,6 +62,9 @@ icon_files! {
     App => "app-window.svg",
     ChevronDown => "chevron-down.svg",
     Backup => "archive.svg",
+    Sync => "arrow-left-right.svg",
+    Lock => "lock.svg",
+    Device => "monitor.svg",
 }
 
 /// `icon` at `size` px, tinted `color`.

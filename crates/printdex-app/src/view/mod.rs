@@ -14,6 +14,7 @@ mod restore;
 pub mod settings;
 mod sidebar;
 mod statusbar;
+mod sync;
 mod toolbar;
 mod viewer;
 mod widgets;

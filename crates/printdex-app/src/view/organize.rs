@@ -344,11 +344,22 @@ pub fn short_url(url: &str) -> String {
 }
 
 /// The Notes section of the main column.
-pub fn notes<'a>(o: &'a OrgState, p: Palette, id: ModelId) -> Element<'a, Message> {
+/// The notes section; `device` is "on Laptop" when another computer
+/// wrote them last.
+pub fn notes<'a>(
+    o: &'a OrgState,
+    p: Palette,
+    id: ModelId,
+    device: Option<String>,
+) -> Element<'a, Message> {
     let has_notes = o.data_for(id).is_some_and(|d| !d.notes.trim().is_empty());
-    let mut head = row![widgets::section(p, t("model-notes"), None)]
-        .spacing(theme::S4)
-        .align_y(Alignment::Center);
+    let mut head = row![widgets::section(
+        p,
+        t("model-notes"),
+        device.filter(|_| has_notes)
+    )]
+    .spacing(theme::S4)
+    .align_y(Alignment::Center);
     head = head.push(Space::new().width(Length::Fill));
 
     let body: Element<'a, Message> = match &o.notes_edit {

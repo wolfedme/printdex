@@ -120,6 +120,7 @@ pub enum SettingsSection {
     Apps,
     Storage,
     Backup,
+    Sync,
     About,
 }
 
@@ -163,6 +164,9 @@ pub struct App {
     pub updates: crate::updates::Updates,
     /// Settings › Backup and the sidebar status line.
     pub backup: crate::backup_ui::BackupUi,
+    /// Settings › Sync, the sidebar sync line and the model view's
+    /// "Edited elsewhere".
+    pub sync: crate::sync_ui::SyncUi,
     /// Restore wizard, library relinks and single-model restore.
     pub restore: crate::restore_ui::RestoreUi,
     /// Watches libraries for changes and offline shares while the app runs.
@@ -221,6 +225,7 @@ pub enum Message {
     Files(crate::files::Fx),
     Updates(crate::updates::Ux),
     Backup(crate::backup_ui::Bx),
+    Sync(crate::sync_ui::Sx),
     Restore(crate::restore_ui::Rx),
     Libraries(Result<LibrarySnapshot, Arc<CoreError>>),
     Engine(EngineEvent),
@@ -308,6 +313,7 @@ impl App {
             monitor: None,
             updates: crate::updates::Updates::default(),
             backup: crate::backup_ui::BackupUi::default(),
+            sync: crate::sync_ui::SyncUi::default(),
             restore: crate::restore_ui::RestoreUi::default(),
             files: crate::files::FilesUi {
                 apps,
@@ -558,12 +564,14 @@ impl App {
                     self.apply_cache_limit(),
                     self.load_lists(),
                     self.start_backups(),
+                    self.start_sync(),
                     self.load_pending(),
                 ])
             }
             Message::Files(f) => self.on_files(f),
             Message::Updates(u) => self.on_updates(u),
             Message::Backup(b) => self.on_backup(b),
+            Message::Sync(m) => self.on_sync(m),
             Message::Restore(r) => self.on_restore(r),
             Message::MonitorStarted(monitor) => {
                 self.monitor = Some(monitor);
@@ -799,6 +807,7 @@ impl App {
                 match section {
                     SettingsSection::Storage => self.measure_cache(),
                     SettingsSection::Backup => self.load_backup(),
+                    SettingsSection::Sync => self.load_sync(),
                     _ => Task::none(),
                 }
             }
@@ -1326,11 +1335,10 @@ impl App {
             | EngineEvent::BackupFinished { .. }
             | EngineEvent::BackupFailed { .. }
             | EngineEvent::BackupNeedsAttention(_)) => self.on_backup_event(event),
-            // The sync status UI arrives with Settings › Sync.
-            EngineEvent::SyncStarted { .. }
+            event @ (EngineEvent::SyncStarted { .. }
             | EngineEvent::SyncFinished { .. }
             | EngineEvent::SyncFailed { .. }
-            | EngineEvent::SyncParked { .. } => Task::none(),
+            | EngineEvent::SyncParked { .. }) => self.on_sync_event(event),
         }
     }
 
@@ -1601,6 +1609,7 @@ pub fn error_text(e: &CoreError) -> String {
         CoreError::CollectionNameInvalid => t("error-collection-name"),
         CoreError::TextTooLong => t("error-text-too-long"),
         CoreError::Backup(b) => crate::backup_ui::backup_error_text(b),
+        CoreError::Sync(s) => crate::sync_ui::sync_error_text(s),
         _ => t("error-other"),
     }
 }

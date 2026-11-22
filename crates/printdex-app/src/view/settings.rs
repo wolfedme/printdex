@@ -63,6 +63,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
             t("settings-storage"),
         ),
         (SettingsSection::Backup, Icon::Backup, t("settings-backup")),
+        (SettingsSection::Sync, Icon::Sync, t("settings-sync")),
         (SettingsSection::About, Icon::FileText, t("settings-about")),
     ] {
         let active = app.settings_section == section;
@@ -97,6 +98,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
         SettingsSection::Apps => apps(app, p),
         SettingsSection::Storage => storage(app, p),
         SettingsSection::Backup => super::backup::view(app, p),
+        SettingsSection::Sync => super::sync::view(app, p),
         SettingsSection::About => about(app, p),
     };
 
@@ -306,7 +308,7 @@ fn change_detection(app: &App, p: Palette) -> Element<'_, Message> {
     col.into()
 }
 
-const ACTIONS_WIDTH: f32 = 150.0;
+const ACTIONS_WIDTH: f32 = 180.0;
 
 fn library_row<'a>(app: &'a App, p: Palette, lib: &'a Library) -> Element<'a, Message> {
     let name: Element<'a, Message> = match &app.renaming {
@@ -392,6 +394,12 @@ fn library_row<'a>(app: &'a App, p: Palette, lib: &'a Library) -> Element<'a, Me
                     t("settings-rescan")
                 },
                 (!scanning).then_some(Message::RescanLibrary(lib.id))
+            ),
+            icon_only(
+                p,
+                Icon::Sync,
+                t("sync-this-library"),
+                Some(Message::Sync(crate::sync_ui::Sx::SyncLibrary(lib.id)))
             ),
             icon_only(
                 p,

@@ -18,6 +18,7 @@ mod prints;
 mod restore_ui;
 mod search;
 mod settings;
+mod sync_ui;
 mod theme;
 mod thumbs;
 mod updates;

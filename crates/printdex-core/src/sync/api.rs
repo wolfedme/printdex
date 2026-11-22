@@ -139,7 +139,7 @@ impl Engine {
                 SpaceKind::Target,
                 None,
                 Some(&json),
-                &store.location(),
+                &space_name(&target),
                 file.space_id,
                 file.kdf.is_some(),
                 now_ms(),
@@ -389,7 +389,11 @@ impl Engine {
                     .to_string(),
                 None => String::new(),
             },
-            SpaceKind::Target => row.name.clone(),
+            SpaceKind::Target => row
+                .target
+                .as_deref()
+                .and_then(|j| serde_json::from_str::<Target>(j).ok())
+                .map_or_else(|| row.name.clone(), |t| target_location(&t)),
         };
         let locked = row.encrypted
             && !self
@@ -547,12 +551,15 @@ impl Engine {
             };
             let mut newest: HashMap<AttemptId, super::Stamp> = HashMap::new();
             let mut notes_stamp = None;
+            // A local edit not synced yet is this device's, whatever the
+            // space last said.
+            let notes_now = self.model_data(model).await?.map(|d| d.notes);
             for r in self.db.model_fields(space, sid).await? {
                 match Key::parse(&r.key) {
                     Some(Key::Model {
                         field: ModelField::Notes,
                         ..
-                    }) => notes_stamp = Some(r.stamp),
+                    }) if r.value.as_str() == notes_now.as_deref() => notes_stamp = Some(r.stamp),
                     Some(Key::Attempt { attempt, .. }) => {
                         let e = newest.entry(AttemptId(attempt)).or_insert(r.stamp);
                         if r.stamp > *e {
@@ -624,5 +631,71 @@ impl Engine {
                 next_full = tokio::time::Instant::now() + INTERVAL;
             }
         });
+    }
+}
+
+/// Where a target space is, for people: a folder path, an S3 bucket, a
+/// WebDAV URL or `user@host:path`.
+fn target_location(target: &Target) -> String {
+    match target {
+        Target::Folder { path } => path.display().to_string(),
+        Target::S3 {
+            endpoint,
+            bucket,
+            prefix,
+            ..
+        } => {
+            let host = endpoint.split("://").nth(1).unwrap_or(endpoint);
+            if prefix.is_empty() {
+                format!("{host}/{bucket}")
+            } else {
+                format!("{host}/{bucket}/{prefix}")
+            }
+        }
+        Target::WebDav { url, .. } => url.clone(),
+        Target::Sftp {
+            host, user, path, ..
+        } => format!("{user}@{host}:{path}"),
+    }
+}
+
+/// A short name for a target space: the folder's name, the bucket, or the
+/// server's host.
+fn space_name(target: &Target) -> String {
+    let named = match target {
+        Target::Folder { path } => path.file_name().map(|n| n.to_string_lossy().into_owned()),
+        Target::S3 { bucket, .. } => Some(bucket.clone()),
+        Target::WebDav { url, .. } => url
+            .split("://")
+            .nth(1)
+            .and_then(|rest| rest.split(['/', ':']).next())
+            .map(str::to_owned),
+        Target::Sftp { host, .. } => Some(host.clone()),
+    };
+    named
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| "Sync".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn target_space_names() {
+        let folder = Target::Folder {
+            path: PathBuf::from("/home/max/Nextcloud/printdex-sync"),
+        };
+        assert_eq!(space_name(&folder), "printdex-sync");
+        let dav = Target::WebDav {
+            url: "https://cloud.example.com:8443/remote.php/dav".into(),
+            user: "max".into(),
+        };
+        assert_eq!(space_name(&dav), "cloud.example.com");
+        let root = Target::Folder {
+            path: PathBuf::from("/"),
+        };
+        assert_eq!(space_name(&root), "Sync");
     }
 }

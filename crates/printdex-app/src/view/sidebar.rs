@@ -218,6 +218,9 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     if let Some(line) = super::backup::status(&app.backup, p) {
         foot = foot.push(line);
     }
+    if let Some(line) = super::sync::status(app, p) {
+        foot = foot.push(line);
+    }
 
     let on_settings = app.screen == Screen::Settings;
     let settings = button(

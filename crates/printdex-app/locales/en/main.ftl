@@ -655,3 +655,120 @@ restore-model-done = { $count ->
 restore-model-here = Restore here
 restore-model-elsewhere = Restore to another folder…
 restore-model-pick = Restore a copy into…
+
+## Sync
+
+settings-sync = Sync
+sync-body = Keep tags, collections, notes, recipes and the print log the same on all your computers. Model files are never copied: share them with your NAS, Syncthing or Dropbox.
+sync-loading = Loading…
+sync-on = Sync
+sync-on-body = Off keeps your spaces and your data. Changes made meanwhile go out when you turn it back on.
+sync-device = This device
+sync-device-body = How other computers name this one.
+sync-device-save = Save
+sync-spaces = Spaces
+sync-spaces-body = A space is the folder where your computers leave their changes for each other.
+sync-empty-title = Not syncing yet
+sync-empty-body = Put a space inside a library that every computer opens from your NAS, or in another place (a shared folder, S3, WebDAV or SFTP) when each computer has its own copy of the files.
+sync-add = Add space
+sync-now = Sync now
+sync-syncing = Syncing…
+sync-kind-library = Inside a library
+sync-kind-target = Another place
+sync-kind-library-body = Every computer opens this library from the same NAS share. The space sits in its .printdex folder.
+sync-kind-target-body = Each computer has its own copy of the files. The space can be a shared folder, an S3 bucket, a WebDAV server or an SFTP server.
+sync-where = Where the space goes
+sync-library = Library
+sync-library-first = Library to sync first
+sync-need-library = Pick a library.
+sync-need-fields = Fill in where the space goes.
+sync-ack = I understand that a lost passphrase can’t be recovered: this space’s data can only be read with it.
+sync-pick-folder = Choose a folder for the space
+sync-encrypt = Encrypt the space
+sync-encrypt-body-library = Off is fine on your own NAS. Every computer needs the passphrase once.
+sync-encrypt-body-target = Recommended: the place only ever sees encrypted data. Every computer needs the passphrase once.
+sync-joining = This space is encrypted. Enter the passphrase it was set up with.
+sync-save = Add space
+sync-saving = Adding…
+sync-kind-label-library = library space
+sync-encrypted = Encrypted
+sync-locked = Locked
+sync-unlock = Enter passphrase
+sync-unlock-body = This computer doesn’t have the passphrase of { $space }.
+sync-unlock-confirm = Unlock
+sync-last = Synced { $ago }
+sync-last-never = Not synced yet
+sync-last-error = Last try failed: { $error }
+sync-libraries = Libraries
+sync-libraries-none = No library syncs through this space yet.
+sync-library-pair = { $local } ↔ { $remote }
+sync-link = Link a library
+sync-unlink = Stop syncing
+sync-devices = Devices
+sync-device-this = { $name } (this device)
+sync-device-seen = { $name } · seen { $ago }
+sync-forget = Forget
+sync-forget-hint = A device can be forgotten after 30 days without syncing.
+sync-forget-confirm = Forget { $name }? Its changes stay; its folder in the space is removed.
+sync-forget-yes = Forget device
+sync-parked = { $count ->
+    [one] 1 model from another computer isn’t on this one
+   *[other] { $n } models from other computers aren’t on this one
+}
+sync-parked-show = Show
+sync-parked-hide = Hide
+sync-parked-body = Their data waits here and arrives as soon as a scan finds them.
+sync-parked-from = from { $device }
+sync-remove = Leave space
+sync-remove-confirm = Leave { $space }? This computer stops syncing through it. Your data here stays as it is.
+sync-remove-yes = Leave space
+sync-link-title = Link a library
+sync-link-body = Pick the library on this computer and the one in the space it matches.
+sync-link-local = On this computer
+sync-link-remote = In the space
+sync-link-new = Add it as a new library
+sync-link-suggested = same models
+sync-link-from = from { $device }
+sync-link-confirm = Link
+sync-link-linking = Linking…
+sync-link-none = Every library here already syncs through this space.
+sync-this-library = Sync this library…
+sync-status-off = Sync off
+sync-status-locked = Passphrase needed
+sync-status-waiting = Waiting for { $space }
+sync-status-synced = Synced { $ago }
+sync-status-never = Not synced yet
+sync-status-syncing = Syncing…
+sync-pop-queued = { $count ->
+    [0] Nothing waiting to go out
+    [one] 1 changed model waiting to go out
+   *[other] { $n } changed models waiting to go out
+}
+sync-pop-settings = Sync settings
+sync-on-device = on { $device }
+sync-edited-title = Edited elsewhere
+sync-edited-body = These edits were made at the same time on two computers. The newer one was kept; here is the other.
+sync-edited-notes = Notes
+sync-edited-recipe = Recipe notes
+sync-edited-attempt = Print notes
+sync-edited-other = Text
+sync-edited-meta = { $field } · on { $device }, { $time }
+sync-edited-restore = Restore
+sync-edited-copy = Copy
+sync-edited-dismiss = Dismiss
+sync-edited-copied = Copied
+sync-error-passphrase = That passphrase doesn’t open this space.
+sync-error-passphrase-needed = This space is encrypted: enter its passphrase.
+sync-error-unreachable = The space can’t be reached right now. Printdex tries again on its own.
+sync-error-read-only = Printdex can’t write to the space. Check that this computer may write there.
+sync-error-newer = The space was set up by a newer Printdex. Update Printdex on this computer.
+sync-error-already-linked = This library already syncs through that space.
+sync-error-device-recent = That device synced too recently to be forgotten.
+sync-error-damaged = A file in the space is damaged. Printdex skips it and keeps the rest.
+ago-now = just now
+ago-min = { $n } min ago
+ago-hours = { $n } h ago
+ago-days = { $n ->
+    [one] 1 day ago
+   *[other] { $n } days ago
+}
