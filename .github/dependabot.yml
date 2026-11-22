@@ -1,0 +1,14 @@
+# Keeps the SHA-pinned GitHub Actions current. Cargo dependencies are
+# updated by hand (cargo-deny checks them).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci

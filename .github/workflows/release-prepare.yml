@@ -1,0 +1,72 @@
+name: release prepare
+
+# Step 1 of a release (#127). Run it by hand from the Actions tab on `dev`
+# (or a hotfix/* branch). It works out the next version from the
+# conventional commits since the last tag (git-cliff), bumps Cargo.toml,
+# rewrites CHANGELOG.md, commits "chore(release): vX.Y.Z" to that branch and
+# opens the release PR into main with the release notes as its body.
+#
+# Step 2 is merging that PR ("Create a merge commit", not squash):
+# release-tag.yml then tags the merge commit. Nothing is ever pushed to main
+# directly, so main can require a pull request with no bypass.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # push the release commit to dev / hotfix/*
+  pull-requests: write # open the release PR
+  actions: write # start ci.yml on it (PRs opened with this token start nothing)
+
+jobs:
+  prepare:
+    name: prepare release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Only from dev or hotfix/*
+        run: |
+          if [[ "$GITHUB_REF_NAME" != dev && "$GITHUB_REF_NAME" != hotfix/* ]]; then
+            echo "::error::Run this on dev or a hotfix/* branch, not $GITHUB_REF_NAME"
+            exit 1
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2
+        with:
+          tool: git-cliff
+      - name: Bump version and changelog
+        id: prep
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          scripts/release-prepare.sh
+      - name: Push and open the release PR
+        if: steps.prep.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.prep.outputs.version }}
+        run: |
+          git push origin "HEAD:$GITHUB_REF_NAME"
+          git cliff --unreleased --tag "v$VERSION" --strip all > notes.md 2>/dev/null \
+            || git cliff --latest --strip all > notes.md
+          {
+            echo "Merging this PR (with **Create a merge commit**) tags \`v$VERSION\` and builds the release."
+            echo
+            cat notes.md
+          } > body.md
+          existing=$(gh pr list --base main --head "$GITHUB_REF_NAME" --state open --json number --jq '.[0].number')
+          if [[ -n "$existing" ]]; then
+            gh pr edit "$existing" --title "Release v$VERSION" --body-file body.md
+            echo "Updated release PR #$existing" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh pr create --base main --head "$GITHUB_REF_NAME" --title "Release v$VERSION" --body-file body.md
+          fi
+          # A PR opened with GITHUB_TOKEN triggers no workflows; run the full
+          # checks on the release commit so they show on the PR.
+          gh workflow run ci.yml --ref "$GITHUB_REF_NAME"
