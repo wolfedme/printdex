@@ -1,0 +1,80 @@
+name: release tag
+
+# Step 2 of a release (#127). When the release PR from release-prepare.yml
+# merges into main, this tags vX.Y.Z (the version is already in Cargo.toml)
+# on the release commit itself, not on the merge commit, so the tag is in
+# dev's history too and git-cliff on dev knows where the last release was.
+# This starts release.yml for the tag (installers, signed
+# update feeds, draft GitHub release) and, for hotfixes, merges main back
+# into dev. It only pushes a tag, never a commit to main.
+#
+# No tests run here: the release PR already ran the full set on this merge.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # push the tag (and dev after a hotfix)
+  actions: write # start release.yml (a tag pushed with this token can't)
+
+jobs:
+  tag:
+    name: tag release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Tag the release
+        id: tag
+        env:
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          first="${MESSAGE%%$'\n'*}"
+          branch=$(sed -n 's|^Merge pull request #[0-9]* from [^/]*/||p' <<< "$first")
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_EVENT_NAME" != workflow_dispatch && "$branch" != dev && "$branch" != hotfix/* ]]; then
+            echo "Not a release merge: '$first'" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::warning::$tag already exists. Run 'release prepare' on $branch before merging into main."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # The release commit is in main now; its tree is what main has.
+          commit=$(git log --format='%H %s' HEAD | awk -v s="chore(release): $tag" '$0 == $1 " " s { print $1; exit }')
+          if [[ -z "$commit" ]]; then
+            echo "::warning::No 'chore(release): $tag' commit on main. Run 'release prepare' on $branch before merging into main."
+            exit 0
+          fi
+          git tag -a "$tag" -m "$tag" "$commit"
+          git push origin "refs/tags/$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Tagged $tag on ${commit:0:7}." >> "$GITHUB_STEP_SUMMARY"
+      - name: Build the release
+        if: steps.tag.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --ref "${{ steps.tag.outputs.tag }}"
+      - name: Merge a hotfix back into dev
+        if: steps.tag.outputs.tag != '' && startsWith(steps.tag.outputs.branch, 'hotfix/')
+        run: |
+          git fetch origin dev
+          git checkout -B dev origin/dev
+          if ! git merge --no-edit origin/main; then
+            echo "::error::main does not merge cleanly into dev; merge it by hand"
+            exit 1
+          fi
+          git push origin dev

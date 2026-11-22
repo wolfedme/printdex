@@ -11,7 +11,10 @@ name: CI
 # - PR into main: Windows, macOS, MSRV, bench smoke. The Linux job is skipped
 #   for the release PR (head `dev`), which dev's push already tested.
 # - Push to main: nothing here; the PR tested that exact merge, and
-#   release-cut.yml tags the release.
+#   release-tag.yml tags the release.
+# - The release PR is opened by release-prepare.yml, whose token can't
+#   trigger workflows, so it starts this workflow by hand on the release
+#   commit (manual run = everything).
 # - Weekly / manual: everything, on dev, which keeps every cache warm.
 # - `ci: full` label on a PR into dev: the heavy jobs too.
 # - Docs, Markdown and design-tooling-only changes run nothing.
