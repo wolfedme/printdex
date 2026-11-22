@@ -1,10 +1,10 @@
 //! GPU thumbnail rendering on a headless wgpu device.
 //!
 //! The GPU rasterizes the triangles (the expensive part for big meshes)
-//! into a colour target and a depth-value target at the supersampled
-//! size. Both are read back and finished on the CPU with the same edge
-//! pass and downsampling as [`crate::render`], so a thumbnail looks the
-//! same whichever path drew it.
+//! into a normal target and a depth-value target at the supersampled
+//! size. Both are read back and finished on the CPU with the same
+//! shading, occlusion, edge pass and downsampling as [`crate::render`],
+//! so a thumbnail looks the same whichever path drew it.
 //!
 //! [`GpuRenderer::new`] only accepts hardware adapters: a software adapter
 //! (llvmpipe, WARP) is no faster than the CPU rasterizer. Set
@@ -13,15 +13,19 @@
 
 use std::sync::mpsc;
 
-use printdex_mesh::Mesh;
+use glam::Vec3;
+use printdex_mesh::{Mesh, pack};
 use wgpu::util::DeviceExt;
 
-use crate::raster::{Frame, Image, RenderOptions, Target, Tri, finish, prepare};
+use crate::raster::{
+    Frame, Image, RenderOptions, Target, Tri, finish, pack_px, prepare, wants_smooth_normals,
+};
 
 /// Vertices per buffer: 3M × 20 bytes stays well under wgpu's default
 /// 256 MB buffer limit.
 const CHUNK_VERTICES: usize = 3 << 20;
-/// Bytes per vertex: x, y, z (clip space), raw depth, then RGBA8.
+/// Bytes per vertex: x, y, z (clip space), raw depth, then the normal as
+/// snorm8x4.
 const VERTEX_BYTES: usize = 20;
 /// Value the depth-value target is cleared to: "nothing here".
 const EMPTY_DEPTH: f32 = -1.0e30;
@@ -29,20 +33,20 @@ const EMPTY_DEPTH: f32 = -1.0e30;
 const SHADER: &str = r#"
 struct VOut {
     @builtin(position) clip: vec4<f32>,
-    @location(0) @interpolate(flat) color: vec4<f32>,
+    @location(0) normal: vec3<f32>,
     @location(1) depth: f32,
 };
 
 struct FOut {
-    @location(0) color: vec4<f32>,
+    @location(0) normal: vec4<f32>,
     @location(1) depth: f32,
 };
 
 @vertex
-fn vs(@location(0) pos: vec4<f32>, @location(1) color: vec4<f32>) -> VOut {
+fn vs(@location(0) pos: vec4<f32>, @location(1) normal: vec4<f32>) -> VOut {
     var o: VOut;
     o.clip = vec4<f32>(pos.xy, pos.z, 1.0);
-    o.color = color;
+    o.normal = normal.xyz;
     o.depth = pos.w;
     return o;
 }
@@ -50,7 +54,12 @@ fn vs(@location(0) pos: vec4<f32>, @location(1) color: vec4<f32>) -> VOut {
 @fragment
 fn fs(i: VOut) -> FOut {
     var o: FOut;
-    o.color = i.color;
+    let len = length(i.normal);
+    var n = vec3<f32>(0.0);
+    if len > 0.0 {
+        n = i.normal / len;
+    }
+    o.normal = vec4<f32>(n * 0.5 + 0.5, 1.0);
     o.depth = i.depth;
     return o;
 }
@@ -138,17 +147,19 @@ impl GpuRenderer {
 
     /// Renders `mesh` like [`crate::render`], on the GPU.
     pub fn render(&self, mesh: &Mesh, opts: &RenderOptions) -> Result<Image, GpuError> {
-        let mut bytes: Vec<u8> = Vec::new();
+        let normals = wants_smooth_normals(mesh, opts).then(|| printdex_mesh::corner_normals(mesh));
+        let mut bytes: Vec<u8> = Vec::with_capacity(mesh.positions.len() * VERTEX_BYTES);
         // Clip-space z needs the depth range, known only after the pass:
         // store raw depth now and convert below.
-        let frame = prepare(mesh, opts, |t: Tri| {
+        let frame = prepare(mesh, normals.as_deref(), opts, |t: Tri| {
             for k in 0..3 {
                 for v in [t.px[k].x, t.px[k].y, 0.0, t.depth[k]] {
                     bytes.extend_from_slice(&v.to_le_bytes());
                 }
-                bytes.extend_from_slice(&[t.color[0], t.color[1], t.color[2], 255]);
+                bytes.extend(pack(t.normal[k].to_array()).map(|c| c as u8));
             }
         });
+        drop(normals);
         let Some(frame) = frame else {
             return Ok(Image::transparent(opts.width, opts.height));
         };
@@ -190,7 +201,7 @@ impl GpuRenderer {
             })
         };
         let readable = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC;
-        let color = texture("color", wgpu::TextureFormat::Rgba8Unorm, readable);
+        let color = texture("normal", wgpu::TextureFormat::Rgba8Unorm, readable);
         let depth_value = texture("depth value", wgpu::TextureFormat::R32Float, readable);
         let depth = texture(
             "depth",
@@ -313,8 +324,13 @@ impl GpuRenderer {
                     ]);
                     if z > EMPTY_DEPTH / 2.0 {
                         let i = y * w + x;
+                        let unit = |c: u8| f32::from(c) / 255.0 * 2.0 - 1.0;
                         target.depth[i] = z;
-                        target.color[i] = [colors[o], colors[o + 1], colors[o + 2]];
+                        target.normal[i] = pack_px(Vec3::new(
+                            unit(colors[o]),
+                            unit(colors[o + 1]),
+                            unit(colors[o + 2]),
+                        ));
                     }
                 }
             }
@@ -367,7 +383,7 @@ fn pipeline(d: &wgpu::Device) -> wgpu::RenderPipeline {
             buffers: &[wgpu::VertexBufferLayout {
                 array_stride: VERTEX_BYTES as u64,
                 step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Unorm8x4],
+                attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Snorm8x4],
             }],
         },
         fragment: Some(wgpu::FragmentState {

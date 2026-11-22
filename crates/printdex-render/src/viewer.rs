@@ -2,33 +2,38 @@
 //! wgpu render target (the app's window, through iced's shader widget).
 //!
 //! It looks like a thumbnail: the same orbit camera, material ramp,
-//! world-fixed light, edge line and 2×2 supersampling. Pass one draws the
-//! mesh into offscreen colour and depth-value textures at twice the
-//! size; pass two finds edges, averages each 2×2 block and blends the
-//! result over whatever is behind the viewer. The CPU fallback for the
-//! same picture is [`crate::render`] with [`Framing::Orbit`].
+//! world-fixed light, soft highlight, ambient occlusion, edge line and
+//! 2×2 supersampling. Pass one draws the mesh with its smooth corner
+//! normals into offscreen normal and depth-value textures at twice the
+//! size; pass two finds edges, shades, darkens crevices, averages each
+//! 2×2 block in linear light and blends the result over whatever is
+//! behind the viewer. The CPU fallback for the same picture is
+//! [`crate::render_with_normals`] with [`Framing::Orbit`].
 //!
 //! [`Framing::Orbit`]: crate::camera::Framing::Orbit
 
 use glam::{Vec2, Vec3};
-use printdex_mesh::{Bounds, Mesh};
+use printdex_mesh::{Bounds, Mesh, PackedNormal, pack};
 use wgpu::util::DeviceExt;
 
 use crate::camera::{Fit, View};
-use crate::material::{Material, light_dir};
+use crate::material::{AO_RADIUS, Lighting, Material};
 use crate::raster::{Sphere, edge_step};
 
 /// Supersampling factor per axis (as for thumbnails), when the device
 /// allows textures that large.
 const SS: u32 = 2;
 /// Positions per vertex buffer: whole triangles (a multiple of 3), and
-/// 3M × 12 bytes stays well under wgpu's default 256 MB buffer limit.
+/// 3M × 16 bytes stays well under wgpu's default 256 MB buffer limit.
 const CHUNK_VERTICES: usize = 3 << 20;
+/// Bytes per vertex: position (3 × f32) and normal (snorm8x4).
+const VERTEX_BYTES: usize = 16;
 const _: () = assert!(CHUNK_VERTICES.is_multiple_of(3));
 /// Value the depth-value texture is cleared to: "nothing here".
 const EMPTY_DEPTH: f32 = -1.0e30;
 
-const SCENE: &str = r#"
+/// The uniform block both shaders share.
+const UNIFORMS_WGSL: &str = r#"
 struct U {
     right: vec4<f32>,
     up: vec4<f32>,
@@ -38,31 +43,39 @@ struct U {
     fit: vec4<f32>,
     // width, height (supersampled), nearest and farthest depth
     size: vec4<f32>,
+    // material tones, linear
     top: vec4<f32>,
     side: vec4<f32>,
     shade: vec4<f32>,
     edge: vec4<f32>,
     // edge step, sRGB target, output origin x, y (target pixels)
     params: vec4<f32>,
-    // supersampling, output width, height
+    // supersampling, output width, height, occlusion radius (ss pixels)
     extra: vec4<f32>,
+    // halfway between light and eye
+    half_dir: vec4<f32>,
+    // highlight colour
+    sheen: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: U;
+"#;
 
+const SCENE: &str = r#"
 struct VOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) world: vec3<f32>,
-    @location(1) depth: f32,
+    @location(1) normal: vec3<f32>,
+    @location(2) depth: f32,
 };
 
 struct FOut {
-    @location(0) color: vec4<f32>,
+    @location(0) normal: vec4<f32>,
     @location(1) depth: f32,
 };
 
 @vertex
-fn vs(@location(0) p: vec3<f32>) -> VOut {
+fn vs(@location(0) p: vec3<f32>, @location(1) n: vec4<f32>) -> VOut {
     let s = vec2<f32>(dot(p, u.right.xyz), dot(p, u.up.xyz));
     let d = dot(p, u.eye.xyz);
     let px = vec2<f32>(s.x * u.fit.x + u.fit.y, -s.y * u.fit.x + u.fit.z);
@@ -75,57 +88,38 @@ fn vs(@location(0) p: vec3<f32>) -> VOut {
         1.0,
     );
     o.world = p;
+    o.normal = n.xyz;
     o.depth = d;
     return o;
 }
 
-// material::shade: each tone holds flat, curved surfaces blend.
-fn ramp(t: f32) -> vec3<f32> {
-    if t <= 0.0 {
-        return u.shade.rgb;
-    } else if t < 0.4 {
-        return mix(u.shade.rgb, u.side.rgb, t / 0.4);
-    } else if t <= 0.6 {
-        return u.side.rgb;
-    } else if t < 0.78 {
-        return mix(u.side.rgb, u.top.rgb, (t - 0.6) / 0.18);
-    }
-    return u.top.rgb;
-}
-
 @fragment
 fn fs(i: VOut) -> FOut {
-    // The face normal from the change of position across the triangle.
-    var n = normalize(cross(dpdx(i.world), dpdy(i.world)));
-    // Two-sided: many files have inconsistent winding.
-    if dot(n, u.eye.xyz) < 0.0 {
-        n = -n;
+    // The face normal, turned to the eye: two-sided, since many files
+    // have inconsistent winding.
+    var f = normalize(cross(dpdx(i.world), dpdy(i.world)));
+    if dot(f, u.eye.xyz) < 0.0 {
+        f = -f;
+    }
+    // Corner normals follow their face's winding: flip with it.
+    var n = f;
+    if dot(i.normal, i.normal) > 1e-6 {
+        n = normalize(i.normal);
+        if dot(n, f) < 0.0 {
+            n = -n;
+        }
     }
     var o: FOut;
-    o.color = vec4<f32>(ramp(dot(n, u.light.xyz)), 1.0);
+    o.normal = vec4<f32>(n * 0.5 + 0.5, 1.0);
     o.depth = i.depth;
     return o;
 }
 "#;
 
+/// Mirrors `raster::Target::resolve` and `material::Lighting`, with the
+/// constants filled in from Rust by [`composite_source`].
 const COMPOSITE: &str = r#"
-struct U {
-    right: vec4<f32>,
-    up: vec4<f32>,
-    eye: vec4<f32>,
-    light: vec4<f32>,
-    fit: vec4<f32>,
-    size: vec4<f32>,
-    top: vec4<f32>,
-    side: vec4<f32>,
-    shade: vec4<f32>,
-    edge: vec4<f32>,
-    params: vec4<f32>,
-    extra: vec4<f32>,
-};
-
-@group(0) @binding(0) var<uniform> u: U;
-@group(0) @binding(1) var color_t: texture_2d<f32>;
+@group(0) @binding(1) var normal_t: texture_2d<f32>;
 @group(0) @binding(2) var depth_t: texture_2d<f32>;
 
 @vertex
@@ -137,6 +131,10 @@ fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
 
 fn depth_at(p: vec2<i32>) -> f32 {
     return textureLoad(depth_t, p, 0).r;
+}
+
+fn normal_at(p: vec2<i32>) -> vec3<f32> {
+    return textureLoad(normal_t, p, 0).rgb * 2.0 - 1.0;
 }
 
 // raster::Target::edges: next to the background or a farther surface.
@@ -156,10 +154,62 @@ fn is_edge(p: vec2<i32>, here: f32, dims: vec2<i32>) -> bool {
     return false;
 }
 
-fn to_linear(c: vec3<f32>) -> vec3<f32> {
-    let lo = c / 12.92;
-    let hi = pow((c + 0.055) / 1.055, vec3<f32>(2.4));
-    return select(hi, lo, c <= vec3<f32>(0.04045));
+// material::Lighting::shade, in linear light.
+fn shade(n: vec3<f32>) -> vec3<f32> {
+    let t = dot(n, u.light.xyz);
+    var base = u.top.rgb;
+    if t <= SHADE_UNTIL {
+        base = u.shade.rgb;
+    } else if t < SIDE_FROM {
+        base = mix(u.shade.rgb, u.side.rgb, (t - SHADE_UNTIL) / (SIDE_FROM - SHADE_UNTIL));
+    } else if t <= SIDE_UNTIL {
+        base = u.side.rgb;
+    } else if t < TOP_FROM {
+        base = mix(u.side.rgb, u.top.rgb, (t - SIDE_UNTIL) / (TOP_FROM - SIDE_UNTIL));
+    }
+    var h = max(dot(n, u.half_dir.xyz), 0.0);
+    h = h * h;
+    h = h * h;
+    h = h * h;
+    h = h * h;
+    return base + SPECULAR * h * u.sheen.rgb;
+}
+
+// raster::Target::occlusion with the kernel turned by `turn`.
+fn occlusion(p: vec2<i32>, n: vec3<f32>, here: f32, dims: vec2<i32>, turn: f32) -> f32 {
+    let ne = max(dot(n, u.eye.xyz), 0.25);
+    let per_px = 1.0 / max(u.fit.x, 1e-9);
+    let gx = -dot(n, u.right.xyz) / ne * per_px;
+    let gy = dot(n, u.up.xyz) / ne * per_px;
+    let radius = u.extra.w * per_px;
+    let bias = 0.06 * radius;
+    let golden = 3.14159265 * (3.0 - sqrt(5.0));
+    var occ = 0.0;
+    for (var i = 0; i < AO_SAMPLES; i++) {
+        let r = sqrt((f32(i) + 0.5) / f32(AO_SAMPLES));
+        let a = f32(i) * golden + turn * 6.28318531;
+        let o = vec2<i32>(round(vec2<f32>(r * cos(a), r * sin(a)) * u.extra.w));
+        let q = p + o;
+        if q.x < 0 || q.y < 0 || q.x >= dims.x || q.y >= dims.y {
+            continue;
+        }
+        let d = depth_at(q);
+        if d <= -1.0e29 {
+            continue;
+        }
+        let rise = d - (here + gx * f32(o.x) + gy * f32(o.y));
+        if rise > bias {
+            occ += clamp(2.0 - rise / radius, 0.0, 1.0);
+        }
+    }
+    return occ / f32(AO_SAMPLES);
+}
+
+fn to_srgb(c: vec3<f32>) -> vec3<f32> {
+    let x = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+    let lo = x * 12.92;
+    let hi = 1.055 * pow(x, vec3<f32>(1.0 / 2.4)) - 0.055;
+    return select(hi, lo, x <= vec3<f32>(0.0031308));
 }
 
 @fragment
@@ -170,36 +220,98 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     }
     let ss = i32(u.extra.x);
     let dims = vec2<i32>(textureDimensions(depth_t));
-    var sum = vec3<f32>(0.0);
-    var n = 0.0;
-    for (var sy = 0; sy < ss; sy++) {
-        for (var sx = 0; sx < ss; sx++) {
-            let p = o * ss + vec2<i32>(sx, sy);
-            let here = depth_at(p);
-            if here <= -1.0e29 {
-                continue;
-            }
-            var c = textureLoad(color_t, p, 0).rgb;
-            if is_edge(p, here, dims) {
-                c = u.edge.rgb;
-            }
-            sum += c;
-            n += 1.0;
+    let p0 = o * ss;
+    let n0 = normal_at(p0);
+    // One surface across the pixel: shade its averaged normal once;
+    // otherwise shade each subsample.
+    var inside = true;
+    var nsum = vec3<f32>(0.0);
+    var count = 0.0;
+    var first = vec2<i32>(-1);
+    var edges = array<bool, 4>(false, false, false, false);
+    var covered = array<bool, 4>(false, false, false, false);
+    for (var k = 0; k < ss * ss; k++) {
+        let p = p0 + vec2<i32>(k % ss, k / ss);
+        let here = depth_at(p);
+        if here <= -1.0e29 {
+            inside = false;
+            continue;
         }
+        covered[k] = true;
+        if first.x < 0 {
+            first = p;
+        }
+        let n = normal_at(p);
+        edges[k] = is_edge(p, here, dims);
+        if edges[k] || dot(n, n0) < CREASE {
+            inside = false;
+        }
+        nsum += n;
+        count += 1.0;
     }
-    if n == 0.0 {
+    if count == 0.0 {
         discard;
     }
-    var rgb = sum / n;
-    if u.params.y > 0.5 {
-        rgb = to_linear(rgb);
+    var rgb = vec3<f32>(0.0);
+    if inside {
+        rgb = shade(normalize(nsum));
+    } else {
+        for (var k = 0; k < ss * ss; k++) {
+            if !covered[k] {
+                continue;
+            }
+            if edges[k] {
+                rgb += u.edge.rgb;
+            } else {
+                rgb += shade(normalize(normal_at(p0 + vec2<i32>(k % ss, k / ss))));
+            }
+        }
+        rgb /= count;
     }
-    return vec4<f32>(rgb, n / f32(ss * ss));
+    // Occlusion from the first covered subsample, with two of the four
+    // kernel turns, alternating between pixels (the CPU blurs
+    // neighbouring pixels' turns instead).
+    let here = depth_at(first);
+    let n = normalize(normal_at(first));
+    let k0 = (o.x & 1) | ((o.y & 1) << 1);
+    let occ = occlusion(first, n, here, dims, AO_TURNS[k0])
+        + occlusion(first, n, here, dims, AO_TURNS[3 - k0]);
+    rgb = mix(rgb, u.edge.rgb, occ / 2.0 * AO_STRENGTH);
+    if u.params.y < 0.5 {
+        rgb = to_srgb(rgb);
+    }
+    return vec4<f32>(rgb, count / f32(ss * ss));
 }
 "#;
 
-/// Size of [`Uniforms`] in bytes: twelve `vec4<f32>`.
-const UNIFORM_BYTES: usize = 12 * 16;
+/// The composite shader with the shading constants from [`crate::material`].
+fn composite_source() -> String {
+    use crate::material::{AO_SAMPLES, AO_STRENGTH, SPECULAR, ao_turn, ramp_breaks};
+    let [shade_until, side_from, side_until, top_from] = ramp_breaks();
+    let f = |v: f32| format!("{v:?}");
+    let turns = (0..4)
+        .map(|k| f(ao_turn(k & 1, k >> 1)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let consts = format!(
+        "const SHADE_UNTIL: f32 = {};\nconst SIDE_FROM: f32 = {};\nconst SIDE_UNTIL: f32 = {};\n\
+         const TOP_FROM: f32 = {};\nconst SPECULAR: f32 = {};\nconst AO_STRENGTH: f32 = {};\n\
+         const AO_SAMPLES: i32 = {};\nconst CREASE: f32 = {};\n\
+         const AO_TURNS = array<f32, 4>({turns});\n",
+        f(shade_until),
+        f(side_from),
+        f(side_until),
+        f(top_from),
+        f(SPECULAR),
+        f(AO_STRENGTH),
+        AO_SAMPLES,
+        f(printdex_mesh::CREASE_DEGREES.to_radians().cos()),
+    );
+    format!("{UNIFORMS_WGSL}{consts}{COMPOSITE}")
+}
+
+/// Size of [`Uniforms`] in bytes: fourteen `vec4<f32>`.
+const UNIFORM_BYTES: usize = 14 * 16;
 
 /// Everything the shaders need for one frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -231,31 +343,35 @@ impl Uniforms {
         let (c, d) = basis.project(sphere.center);
         let fit = Fit::orbit(c, sphere.radius, w, h, view.zoom, view.pan);
         let (dmin, dmax) = (d - sphere.radius, d + sphere.radius);
-        let ramp = material.ramp();
-        let rgb = |c: [u8; 3]| c.map(|v| f32::from(v) / 255.0);
+        let light = Lighting::new(&material.ramp(), basis.toward_eye);
         let v3 = |v: Vec3| [v.x, v.y, v.z, 0.0];
-        let c3 = |c: [u8; 3]| {
-            let [r, g, b] = rgb(c);
-            [r, g, b, 1.0]
-        };
-        let rows: [[f32; 4]; 12] = [
+        let c3 = |[r, g, b]: [f32; 3]| [r, g, b, 1.0];
+        let [top, side, shade, edge] = light.tones;
+        let rows: [[f32; 4]; 14] = [
             v3(basis.right),
             v3(basis.up),
             v3(basis.toward_eye),
-            v3(light_dir()),
+            v3(light.light),
             [fit.scale, fit.offset.x, fit.offset.y, 0.0],
             [w as f32, h as f32, dmin, dmax],
-            c3(ramp.top),
-            c3(ramp.side),
-            c3(ramp.shade),
-            c3(ramp.edge),
+            c3(top),
+            c3(side),
+            c3(shade),
+            c3(edge),
             [
                 edge_step(fit.scale, dmin, dmax),
                 if srgb_target { 1.0 } else { 0.0 },
                 place.origin[0],
                 place.origin[1],
             ],
-            [ss as f32, place.width as f32, place.height as f32, 0.0],
+            [
+                ss as f32,
+                place.width as f32,
+                place.height as f32,
+                AO_RADIUS * w.min(h) as f32,
+            ],
+            v3(light.half),
+            c3(light.sheen),
         ];
         let mut out = [0.0; UNIFORM_BYTES / 4];
         for (i, row) in rows.iter().enumerate() {
@@ -408,8 +524,8 @@ impl GpuViewer {
                 source: wgpu::ShaderSource::Wgsl(src.into()),
             })
         };
-        let scene_module = module("viewer scene", SCENE);
-        let composite_module = module("viewer composite", COMPOSITE);
+        let scene_module = module("viewer scene", &format!("{UNIFORMS_WGSL}{SCENE}"));
+        let composite_module = module("viewer composite", &composite_source());
         let layout = |l: &wgpu::BindGroupLayout| {
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
@@ -432,9 +548,9 @@ impl GpuViewer {
                 entry_point: Some("vs"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: 12,
+                    array_stride: VERTEX_BYTES as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Snorm8x4],
                 }],
             },
             fragment: Some(wgpu::FragmentState {
@@ -501,22 +617,45 @@ impl GpuViewer {
         }
     }
 
-    /// Uploads `mesh` unless the one with `id` is already there.
-    pub fn set_mesh(&mut self, device: &wgpu::Device, id: u64, mesh: &Mesh) {
+    /// Uploads `mesh` with its smooth corner `normals` (from
+    /// [`printdex_mesh::corner_normals`]; `None` draws faces flat) unless
+    /// the one with `id` is already there.
+    pub fn set_mesh(
+        &mut self,
+        device: &wgpu::Device,
+        id: u64,
+        mesh: &Mesh,
+        normals: Option<&[PackedNormal]>,
+    ) {
         if self.mesh.as_ref().is_some_and(|(have, _)| *have == id) {
             return;
         }
         // Drop the old buffers before allocating new ones.
         self.mesh = None;
+        let normals = normals.filter(|n| n.len() == mesh.positions.len());
         let buffers = mesh
             .positions
             .chunks(CHUNK_VERTICES)
-            .map(|chunk| {
-                let bytes: Vec<u8> = chunk
-                    .iter()
-                    .flatten()
-                    .flat_map(|v| v.to_le_bytes())
-                    .collect();
+            .enumerate()
+            .map(|(c, chunk)| {
+                let mut bytes: Vec<u8> = Vec::with_capacity(chunk.len() * VERTEX_BYTES);
+                for (t, tri) in chunk.as_chunks::<3>().0.iter().enumerate() {
+                    let corner = c * CHUNK_VERTICES + t * 3;
+                    let face = || {
+                        let [a, b, c] = tri.map(Vec3::from_array);
+                        pack((b - a).cross(c - a).to_array())
+                    };
+                    let ns = match normals {
+                        Some(n) => [n[corner], n[corner + 1], n[corner + 2]],
+                        None => [face(); 3],
+                    };
+                    for (p, n) in tri.iter().zip(ns) {
+                        for v in p {
+                            bytes.extend_from_slice(&v.to_le_bytes());
+                        }
+                        bytes.extend(n.map(|v| v as u8));
+                    }
+                }
                 let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("viewer mesh"),
                     contents: &bytes,
@@ -758,7 +897,7 @@ mod tests {
     ) -> Vec<u8> {
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let mut v = GpuViewer::new(d, format);
-        v.set_mesh(d, 1, mesh);
+        v.set_mesh(d, 1, mesh, Some(&printdex_mesh::corner_normals(mesh)));
         let sphere = Sphere::of(mesh).unwrap();
         // The viewer sits at (10, 6) inside a larger target.
         let (tw, th) = (w + 20, h + 12);

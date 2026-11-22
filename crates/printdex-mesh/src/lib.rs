@@ -11,11 +11,13 @@ use std::io::BufReader;
 use std::path::Path;
 
 mod decimate;
+mod normals;
 mod obj;
 mod stl;
 mod threemf;
 
 pub use decimate::{PREVIEW_TRIANGLES, decimate};
+pub use normals::{CREASE_DEGREES, PackedNormal, corner_normals, pack, unpack};
 pub use threemf::thumbnail as threemf_thumbnail;
 
 /// Buffer size for file reads: large enough that slow network shares see

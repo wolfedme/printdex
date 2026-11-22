@@ -107,6 +107,159 @@ pub fn shade(ramp: &Ramp, normal: Vec3) -> Rgb {
     }
 }
 
+/// Where the ramp's tones hold flat and blend (for the GPU shaders).
+pub(crate) fn ramp_breaks() -> [f32; 4] {
+    [SHADE_UNTIL, SIDE_FROM, SIDE_UNTIL, TOP_FROM]
+}
+
+/// Strength of the soft plastic highlight, added in linear light.
+pub const SPECULAR: f32 = 0.14;
+/// Ambient occlusion: sample radius as a share of the image's smaller
+/// side, and how far a fully occluded point moves towards the edge tone
+/// (so crevices deepen in the material's own hue rather than greying).
+pub const AO_RADIUS: f32 = 0.03;
+pub const AO_STRENGTH: f32 = 0.8;
+/// Samples per pixel of the occlusion pass.
+pub const AO_SAMPLES: usize = 8;
+
+/// An sRGB channel (0..=255) in linear light.
+pub fn to_linear(c: u8) -> f32 {
+    let c = f32::from(c) / 255.0;
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// A linear channel as sRGB 0..=255.
+pub fn to_srgb(c: f32) -> f32 {
+    let c = c.clamp(0.0, 1.0);
+    let s = if c <= 0.003_130_8 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    };
+    s * 255.0
+}
+
+/// Linear light to 8-bit sRGB through a table: exact to within one level,
+/// and fast enough to run per pixel.
+pub(crate) struct SrgbTable(Vec<u8>);
+
+impl SrgbTable {
+    const STEPS: usize = 4096;
+
+    pub fn new() -> SrgbTable {
+        SrgbTable(
+            (0..Self::STEPS)
+                .map(|i| to_srgb(i as f32 / (Self::STEPS - 1) as f32).round() as u8)
+                .collect(),
+        )
+    }
+
+    pub fn get(&self, c: f32) -> u8 {
+        let i = (c.clamp(0.0, 1.0) * (Self::STEPS - 1) as f32 + 0.5) as usize;
+        self.0[i.min(Self::STEPS - 1)]
+    }
+}
+
+/// How a model is lit for one picture: the ramp in linear light, the key
+/// light and the highlight direction (which depends on the camera).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lighting {
+    /// Top, side, shade and edge tones, linear.
+    pub tones: [[f32; 3]; 4],
+    pub light: Vec3,
+    /// Halfway between the light and the eye.
+    pub half: Vec3,
+    /// Colour of the highlight: the top tone halfway to white.
+    pub sheen: [f32; 3],
+}
+
+impl Lighting {
+    pub fn new(ramp: &Ramp, toward_eye: Vec3) -> Lighting {
+        let lin = |c: Rgb| c.map(to_linear);
+        let top = lin(ramp.top);
+        Lighting {
+            sheen: top.map(|c| (c + 1.0) / 2.0),
+            tones: [
+                lin(ramp.top),
+                lin(ramp.side),
+                lin(ramp.shade),
+                lin(ramp.edge),
+            ],
+            light: light_dir(),
+            half: (light_dir() + toward_eye)
+                .try_normalize()
+                .unwrap_or(Vec3::Z),
+        }
+    }
+
+    pub fn edge(&self) -> [f32; 3] {
+        self.tones[3]
+    }
+
+    /// Linear colour of a surface with unit `normal` (facing the eye):
+    /// the ramp tone for its light term (as [`shade`]) plus a soft
+    /// highlight that only curved surfaces catch.
+    pub fn shade(&self, normal: Vec3) -> [f32; 3] {
+        let [top, side, shade, _] = self.tones;
+        let t = normal.dot(self.light);
+        let base = if t <= SHADE_UNTIL {
+            shade
+        } else if t < SIDE_FROM {
+            mix3(shade, side, (t - SHADE_UNTIL) / (SIDE_FROM - SHADE_UNTIL))
+        } else if t <= SIDE_UNTIL {
+            side
+        } else if t < TOP_FROM {
+            mix3(side, top, (t - SIDE_UNTIL) / (TOP_FROM - SIDE_UNTIL))
+        } else {
+            top
+        };
+        let s = specular(normal.dot(self.half));
+        [0, 1, 2].map(|i| base[i] + s * self.sheen[i])
+    }
+
+    /// `color` darkened for ambient occlusion `occ` (0 open, 1 buried).
+    pub fn occlude(&self, color: [f32; 3], occ: f32) -> [f32; 3] {
+        mix3(color, self.edge(), occ * AO_STRENGTH)
+    }
+}
+
+/// The highlight for `n·h`: a soft lobe (exponent 16, by squaring)
+/// that flat faces of a box at the default views still miss.
+pub fn specular(n_dot_h: f32) -> f32 {
+    let mut x = n_dot_h.max(0.0);
+    for _ in 0..4 {
+        x *= x;
+    }
+    SPECULAR * x
+}
+
+fn mix3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    let t = t.clamp(0.0, 1.0);
+    [0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * t)
+}
+
+/// Offsets of the occlusion samples on a unit disc: a golden-angle
+/// spiral turned by `turn` (a fraction of a full turn). Neighbouring
+/// pixels use different turns (see [`ao_turn`]) and a small blur merges
+/// them, so the pattern never shows.
+pub fn ao_kernel(turn: f32) -> [[f32; 2]; AO_SAMPLES] {
+    let golden = std::f32::consts::PI * (3.0 - 5.0f32.sqrt());
+    std::array::from_fn(|i| {
+        let r = ((i as f32 + 0.5) / AO_SAMPLES as f32).sqrt();
+        let a = i as f32 * golden + turn * std::f32::consts::TAU;
+        [r * a.cos(), r * a.sin()]
+    })
+}
+
+/// Kernel turn of output pixel (`x`, `y`): four turns in a 2×2 pattern.
+pub fn ao_turn(x: u32, y: u32) -> f32 {
+    [0.0, 0.5, 0.75, 0.25][((x & 1) | ((y & 1) << 1)) as usize] / AO_SAMPLES as f32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,5 +283,28 @@ mod tests {
         assert_eq!(shade(&r, Vec3::NEG_Y), r.side);
         assert_eq!(shade(&r, Vec3::X), r.shade);
         assert_eq!(shade(&r, Vec3::NEG_Z), r.shade);
+    }
+
+    #[test]
+    fn lighting_keeps_box_faces_on_the_ramp() {
+        let r = Material::Pla.ramp();
+        let eye = crate::Camera::default().toward_eye();
+        let l = Lighting::new(&r, eye);
+        let t = SrgbTable::new();
+        let srgb = |c: [f32; 3]| c.map(|v| t.get(v));
+        assert_eq!(srgb(l.shade(Vec3::Z)), r.top);
+        assert_eq!(srgb(l.shade(Vec3::NEG_Y)), r.side);
+        assert_eq!(srgb(l.shade(Vec3::X)), r.shade);
+        // Facing the highlight direction: brighter than the top tone.
+        let hi = srgb(l.shade(l.half));
+        assert!(hi[2] > r.top[2], "{hi:?}");
+    }
+
+    #[test]
+    fn srgb_round_trips() {
+        let t = SrgbTable::new();
+        for v in 0..=255u8 {
+            assert_eq!(t.get(to_linear(v)), v);
+        }
     }
 }

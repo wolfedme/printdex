@@ -14,7 +14,7 @@ use iced::advanced::widget::{Tree, Widget};
 use iced::advanced::{Clipboard, Shell, renderer};
 use iced::widget::shader::{self, Viewport};
 use iced::{Element, Event, Length, Point, Rectangle, Size, keyboard, mouse, wgpu};
-use printdex_mesh::Mesh;
+use printdex_mesh::{Mesh, PackedNormal};
 use printdex_render::{GpuViewer, Material, Placement, Sphere, View};
 
 use crate::viewer::{Loaded, Msg};
@@ -30,6 +30,7 @@ pub struct Scene {
     pub id: u64,
     pub material: Material,
     pub mesh: Arc<Mesh>,
+    pub normals: Option<Arc<Vec<PackedNormal>>>,
     pub sphere: Sphere,
     pub view: View,
 }
@@ -50,6 +51,7 @@ impl Scene {
             id: loaded.id,
             material,
             mesh: loaded.mesh.clone(),
+            normals: loaded.normals.clone(),
             sphere: loaded.sphere,
             view,
         }
@@ -222,7 +224,12 @@ impl shader::Primitive for Primitive {
             width: (bounds.width * s).round().max(1.0) as u32,
             height: (bounds.height * s).round().max(1.0) as u32,
         };
-        pipeline.viewer.set_mesh(device, scene.id, &scene.mesh);
+        pipeline.viewer.set_mesh(
+            device,
+            scene.id,
+            &scene.mesh,
+            scene.normals.as_deref().map(|n| &n[..]),
+        );
         pipeline.viewer.prepare(
             device,
             queue,

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use iced::widget::image;
 use iced::{Size, Task};
 use printdex_core::{Detail, Engine, PartId, Preview, ThumbFailure};
-use printdex_mesh::{Bounds, Mesh};
+use printdex_mesh::{Bounds, Mesh, PackedNormal};
 use printdex_render::{Material, RenderOptions, Sphere, View};
 
 /// Largest CPU fallback picture, per side, in pixels.
@@ -22,6 +22,8 @@ pub struct Loaded {
     /// Changes with every load, so the GPU uploads each mesh once.
     pub id: u64,
     pub mesh: Arc<Mesh>,
+    /// Smooth corner normals of `mesh`, when it got them.
+    pub normals: Option<Arc<Vec<PackedNormal>>>,
     pub sphere: Sphere,
     /// Bounds of the shown (possibly simplified) mesh.
     pub bounds: Bounds,
@@ -149,6 +151,7 @@ impl Viewer {
                             triangles: p.triangles,
                             decimated: p.decimated,
                             mesh: Arc::new(p.mesh),
+                            normals: p.normals.map(Arc::new),
                             detail,
                         }),
                         _ => Load::Failed(ThumbFailure::Invalid),
@@ -254,13 +257,18 @@ impl Viewer {
             camera: self.view.camera,
             framing: self.view.framing(),
         };
-        let mesh = loaded.mesh.clone();
+        let (mesh, normals) = (loaded.mesh.clone(), loaded.normals.clone());
         let req = self.request;
         Task::perform(
             async move {
-                let img =
-                    printdex_core::cpu::run_cpu(move || printdex_render::render(&mesh, &opts))
-                        .await;
+                let img = printdex_core::cpu::run_cpu(move || {
+                    printdex_render::render_with_normals(
+                        &mesh,
+                        normals.as_deref().map(|n| &n[..]),
+                        &opts,
+                    )
+                })
+                .await;
                 image::Handle::from_rgba(img.width, img.height, img.rgba)
             },
             move |handle| Msg::CpuRendered(req, handle),
@@ -281,6 +289,7 @@ mod tests {
             dims: [10.0, 10.0, 5.0],
             triangles: 1,
             decimated: false,
+            normals: None,
             material: Material::Unknown,
         }
     }
