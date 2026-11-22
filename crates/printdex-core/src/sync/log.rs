@@ -21,9 +21,7 @@ const FLAG_SEALED: u8 = 1;
 
 /// When a change was made, totally ordered across installs: wall clock,
 /// then a counter for changes in the same millisecond, then the install.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Stamp {
     #[serde(rename = "w")]
     pub wall_ms: i64,
@@ -126,17 +124,35 @@ pub enum AttemptField {
 pub enum Key {
     /// Where the model is and what it holds: `{"path", "fps"}`.
     Identity { lib: Uuid, model: Uuid },
-    Model { lib: Uuid, model: Uuid, field: ModelField },
+    Model {
+        lib: Uuid,
+        model: Uuid,
+        field: ModelField,
+    },
     /// Value: the tag as typed, or `null` once removed.
     Tag { lib: Uuid, model: Uuid, tag: String },
     /// A collection (all libraries share them).
     Collection { id: Uuid, field: CollectionField },
     /// Value: `true`, or `null` once removed.
     Member { id: Uuid, lib: Uuid, model: Uuid },
-    Recipe { lib: Uuid, model: Uuid, field: RecipeField },
-    Attempt { lib: Uuid, model: Uuid, attempt: Uuid, field: AttemptField },
+    Recipe {
+        lib: Uuid,
+        model: Uuid,
+        field: RecipeField,
+    },
+    Attempt {
+        lib: Uuid,
+        model: Uuid,
+        attempt: Uuid,
+        field: AttemptField,
+    },
     /// Value: `{"hash", "ext", "name"}`, or `null` once removed.
-    Photo { lib: Uuid, model: Uuid, attempt: Uuid, photo: Uuid },
+    Photo {
+        lib: Uuid,
+        model: Uuid,
+        attempt: Uuid,
+        photo: Uuid,
+    },
 }
 
 impl Key {
@@ -456,7 +472,14 @@ mod tests {
 
     #[test]
     fn batch_roundtrip_encrypted() {
-        let k = derive("pw", &KdfParams { log_n: 4, ..KdfParams::generate() }).unwrap();
+        let k = derive(
+            "pw",
+            &KdfParams {
+                log_n: 4,
+                ..KdfParams::generate()
+            },
+        )
+        .unwrap();
         let b = sample();
         let bytes = encode(&b, Some(&k));
         assert_eq!(decode(&bytes, Some(&k)).unwrap(), b);
@@ -465,11 +488,17 @@ mod tests {
 
     #[test]
     fn wrong_key_fails() {
-        let p = KdfParams { log_n: 4, ..KdfParams::generate() };
+        let p = KdfParams {
+            log_n: 4,
+            ..KdfParams::generate()
+        };
         let k = derive("pw", &p).unwrap();
         let other = derive("nope", &p).unwrap();
         let bytes = encode(&sample(), Some(&k));
-        assert_eq!(decode(&bytes, Some(&other)), Err(SyncError::WrongPassphrase));
+        assert_eq!(
+            decode(&bytes, Some(&other)),
+            Err(SyncError::WrongPassphrase)
+        );
     }
 
     #[test]
@@ -496,7 +525,10 @@ mod tests {
     fn newer_format_rejected() {
         let mut b = sample();
         b.format = 2;
-        assert_eq!(decode(&encode(&b, None), None), Err(SyncError::NewerFormat(2)));
+        assert_eq!(
+            decode(&encode(&b, None), None),
+            Err(SyncError::NewerFormat(2))
+        );
         let mut bytes = encode(&sample(), None);
         bytes[4] = 9;
         assert_eq!(decode(&bytes, None), Err(SyncError::NewerFormat(9)));
@@ -522,6 +554,9 @@ mod tests {
         };
         assert_eq!(Key::parse(&k.text()), Some(k.clone()));
         assert!(k.is_text());
-        assert_eq!(k.with_model(Uuid::from_u128(9)).model().unwrap().1, Uuid::from_u128(9));
+        assert_eq!(
+            k.with_model(Uuid::from_u128(9)).model().unwrap().1,
+            Uuid::from_u128(9)
+        );
     }
 }

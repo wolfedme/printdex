@@ -20,10 +20,12 @@ use crate::model_data::{
 impl Engine {
     fn changed(&self, id: ModelId) {
         self.sidecars.queue(id);
+        self.mark_sync_dirty(id);
         let _ = self.events.send(EngineEvent::ModelDataChanged(id));
     }
 
     fn lists_changed(&self) {
+        self.sync.poke.notify_one();
         let _ = self.events.send(EngineEvent::OrganizeChanged);
     }
 

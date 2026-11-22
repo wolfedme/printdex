@@ -1326,6 +1326,11 @@ impl App {
             | EngineEvent::BackupFinished { .. }
             | EngineEvent::BackupFailed { .. }
             | EngineEvent::BackupNeedsAttention(_)) => self.on_backup_event(event),
+            // The sync status UI arrives with Settings › Sync.
+            EngineEvent::SyncStarted { .. }
+            | EngineEvent::SyncFinished { .. }
+            | EngineEvent::SyncFailed { .. }
+            | EngineEvent::SyncParked { .. } => Task::none(),
         }
     }
 

@@ -66,7 +66,9 @@ fn checked(path: &str) -> Result<&str> {
     let bad = path.is_empty()
         || path.starts_with('/')
         || path.contains('\\')
-        || path.split('/').any(|seg| seg.is_empty() || seg == "." || seg == "..");
+        || path
+            .split('/')
+            .any(|seg| seg.is_empty() || seg == "." || seg == "..");
     if bad {
         return Err(SyncError::Storage(format!("bad path in sync space: {path}")).into());
     }
@@ -74,7 +76,11 @@ fn checked(path: &str) -> Result<&str> {
 }
 
 fn dir_ok(dir: &str) -> Result<&str> {
-    if dir.is_empty() { Ok(dir) } else { checked(dir) }
+    if dir.is_empty() {
+        Ok(dir)
+    } else {
+        checked(dir)
+    }
 }
 
 /// A space in a folder: `<library>/.printdex/sync` or any folder the user
@@ -452,8 +458,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let s = FolderStore::new(dir.path());
         rt().block_on(async {
-            s.write("installs/a/log/1.chg", b"x".to_vec()).await.unwrap();
-            s.write("installs/a/log/1.chg", b"y".to_vec()).await.unwrap();
+            s.write("installs/a/log/1.chg", b"x".to_vec())
+                .await
+                .unwrap();
+            s.write("installs/a/log/1.chg", b"y".to_vec())
+                .await
+                .unwrap();
             assert_eq!(s.list("installs/a/log").await.unwrap(), vec!["1.chg"]);
             assert_eq!(s.list_dirs("installs").await.unwrap(), vec!["a"]);
             assert_eq!(
@@ -466,8 +476,10 @@ mod tests {
     #[test]
     fn write_once_keeps_first() {
         let dir = tempfile::tempdir().unwrap();
-        let stores: Vec<Box<dyn SpaceStore>> =
-            vec![Box::new(FolderStore::new(dir.path())), Box::new(MemStore::new())];
+        let stores: Vec<Box<dyn SpaceStore>> = vec![
+            Box::new(FolderStore::new(dir.path())),
+            Box::new(MemStore::new()),
+        ];
         rt().block_on(async {
             for s in stores {
                 assert!(s.write_once("space.toml", b"one".to_vec()).await.unwrap());

@@ -449,6 +449,15 @@ pub async fn import_library(
                 continue;
             }
         };
+        let own = file.writer.is_empty()
+            || file.writer == install.hyphenated().to_string()
+            || predecessors.contains(&file.writer);
+        if !own && db.syncs_library_with(lib, &file.writer).await? {
+            // That install syncs this library with us: its changes arrive
+            // through the sync log, which knows which field is newer.
+            db.set_sidecar_mtime(state.id, Some(real_mtime)).await?;
+            continue;
+        }
         let imported = import(db, state.id, &file, install, &predecessors).await?;
         db.set_sidecar_mtime(state.id, Some(real_mtime)).await?;
         summary.imported += 1;

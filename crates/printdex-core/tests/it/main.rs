@@ -14,4 +14,5 @@ mod identity;
 mod monitor;
 mod prints;
 mod sidecars;
+mod sync;
 mod thumbs;

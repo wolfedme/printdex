@@ -62,7 +62,7 @@ pub fn hex(bytes: &[u8]) -> String {
 
 /// Bytes of a lowercase or uppercase hex string.
 pub fn unhex(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     (0..s.len())
@@ -74,7 +74,8 @@ pub fn unhex(s: &str) -> Option<Vec<u8>> {
 /// Derives the key for `pass`. CPU-heavy: call it off the async workers.
 pub fn derive(pass: &str, params: &KdfParams) -> Result<SpaceKey, SyncError> {
     let salt = unhex(&params.salt).ok_or(SyncError::Corrupt)?;
-    let p = scrypt::Params::new(params.log_n, params.r, params.p).map_err(|_| SyncError::Corrupt)?;
+    let p =
+        scrypt::Params::new(params.log_n, params.r, params.p).map_err(|_| SyncError::Corrupt)?;
     let mut out = [0_u8; 32];
     scrypt::scrypt(pass.as_bytes(), &salt, &p, &mut out).map_err(|_| SyncError::Corrupt)?;
     Ok(SpaceKey(out))
