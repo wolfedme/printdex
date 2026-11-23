@@ -78,7 +78,11 @@ fn main() -> anyhow::Result<()> {
     let _log_guard = printdex_core::diagnostics::init(&log_dir, &filter);
     // Read before the hook is installed, so this run's own crash isn't seen.
     let crash = printdex_core::diagnostics::unseen_crash(&log_dir);
-    printdex_core::diagnostics::install_panic_hook(log_dir, env!("CARGO_PKG_VERSION"));
+    printdex_core::diagnostics::install_panic_hook(
+        log_dir,
+        env!("CARGO_PKG_VERSION"),
+        printdex_core::diagnostics::CrashSource::App,
+    );
     let config_dir = cli.config_dir.or_else(settings::Settings::default_dir);
     let (settings, settings_status) = config_dir
         .as_deref()
