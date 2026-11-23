@@ -485,6 +485,76 @@ async fn failed_model_restore_keeps_the_original() {
     assert!(names.iter().all(|n| !n.contains("tmp")), "{names:?}");
 }
 
+/// The changed file went to the trash, then the restored copy can't take
+/// its name: the copy is kept under a name the temp sweep leaves alone,
+/// and the error says where.
+#[tokio::test]
+async fn restored_copy_is_kept_when_the_last_rename_fails() {
+    use printdex_core::fsx::faults::{self, Action, Op};
+    use std::io::ErrorKind;
+    let fx = Fx::new().await;
+    let bin = Fx::model(&fx.engine, "Bin").await;
+    fx.backup().await;
+    let snaps = fx.engine.model_snapshots(bin).await.unwrap();
+    write(&fx.root(), "Bin/a.stl", "solid broken\nendsolid broken\n");
+    let root = fx.root();
+    let trash = fx.dir.path().join(".test-trash");
+    let _trash = {
+        let trash = trash.clone();
+        faults::arm(
+            &root,
+            Op::Trash,
+            0,
+            Action::Instead(Box::new(move |p| {
+                fs::create_dir_all(&trash)?;
+                fs::rename(p, trash.join("0"))
+            })),
+        )
+    };
+    // Rename 0 puts the restored copy beside a.stl; rename 1 would give it
+    // a.stl's name.
+    let last = faults::arm(
+        &root,
+        Op::Rename,
+        1,
+        Action::Fail(ErrorKind::PermissionDenied),
+    );
+    let r = fx
+        .engine
+        .restore_model(bin, &snaps[0].id, ModelRestoreDest::Original)
+        .await;
+    let err = format!("{}", r.unwrap_err());
+    assert_eq!(last.fired(), 1);
+    assert!(
+        trash.join("0").is_file(),
+        "the changed file is in the trash"
+    );
+    let bin_dir = fx.root().join("Bin");
+    let kept: Vec<_> = fs::read_dir(&bin_dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(".a.stl.restored-")
+        })
+        .collect();
+    assert_eq!(
+        kept.len(),
+        1,
+        "{:?}",
+        fs::read_dir(&bin_dir).unwrap().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        fs::read_to_string(&kept[0]).unwrap(),
+        "solid a\nendsolid a\n"
+    );
+    assert!(err.contains(".a.stl.restored-"), "{err}");
+    printdex_core::fsx::sweep_temp_files(&bin_dir, std::time::Duration::ZERO);
+    assert!(kept[0].is_file(), "the sweep leaves it alone");
+}
+
 #[tokio::test]
 async fn deleted_model_restores_from_backup() {
     let fx = Fx::new().await;

@@ -113,6 +113,16 @@ pub(crate) fn temp_path(path: &Path) -> io::Result<PathBuf> {
     temp_sibling(path, TEMP_INFIX)
 }
 
+/// A fresh `.<name>.restored-<uuid>` next to `path`: where a restored copy
+/// is kept when it couldn't take `path`'s name. [`sweep_temp_files`] never
+/// matches it.
+pub(crate) fn restored_path(path: &Path) -> io::Result<PathBuf> {
+    temp_sibling(path, RESTORED_INFIX)
+}
+
+/// Infix of [`restored_path`]'s names.
+const RESTORED_INFIX: &str = ".restored-";
+
 /// Infix of [`durable_write`]'s temporary files, which
 /// [`sweep_temp_files`] removes.
 const TEMP_INFIX: &str = ".tmp-";

@@ -86,7 +86,9 @@ fn join_err(e: tokio::task::JoinError) -> CoreError {
 /// to a temporary file next to `to` (renamed, or copied and fsynced from
 /// another drive); only then does a changed `to` (`replace`) go to the
 /// trash and the temporary file take its name, never replacing anything.
-/// A failure before that leaves `to` untouched.
+/// A failure before the trash leaves `to` untouched. A failure after it
+/// keeps the restored copy as `.<name>.restored-<uuid>` (which the temp
+/// sweep leaves alone), and the error names it.
 fn put_restored(from: &Path, to: &Path, replace: bool) -> std::io::Result<()> {
     use crate::fsx::{self, faults, faults::Op};
     if let Some(parent) = to.parent() {
@@ -99,20 +101,44 @@ fn put_restored(from: &Path, to: &Path, replace: bool) -> std::io::Result<()> {
         }
         other => other?,
     }
-    let placed = (|| {
-        if replace {
-            // Safe because the restored copy is ready beside it, and the trash keeps the old file.
-            faults::perform(Op::Trash, to, || {
-                trash::delete(to).map_err(|e| std::io::Error::other(e.to_string()))
-            })?;
+    if replace {
+        // Safe because the restored copy is ready beside it, and the trash keeps the old file.
+        let trashed = faults::perform(Op::Trash, to, || {
+            trash::delete(to).map_err(|e| std::io::Error::other(e.to_string()))
+        });
+        if let Err(e) = trashed {
+            // Safe because it is our own temporary copy; the backup has it.
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
         }
-        fsx::rename_no_replace(&tmp, to)
-    })();
-    if placed.is_err() {
-        // Safe because it is our own temporary copy; the backup has it.
-        let _ = std::fs::remove_file(&tmp);
     }
-    placed
+    let Err(e) = fsx::rename_no_replace(&tmp, to) else {
+        return Ok(());
+    };
+    if !replace {
+        // Safe because it is our own temporary copy, `to` was never there
+        // to lose, and the backup has it.
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    // The old file is in the trash: the restored copy is now the only one
+    // here. Keep it, under a name the temp sweep leaves alone.
+    let kept = fsx::restored_path(to)
+        .and_then(|k| fsx::rename_no_replace(&tmp, &k).map(|()| k))
+        .unwrap_or(tmp);
+    tracing::warn!(
+        path = %to.display(),
+        kept = %kept.display(),
+        error = %e,
+        "the old file is in the trash but the restored copy couldn't take its name"
+    );
+    Err(std::io::Error::new(
+        e.kind(),
+        format!(
+            "{e}; the old file is in the trash and the restored copy is at {}",
+            kept.display()
+        ),
+    ))
 }
 
 /// Moves a file or folder to `to`, which must not exist. On another drive
@@ -233,7 +259,10 @@ pub(crate) fn apply_staged(data_dir: &Path) -> Result<bool> {
         let to = data_dir.join(name);
         move_any(&staged, &to).map_err(|e| io_err(&staged, e))?;
     }
-    // Safe because everything staged has moved in; only SWAP and READY are left.
+    // Safe because everything staged has moved in: what is left is SWAP,
+    // READY and the snapshot's settings.toml/apps.toml, which the app
+    // copies into its config folder right after the restore, before the
+    // restart.
     std::fs::remove_dir_all(&staging).map_err(|e| io_err(&staging, e))?;
     tracing::info!(previous = %old.display(), "applied a restored backup");
     Ok(true)
