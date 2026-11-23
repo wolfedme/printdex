@@ -201,7 +201,7 @@ fn crash_files(dir: &Path, prefix: &str) -> Vec<(i64, PathBuf)> {
             Some(((ms, n), e.path()))
         })
         .collect();
-    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.sort_by_key(|f| std::cmp::Reverse(f.0));
     files.into_iter().map(|((ms, _), p)| (ms, p)).collect()
 }
 
@@ -358,7 +358,7 @@ pub fn save_bundle(
     let mut crashes = crash_files(log_dir, CRASH_PREFIX);
     crashes.extend(crash_files(log_dir, CLI_CRASH_PREFIX));
     // Stable: within a millisecond each prefix keeps its newest-first order.
-    crashes.sort_by(|a, b| b.0.cmp(&a.0));
+    crashes.sort_by_key(|c| std::cmp::Reverse(c.0));
     let crashes: Vec<PathBuf> = crashes
         .into_iter()
         .take(BUNDLE_CRASHES)
