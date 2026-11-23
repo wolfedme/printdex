@@ -361,12 +361,28 @@ async fn restore_library_files_into_new_folder() {
 
 #[tokio::test]
 async fn model_restore_trashes_changed_files_only() {
+    use printdex_core::fsx::faults::{self, Action, Op};
     let fx = Fx::new().await;
     let bin = Fx::model(&fx.engine, "Bin").await;
     fx.backup().await;
     let snaps = fx.engine.model_snapshots(bin).await.unwrap();
     assert_eq!(snaps.len(), 1);
-    write(&fx.root(), "Bin/a.stl", "solid broken\nendsolid broken\n");
+    let broken = "solid broken\nendsolid broken\n";
+    write(&fx.root(), "Bin/a.stl", broken);
+    // Keep the system trash out of it: the changed file goes to a folder.
+    let trash = fx.dir.path().join(".test-trash");
+    let trashed = {
+        let trash = trash.clone();
+        faults::arm(
+            &fx.root(),
+            Op::Trash,
+            0,
+            Action::Instead(Box::new(move |p| {
+                fs::create_dir_all(&trash)?;
+                fs::rename(p, trash.join("0"))
+            })),
+        )
+    };
     let b_mtime = fs::metadata(fx.root().join("Bin/b.stl"))
         .unwrap()
         .modified()
@@ -388,6 +404,12 @@ async fn model_restore_trashes_changed_files_only() {
         .unwrap();
     let rels: Vec<_> = written.iter().map(|d| d.rel.as_str()).collect();
     assert_eq!(rels, ["a.stl"]);
+    assert_eq!(
+        trashed.fired(),
+        1,
+        "only the changed file went to the trash"
+    );
+    assert_eq!(fs::read_to_string(trash.join("0")).unwrap(), broken);
     assert_eq!(
         fs::read_to_string(fx.root().join("Bin/a.stl")).unwrap(),
         "solid a\nendsolid a\n"

@@ -224,6 +224,9 @@ async fn offline_target_refused() {
     assert!(f.root().join("Hook/hook.stl").exists());
 }
 
+/// Deliberately uses the real system trash (no `Op::Trash` fault), to check
+/// a trash and its undo against the platform's trash. Other tests route the trash into a folder with
+/// `faults::arm(.., Op::Trash, .., Action::Instead(..))`.
 #[tokio::test]
 async fn trash_then_undo_restores() {
     let f = Fx::new(&["Hook/hook.stl", "Plain/plain.stl", "Other/x.stl"]).await;
