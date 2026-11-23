@@ -148,7 +148,7 @@ pub fn error_text(e: &CoreError) -> String {
         CoreError::NameTaken(name) => {
             t_args("files-error-taken", &[("name", Arg::str(name.clone()))])
         }
-        CoreError::HasLinks(_) => t("files-has-links"),
+        CoreError::HasLinks(_) => t("files-error-has-links"),
         CoreError::TargetOffline => t("files-error-offline"),
         CoreError::LibraryOffline(_) => t("files-error-source-offline"),
         CoreError::AlreadyScanning(_) => t("files-error-busy"),

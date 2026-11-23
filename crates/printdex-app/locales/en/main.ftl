@@ -450,7 +450,7 @@ files-undone = Undone
 files-undo = Undo
 files-error-name = That name can't be used. Avoid / \ : * ? " < > | and names starting with a dot.
 files-error-taken = Something named { $name } is already there.
-files-has-links = This folder contains links, which Printdex can't move between drives.
+files-error-has-links = This folder contains links, which Printdex can't move between drives.
 files-error-offline = The destination folder can't be reached right now.
 files-error-source-offline = The model's library can't be reached right now.
 files-error-busy = The library is being scanned. Try again in a moment.
@@ -464,17 +464,6 @@ files-error-other = The files could not be changed. Nothing was lost; see the lo
 updates-ask = Check for updates automatically? Printdex looks at its GitHub releases once a day and sends nothing about you or your library.
 updates-yes = Check automatically
 updates-not-now = Not now
-report-title = Report a bug
-report-body = Opens a new issue on GitHub, or saves a file with logs you can send another way. Nothing is sent without you.
-report-open-issue = Open a GitHub issue
-report-save = Save diagnostics…
-settings-broken = Settings file was unreadable and was set aside
-apps-broken = Apps file was unreadable and was set aside
-settings-broken-kept = Settings file is unreadable and could not be set aside, so changes won't be saved this time
-apps-broken-kept = Apps file is unreadable and could not be set aside, so changes won't be saved this time
-report-saved = Diagnostics saved
-report-save-failed = Could not save diagnostics: { $error }
-
 updates-title = Updates
 updates-auto = Check automatically
 updates-auto-hint = Once a day, from Printdex's GitHub releases. Updates install only when you restart.
@@ -487,6 +476,21 @@ updates-ready = Printdex { $version } is ready to install.
 updates-restart = Restart to update
 updates-failed = Could not check for updates: { $error }
 updates-unavailable = Updates come with the installed app. This copy wasn't installed with the Printdex installer, so it doesn't update itself.
+
+## Report a bug
+report-title = Report a bug
+report-body = Opens a new issue on GitHub, or saves a file with logs you can send another way. Nothing is sent without you.
+report-open-issue = Open a GitHub issue
+report-save = Save diagnostics…
+report-saved = Diagnostics saved
+report-save-failed = Could not save diagnostics: { $error }
+report-zip-filter = Zip archive
+
+## Config files
+settings-broken = Settings file was unreadable and was set aside
+apps-broken = Apps file was unreadable and was set aside
+settings-broken-kept = Settings file is unreadable and could not be set aside, so changes won't be saved this time
+apps-broken-kept = Apps file is unreadable and could not be set aside, so changes won't be saved this time
 
 ## Backup (Settings › Backup and the sidebar line)
 settings-backup = Backup

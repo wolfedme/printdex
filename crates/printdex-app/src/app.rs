@@ -1512,11 +1512,13 @@ impl App {
                 let redactor = self.redactor();
                 let name =
                     crate::report::bundle_name(&jiff::ZonedDateTime::now().date().to_string());
+                // Looked up here: the strings are per thread.
+                let filter = t("report-zip-filter");
                 Task::perform(
                     async move {
                         let dest = rfd::AsyncFileDialog::new()
                             .set_file_name(name)
-                            .add_filter("zip", &["zip"])
+                            .add_filter(filter, &["zip"])
                             .save_file()
                             .await?
                             .path()
