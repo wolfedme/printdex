@@ -23,6 +23,7 @@ pub const SIDECARS_FROM_DB: &str = "restore_sidecars_from_db";
 
 const STAGING: &str = "restore-staging";
 const READY: &str = ".ready";
+const SWAP: &str = "SWAP";
 const DB_FILE: &str = "printdex.db";
 const PHOTOS: &str = "photos";
 
@@ -93,18 +94,22 @@ fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::remove_file(from)
 }
 
+/// Moves a file or folder to `to`, which must not exist. On another drive
+/// it copies (verified) and removes the source only after that succeeded.
 fn move_any(from: &Path, to: &Path) -> std::io::Result<()> {
-    if from.is_dir() {
-        if std::fs::rename(from, to).is_ok() {
-            return Ok(());
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    match crate::fsx::rename_no_replace(from, to) {
+        Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+            crate::fsx::copy_tree_verified(from, to)?;
+            if from.is_dir() {
+                std::fs::remove_dir_all(from)
+            } else {
+                std::fs::remove_file(from)
+            }
         }
-        for entry in walk_files(from)? {
-            let rel = entry.strip_prefix(from).unwrap_or(&entry);
-            move_file(&entry, &to.join(rel))?;
-        }
-        std::fs::remove_dir_all(from)
-    } else {
-        move_file(from, to)
+        other => other,
     }
 }
 
@@ -151,35 +156,59 @@ fn same_content(a: &Path, b: &Path) -> std::io::Result<bool> {
 /// previous database and photos move to `pre-restore-<time>/`. An
 /// unfinished staging folder is removed. Returns whether a restore was
 /// applied.
+///
+/// Every step can be repeated: the name of the `pre-restore-` folder is
+/// written to `SWAP` first, a live item moves aside only if it is still
+/// there and isn't aside yet, and an item already moved in is no longer in
+/// staging. So a swap that was interrupted finishes on the next run.
 pub(crate) fn apply_staged(data_dir: &Path) -> Result<bool> {
     let staging = data_dir.join(STAGING);
     if !staging.exists() {
         return Ok(false);
     }
-    if !staging.join(READY).exists() || !staging.join(DB_FILE).exists() {
+    if !staging.join(READY).exists() {
         tracing::warn!("removing an unfinished restore");
         std::fs::remove_dir_all(&staging).map_err(|e| io_err(&staging, e))?;
         return Ok(false);
     }
-    let old = data_dir.join(format!("pre-restore-{}", now_ms()));
+    let swap_file = staging.join(SWAP);
+    let existing = std::fs::read_to_string(&swap_file)
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| s.starts_with("pre-restore-") && !s.contains(['/', '\\']));
+    let folder = match existing {
+        Some(name) => name,
+        None => {
+            let name = format!("pre-restore-{}", now_ms());
+            crate::fsx::durable_write(
+                &swap_file,
+                name.as_bytes(),
+                crate::fsx::Durability::UserData,
+            )
+            .map_err(|e| io_err(&swap_file, e))?;
+            name
+        }
+    };
+    let old = data_dir.join(folder);
     std::fs::create_dir_all(&old).map_err(|e| io_err(&old, e))?;
-    for name in [
-        DB_FILE.to_owned(),
-        format!("{DB_FILE}-wal"),
-        format!("{DB_FILE}-shm"),
-        PHOTOS.to_owned(),
-    ] {
-        let from = data_dir.join(&name);
-        if from.exists() {
-            move_any(&from, &old.join(&name)).map_err(|e| io_err(&from, e))?;
-        }
-    }
     for name in [DB_FILE, PHOTOS] {
-        let from = staging.join(name);
-        if from.exists() {
-            let to = data_dir.join(name);
-            move_any(&from, &to).map_err(|e| io_err(&from, e))?;
+        let staged = staging.join(name);
+        if !staged.exists() {
+            continue;
         }
+        let mut live = vec![name.to_owned()];
+        if name == DB_FILE {
+            live.push(format!("{DB_FILE}-wal"));
+            live.push(format!("{DB_FILE}-shm"));
+        }
+        for item in live {
+            let (from, aside) = (data_dir.join(&item), old.join(&item));
+            if from.exists() && !aside.exists() {
+                move_any(&from, &aside).map_err(|e| io_err(&from, e))?;
+            }
+        }
+        let to = data_dir.join(name);
+        move_any(&staged, &to).map_err(|e| io_err(&staged, e))?;
     }
     std::fs::remove_dir_all(&staging).map_err(|e| io_err(&staging, e))?;
     tracing::info!(previous = %old.display(), "applied a restored backup");
