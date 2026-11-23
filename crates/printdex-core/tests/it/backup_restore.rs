@@ -411,6 +411,58 @@ async fn model_restore_trashes_changed_files_only() {
     assert!(other.join("Bin/b.stl").is_file());
 }
 
+/// Restoring a model's changed file fails while the restored copy is
+/// written (another drive, disk full): the user's file is still there,
+/// untouched and not in the trash, and no temporary file is left.
+#[tokio::test]
+async fn failed_model_restore_keeps_the_original() {
+    use printdex_core::fsx::faults::{self, Action, Op};
+    use std::io::ErrorKind;
+    let fx = Fx::new().await;
+    let bin = Fx::model(&fx.engine, "Bin").await;
+    fx.backup().await;
+    let snaps = fx.engine.model_snapshots(bin).await.unwrap();
+    let broken = "solid broken\nendsolid broken\n";
+    write(&fx.root(), "Bin/a.stl", broken);
+    let root = fx.root();
+    let trash = fx.dir.path().join(".test-trash");
+    let _cross = faults::arm(
+        &root,
+        Op::Rename,
+        0,
+        Action::Fail(ErrorKind::CrossesDevices),
+    );
+    let full = faults::arm(&root, Op::Copy, 0, Action::Fail(ErrorKind::StorageFull));
+    let _trash = {
+        let trash = trash.clone();
+        faults::arm(
+            &root,
+            Op::Trash,
+            0,
+            Action::Instead(Box::new(move |p| {
+                fs::create_dir_all(&trash)?;
+                fs::rename(p, trash.join("0"))
+            })),
+        )
+    };
+    let r = fx
+        .engine
+        .restore_model(bin, &snaps[0].id, ModelRestoreDest::Original)
+        .await;
+    assert!(r.is_err(), "{r:?}");
+    assert_eq!(full.fired(), 1, "the restored copy went through fsx");
+    assert_eq!(
+        fs::read_to_string(fx.root().join("Bin/a.stl")).unwrap(),
+        broken
+    );
+    assert!(!trash.exists(), "nothing went to the trash");
+    let names: Vec<_> = fs::read_dir(fx.root().join("Bin"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(names.iter().all(|n| !n.contains("tmp")), "{names:?}");
+}
+
 #[tokio::test]
 async fn deleted_model_restores_from_backup() {
     let fx = Fx::new().await;

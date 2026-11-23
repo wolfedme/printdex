@@ -82,16 +82,36 @@ fn join_err(e: tokio::task::JoinError) -> CoreError {
     BackupError::Repository(e.to_string()).into()
 }
 
-/// Moves `from` to `to`, copying when they are on different drives.
-fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
+/// Puts the restored file `from` at `to`. The restored contents first go
+/// to a temporary file next to `to` (renamed, or copied and fsynced from
+/// another drive); only then does a changed `to` (`replace`) go to the
+/// trash and the temporary file take its name, never replacing anything.
+/// A failure before that leaves `to` untouched.
+fn put_restored(from: &Path, to: &Path, replace: bool) -> std::io::Result<()> {
+    use crate::fsx::{self, faults, faults::Op};
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    if std::fs::rename(from, to).is_ok() {
-        return Ok(());
+    let tmp = fsx::temp_path(to)?;
+    match fsx::rename_no_replace(from, &tmp) {
+        Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+            fsx::copy_file_durable(from, &tmp)?;
+        }
+        other => other?,
     }
-    std::fs::copy(from, to)?;
-    std::fs::remove_file(from)
+    let placed = (|| {
+        if replace {
+            faults::perform(Op::Trash, to, || {
+                trash::delete(to).map_err(|e| std::io::Error::other(e.to_string()))
+            })?;
+        }
+        fsx::rename_no_replace(&tmp, to)
+    })();
+    if placed.is_err() {
+        // Safe because it is our own temporary copy; the backup has it.
+        let _ = std::fs::remove_file(&tmp);
+    }
+    placed
 }
 
 /// Moves a file or folder to `to`, which must not exist. On another drive
@@ -598,15 +618,11 @@ impl Engine {
                 } else {
                     FileChange::Changed
                 };
-                match change {
-                    FileChange::Same => continue,
-                    FileChange::Changed => {
-                        trash::delete(&to)
-                            .map_err(|e| io_err(&to, std::io::Error::other(e.to_string())))?;
-                    }
-                    FileChange::Missing => {}
+                if change == FileChange::Same {
+                    continue;
                 }
-                move_file(&from, &to).map_err(|e| io_err(&to, e))?;
+                put_restored(&from, &to, change == FileChange::Changed)
+                    .map_err(|e| io_err(&to, e))?;
                 out.push(FileDiff { rel, change });
             }
             Ok(out)

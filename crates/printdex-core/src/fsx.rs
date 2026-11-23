@@ -107,6 +107,12 @@ pub fn copy_file_durable(from: &Path, to: &Path) -> io::Result<()> {
     sync_dir(parent_dir(to))
 }
 
+/// A fresh temporary name next to `path`, of the kind [`durable_write`]
+/// uses and [`sweep_temp_files`] removes.
+pub(crate) fn temp_path(path: &Path) -> io::Result<PathBuf> {
+    temp_sibling(path, TEMP_INFIX)
+}
+
 /// Infix of [`durable_write`]'s temporary files, which
 /// [`sweep_temp_files`] removes.
 const TEMP_INFIX: &str = ".tmp-";
