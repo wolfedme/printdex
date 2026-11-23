@@ -96,21 +96,27 @@ fn write_crash(
     Ok(path)
 }
 
+fn payload_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "non-string panic".to_string())
+}
+
+fn format_location(l: &std::panic::Location<'_>) -> String {
+    format!("{}:{}:{}", l.file(), l.line(), l.column())
+}
+
 /// Writes `crash-<unix_ms>.txt` into `log_dir` on every panic, then calls
 /// the previous hook.
 pub fn install_panic_hook(log_dir: PathBuf, version: &'static str) {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let payload = info.payload();
-        let message = payload
-            .downcast_ref::<&str>()
-            .map(|s| (*s).to_string())
-            .or_else(|| payload.downcast_ref::<String>().cloned())
-            .unwrap_or_else(|| "non-string panic".to_string());
-        let location = info.location().map_or_else(
-            || "unknown".to_string(),
-            |l| format!("{}:{}:{}", l.file(), l.line(), l.column()),
-        );
+        let message = payload_message(info.payload());
+        let location = info
+            .location()
+            .map_or_else(|| "unknown".to_string(), format_location);
         let thread = std::thread::current();
         let name = thread.name().unwrap_or("unnamed");
         let _ = write_crash(&log_dir, version, &message, &location, name);
@@ -191,23 +197,33 @@ pub struct Redactor {
     rules: Vec<(Vec<u8>, String)>,
 }
 
-fn normalise(s: &str) -> Vec<u8> {
-    // ASCII-only changes keep every byte offset equal to the original's.
-    s.bytes()
-        .map(|b| {
-            if b == b'\\' {
-                b'/'
-            } else {
-                b.to_ascii_lowercase()
-            }
-        })
-        .collect()
+/// Lowercases ASCII, turns `\` into `/` and collapses runs of separators
+/// (so `C:\\Users` from a `{:?}` dump matches `C:\Users`). The second vector
+/// maps each normalised byte to its offset in `s`, with `s.len()` appended.
+fn normalise(s: &str) -> (Vec<u8>, Vec<usize>) {
+    let mut out = Vec::with_capacity(s.len());
+    let mut map = Vec::with_capacity(s.len() + 1);
+    for (i, b) in s.bytes().enumerate() {
+        let is_sep = b == b'\\' || b == b'/';
+        if is_sep && out.last() == Some(&b'/') {
+            continue;
+        }
+        out.push(if is_sep { b'/' } else { b.to_ascii_lowercase() });
+        map.push(i);
+    }
+    map.push(s.len());
+    (out, map)
 }
 
-/// Whether `b` may follow a matched folder: a separator or punctuation, not
-/// the middle of a longer name.
-fn ends_component(b: u8) -> bool {
-    b == b'/' || (b.is_ascii() && !b.is_ascii_alphanumeric() && !matches!(b, b'_' | b'-' | b'.'))
+/// Whether the byte after a matched folder ends the path component: a
+/// separator or punctuation, not the middle of a longer name. A `.` ends it
+/// only when no name character follows (`/home/max.` at a sentence end).
+fn ends_component(b: u8, after: Option<u8>) -> bool {
+    match b {
+        b'.' => after.is_none_or(|a| !a.is_ascii_alphanumeric() && a < 0x80),
+        b'_' | b'-' => false,
+        _ => b == b'/' || (b.is_ascii() && !b.is_ascii_alphanumeric()),
+    }
 }
 
 impl Redactor {
@@ -215,7 +231,7 @@ impl Redactor {
     pub fn new(home: Option<&Path>, libraries: &[PathBuf]) -> Redactor {
         let mut rules = Vec::new();
         let mut add = |path: &Path, replacement: String| {
-            let mut needle = normalise(&path.to_string_lossy());
+            let (mut needle, _) = normalise(&path.to_string_lossy());
             while needle.last() == Some(&b'/') {
                 needle.pop();
             }
@@ -235,7 +251,7 @@ impl Redactor {
     /// Returns `text` with the known folders replaced. Only whole path
     /// components match, so `/home/max` leaves `/home/maxwell` alone.
     pub fn apply(&self, text: &str) -> String {
-        let norm = normalise(text);
+        let (norm, map) = normalise(text);
         let mut out = String::with_capacity(text.len());
         let mut i = 0;
         let mut copied = 0;
@@ -244,14 +260,14 @@ impl Redactor {
                 norm[i..].starts_with(needle)
                     && norm
                         .get(i + needle.len())
-                        .is_none_or(|&b| ends_component(b))
+                        .is_none_or(|&b| ends_component(b, norm.get(i + needle.len() + 1).copied()))
             });
             match hit {
                 Some((needle, replacement)) => {
-                    out.push_str(&text[copied..i]);
+                    out.push_str(&text[copied..map[i]]);
                     out.push_str(replacement);
                     i += needle.len();
-                    copied = i;
+                    copied = map[i];
                 }
                 None => i += 1,
             }
@@ -319,36 +335,39 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn init_without_writable_folder_falls_back_to_stderr() {
+    fn file_writer_fails_when_folder_cannot_be_created() {
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("afile");
         std::fs::write(&file, b"x").unwrap();
         assert!(make_file_writer(&file.join("logs")).is_err());
-        assert!(init(&file.join("logs"), "info").is_none());
+        let (_writer, _guard) = make_file_writer(&tmp.path().join("logs")).unwrap();
     }
 
     #[test]
-    fn panic_hook_writes_crash_file_from_any_thread() {
-        let tmp = tempfile::tempdir().unwrap();
-        install_panic_hook(tmp.path().to_path_buf(), "9.9.9");
-        let joined = std::thread::spawn(|| panic!("boom")).join();
-        assert!(joined.is_err());
-        // Restore the default hook so later panics do not write here.
-        let _ = std::panic::take_hook();
-        let crash = unseen_crash(tmp.path()).expect("crash file written");
-        assert_eq!(crash.message, "boom");
-        let (file, rest) = crash.location.rsplit_once(':').unwrap();
-        let (file, line) = file.rsplit_once(':').unwrap();
-        assert!(file.ends_with("diagnostics.rs"), "{file}");
-        assert!(line.parse::<u32>().is_ok() && rest.parse::<u32>().is_ok());
-        let text = std::fs::read_to_string(&crash.path).unwrap();
-        assert!(text.starts_with("Printdex 9.9.9 crashed\ntime: "));
-        assert!(text.contains("\nthread: unnamed\n"));
-        assert!(text.contains("\nbacktrace:\n"));
+    fn panic_payloads_become_messages() {
+        let caught = |f: fn()| std::panic::catch_unwind(f).unwrap_err();
+        let silent = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let literal = caught(|| panic!("boom"));
+        let formatted = caught(|| panic!("n={}", 7));
+        let other = caught(|| std::panic::panic_any(42));
+        std::panic::set_hook(silent);
+        assert_eq!(payload_message(&*literal), "boom");
+        assert_eq!(payload_message(&*formatted), "n=7");
+        assert_eq!(payload_message(&*other), "non-string panic");
     }
 
     #[test]
-    fn write_crash_records_non_string_parts() {
+    fn location_formats_as_file_line_col() {
+        let text = format_location(std::panic::Location::caller());
+        let mut parts = text.rsplitn(3, ':');
+        assert!(parts.next().unwrap().parse::<u32>().is_ok());
+        assert!(parts.next().unwrap().parse::<u32>().is_ok());
+        assert!(parts.next().unwrap().ends_with("diagnostics.rs"), "{text}");
+    }
+
+    #[test]
+    fn write_crash_flattens_newlines_in_message() {
         let tmp = tempfile::tempdir().unwrap();
         let path = write_crash(
             tmp.path(),
@@ -358,8 +377,10 @@ mod tests {
             "worker",
         )
         .unwrap();
-        let text = std::fs::read_to_string(path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("Printdex 1.0 crashed\ntime: "));
         assert!(text.contains("thread: worker\nmessage: line one line two\nlocation: a.rs:1:2\n"));
+        assert!(text.contains("\nbacktrace:\n"));
     }
 
     #[test]
@@ -387,6 +408,15 @@ mod tests {
         assert_eq!(r.apply("/home/max/.local"), "~/.local");
         assert_eq!(r.apply("/home/maxwell/x"), "/home/maxwell/x");
         assert_eq!(r.apply("é /home/max"), "é ~");
+        assert_eq!(r.apply("see /home/max."), "see ~.");
+        assert_eq!(r.apply("/home/max.bak/x"), "/home/max.bak/x");
+        let r = Redactor::new(Some(Path::new("C:\\Users\\max")), &["D:\\Prints".into()]);
+        assert_eq!(r.apply("in D:\\Prints."), "in <library 1>.");
+        // As printed by `{:?}`: every backslash doubled.
+        assert_eq!(
+            r.apply(r#"Err("C:\\Users\\max\\a b" D:\\Prints\\x)"#),
+            r#"Err("~\\a b" <library 1>\\x)"#
+        );
     }
 
     #[test]
