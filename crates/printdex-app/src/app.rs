@@ -221,7 +221,8 @@ pub struct App {
     pub crash: Option<CrashReport>,
     /// A startup note (a config file was set aside), shown once at boot.
     pub config_notice: Option<String>,
-    /// `settings.toml` is broken and couldn't be set aside: never save over it.
+    /// Never save over `settings.toml`: it is broken and couldn't be set
+    /// aside, or a data restore put it back and the restart is pending.
     pub settings_kept: bool,
     /// Likewise for `apps.toml`.
     pub apps_kept: bool,
@@ -1243,7 +1244,7 @@ impl App {
     /// Writes the settings file off the UI thread.
     pub(crate) fn save_settings(&self) -> Task<Message> {
         if self.settings_kept {
-            tracing::warn!("settings.toml is unreadable and was kept; not saving settings");
+            tracing::warn!("settings.toml is kept (unreadable, or restored); not saving settings");
             return Task::none();
         }
         let Some(dir) = self.options.config_dir.clone() else {

@@ -139,6 +139,8 @@ pub enum Rx {
     Back,
     Restore,
     Restored(Result<RestoredData, Arc<CoreError>>),
+    /// The restored settings files are back in the config folder.
+    SettingsBack,
     Restart,
     Pending(Result<Vec<Pending>, Arc<CoreError>>),
     Here(LibraryId),
@@ -413,16 +415,23 @@ impl App {
             }
             Rx::Restored(Ok(data)) => {
                 // Settings come back with the data; they take effect after
-                // the restart.
-                if let Some(dir) = &self.options.config_dir {
-                    for f in &data.settings_files {
-                        if let Some(name) = f.file_name()
-                            && let Err(e) = std::fs::copy(f, dir.join(name))
-                        {
-                            tracing::warn!(error = %e, "could not restore a settings file");
-                        }
-                    }
-                }
+                // the restart. Until then nothing may save over them.
+                self.settings_kept = true;
+                self.apps_kept = true;
+                let Some(dir) = self.options.config_dir.clone() else {
+                    return self.on_restore(Rx::SettingsBack);
+                };
+                let files = data.settings_files;
+                Task::perform(
+                    async move {
+                        let _ =
+                            tokio::task::spawn_blocking(move || put_back_settings(&files, &dir))
+                                .await;
+                    },
+                    |()| Message::Restore(Rx::SettingsBack),
+                )
+            }
+            Rx::SettingsBack => {
                 if let Some(w) = self.wizard() {
                     w.step = Step::Done;
                 }
@@ -598,6 +607,26 @@ impl App {
     }
 }
 
+/// Puts the settings files of a data restore back into `config_dir`, each
+/// written atomically; a file that can't be put back is logged.
+fn put_back_settings(files: &[PathBuf], config_dir: &std::path::Path) {
+    for f in files {
+        let Some(name) = f.file_name() else {
+            continue;
+        };
+        let r = std::fs::read(f).and_then(|bytes| {
+            printdex_core::fsx::durable_write(
+                &config_dir.join(name),
+                &bytes,
+                printdex_core::fsx::Durability::UserData,
+            )
+        });
+        if let Err(e) = r {
+            tracing::warn!(error = %e, file = %f.display(), "could not restore a settings file");
+        }
+    }
+}
+
 fn t_lib(key: &str, name: &str) -> String {
     crate::i18n::t_args(key, &[("library", crate::i18n::Arg::str(name.to_owned()))])
 }
@@ -660,6 +689,42 @@ mod tests {
             ..BackupConfig::default()
         });
         assert!(!c.offers_restore());
+    }
+
+    #[test]
+    fn restored_settings_are_put_back_and_never_saved_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let (staging, config) = (dir.path().join("staging"), dir.path().join("config"));
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(staging.join("settings.toml"), "theme = \"dark\"\n").unwrap();
+        std::fs::write(staging.join("apps.toml"), "[apps]\n").unwrap();
+        std::fs::write(config.join("settings.toml"), "old").unwrap();
+        let files = vec![staging.join("settings.toml"), staging.join("apps.toml")];
+
+        let mut a = App::new(crate::app::Options {
+            config_dir: Some(config.clone()),
+            ..crate::app::Options::in_memory(dir.path().join("data"))
+        });
+        a.restore.wizard = Some(Wizard::new());
+        let _ = a.on_restore(Rx::Restored(Ok(RestoredData {
+            settings_files: files.clone(),
+        })));
+        // From here until the restart nothing saves over the restored files.
+        assert!(a.settings_kept);
+        assert!(a.apps_kept);
+
+        put_back_settings(&files, &config);
+        assert_eq!(
+            std::fs::read_to_string(config.join("settings.toml")).unwrap(),
+            "theme = \"dark\"\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(config.join("apps.toml")).unwrap(),
+            "[apps]\n"
+        );
+        let _ = a.on_restore(Rx::SettingsBack);
+        assert_eq!(a.restore.wizard.as_ref().unwrap().step, Step::Done);
     }
 
     #[test]
