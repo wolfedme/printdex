@@ -1,7 +1,8 @@
 //! File action views: the confirm dialogs, the undo toast and the
 //! selection bar.
 
-use iced::widget::{Space, button, column, container, mouse_area, opaque, row, text, text_input};
+use super::focus::button;
+use iced::widget::{Space, column, container, mouse_area, opaque, row, text, text_input};
 use iced::{Alignment, Element, Length};
 
 use printdex_core::Material;

@@ -1,7 +1,9 @@
 //! Restore views: the "Restore from backup" wizard, the per-library
 //! question after a restore, and the model's "Restore from backup…" panel.
 
-use iced::widget::{Space, button, column, container, row, text, toggler};
+use super::focus::button;
+use super::focus::toggler;
+use iced::widget::{Space, column, container, row, text};
 use iced::{Alignment, Element, Length};
 use printdex_core::ModelDetail;
 use printdex_core::backup::{FileChange, SnapshotInfo};

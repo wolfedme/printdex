@@ -391,7 +391,7 @@ Desktop window only; native OS window decorations, which the mockup does not dra
 - **Library grid:** virtualized grid of model panes, five columns at the 1280px mock width, 16px row and 14px column gaps.
 - **List view:** the same models as a dense table inside one 14px pane, with a small opaque material thumbnail per row.
 - **Model:** header with breadcrumb, name and catalogue number, and actions; below, a main column (3D viewer, parts row, notes) and a 384px side column (recipe card, tags, details, print log).
-- **Log a print:** an inline panel replaces the side column, so the model stays visible.
+- **Log a print:** an inline panel replaces the side column, so the model stays visible. Its Save row is pinned to the bottom of the window over the side column, so Save never scrolls out of reach. A log filled in from the recipe folds the settings into one "Same settings as the recipe" line with summary chips and a Change button; they unfold on Change or when a setting is in error.
 - **Settings:** 200px section list and a body capped near 760px per setting row.
 
 Spacing scale: 2, 4, 6, 8, 12, 16, 20, 24, 32px.
@@ -435,20 +435,20 @@ Soft, consistent corners: 14px on panes (model panes, viewer, recipe card, log f
 - **Ghost:** no border or fill, `ink-2` text.
 
 ### Focus
-App-drawn: a 2px accent ring outside a 1px gap in the `ground` colour, on exactly one element at a time.
+App-drawn: a 2px accent ring outside a 1px gap in the `ground` colour, on exactly one element at a time. Tab and Shift+Tab move it through inputs, buttons, segments, chips and switches (iced can only focus text inputs, so `view/focus.rs` wraps the rest); Enter or Space presses the focused control. Focus only comes from the keyboard: a click never shows the ring, and a click or Escape drops it. Disabled controls are skipped.
 
 ### Chips
 - **Recipe chips:** full-round, `rule-soft` fill, 11px; mono only for measurements.
 - **Filter chips:** 10px corners, 24px, pane fill with `rule` border, grey key then value and a remove icon.
 
 ### Model pane (signature)
-Pane glass, bright 1px edge, 14px corners, 8px padding. Inside: an opaque preview in the material ramp on a `tray` well, a parts count when there is more than one file, the name (600, two lines max) with the catalogue number "№ 0412" in `ink-3` mono, recipe chips, and the last print as icon, word and date. Selected: Signal Wash fill plus a 2px accent ring. A preview still rendering shows a small "Rendering preview" label and never blocks the grid. The catalogue number is per library and never reused (Max confirmed 2026-11-17); search finds it as `412`, `0412` or `№ 412`.
+Pane glass, bright 1px edge, 14px corners, 8px padding. Inside: an opaque preview in the material ramp on a `tray` well, a parts count when there is more than one file, the name (600, two lines max) with the catalogue number "№ 0412" in `ink-3` mono, recipe chips, and the last print as icon, word and date. Selected (one model): Signal Wash fill plus a 2px accent ring. While several models are picked, the two split: picked panes take the Signal Wash and a check mark in a `primary` circle at the top left of the well, and the 2px ring alone marks the keyboard cursor, so "these are picked" never reads as "the cursor is here". List rows split the same way. Part tiles in the model view mark the part on show with a 2px `ink-2` edge, not the accent. A preview still rendering shows a small "Rendering preview" label and never blocks the grid. The catalogue number is per library and never reused (Max confirmed 2026-11-17); search finds it as `412`, `0412` or `№ 412`.
 
 ### Inputs / Fields
 - **Style:** 30px, 10px corners, `ground` fill, `rule` border; units in small mono `ink-3`.
 - **Focus:** the standard focus ring.
 - **Error:** `fail` border with a 2px `fail-soft` halo and a message that names the valid range.
-- **Outcome picker:** three-way segmented Success / Partial / Failed; the chosen one takes its status wash, colour and a 2px underline.
+- **Outcome picker:** three-way segmented Success / Partial / Failed; the chosen one takes its status wash, colour and border, never the accent. A new log starts with none chosen (S, P or F picks one, shown as a mono hint by the label); saving without one outlines the picker in `fail` and says what's missing.
 
 ### Navigation (sidebar)
 Groups: Libraries, Collections, Smart filters, Tags, with counts in tabular figures; scan progress and Settings at the foot. Rows 28px; hover `rail-hi`; active row Signal Wash with its icon in Signal Ink. Offline libraries show in `on-rail-2` with "Offline since …".

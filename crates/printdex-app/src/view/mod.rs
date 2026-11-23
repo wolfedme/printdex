@@ -4,6 +4,7 @@ mod backup;
 mod dropdown;
 mod empty;
 mod files;
+mod focus;
 mod grid;
 mod list;
 mod model;
@@ -21,7 +22,8 @@ mod widgets;
 
 pub use organize::notes_editor_id;
 
-use iced::widget::{Space, button, column, container, row, stack, text};
+use focus::button;
+use iced::widget::{Space, column, container, row, stack, text};
 use iced::{Alignment, Element, Length};
 
 use crate::app::{App, Boot, Message, Screen};
@@ -32,6 +34,7 @@ use crate::theme::{self, Palette};
 
 pub fn view(app: &App) -> Element<'_, Message> {
     let p = app.palette();
+    focus::set_accent(p.t.accent);
     match &app.boot {
         Boot::Opening => centered(
             p,

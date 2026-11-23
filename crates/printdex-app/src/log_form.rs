@@ -35,6 +35,7 @@ pub enum Field {
     Infill,
     Walls,
     Duration,
+    Outcome,
     Text,
 }
 
@@ -52,7 +53,9 @@ pub const REQUIRABLE: [(&str, &str); 6] = [
 #[derive(Debug)]
 pub struct LogForm {
     pub mode: FormMode,
-    pub outcome: AttemptResult,
+    /// How the print went; a new log starts with none picked so the
+    /// user never saves a success by accident.
+    pub outcome: Option<AttemptResult>,
     pub printer: String,
     pub date: String,
     pub material: String,
@@ -71,6 +74,9 @@ pub struct LogForm {
     pub photos: Vec<PathBuf>,
     /// Settings came from the recipe.
     pub prefilled: bool,
+    /// A prefilled log shows its settings folded into one summary line
+    /// until the user opens them to change something.
+    pub settings_open: bool,
     /// Recipe editor: required field names and the notes.
     pub required: BTreeSet<String>,
     pub recipe_notes: Vec<RecipeNote>,
@@ -252,7 +258,7 @@ impl LogForm {
     fn blank(mode: FormMode) -> LogForm {
         LogForm {
             mode,
-            outcome: AttemptResult::Success,
+            outcome: None,
             printer: String::new(),
             date: today(),
             material: String::new(),
@@ -269,6 +275,7 @@ impl LogForm {
             notes: text_editor::Content::new(),
             photos: Vec::new(),
             prefilled: false,
+            settings_open: false,
             required: BTreeSet::new(),
             recipe_notes: Vec::new(),
             new_note: String::new(),
@@ -321,7 +328,7 @@ impl LogForm {
     pub fn edit(a: &Attempt) -> LogForm {
         let mut f = LogForm::blank(FormMode::Edit(a.id));
         f.fill(&a.settings);
-        f.outcome = a.result;
+        f.outcome = Some(a.result);
         f.printer = a.settings.printer.clone().unwrap_or_default();
         f.date = date_text(a.printed_at);
         f.duration = a.duration_min.map(format_duration).unwrap_or_default();
@@ -487,6 +494,31 @@ impl LogForm {
         }
     }
 
+    /// The settings fields fold away: a new log filled in from the
+    /// recipe, not opened, with no setting in error.
+    pub fn settings_folded(&self) -> bool {
+        self.mode == FormMode::Log
+            && self.prefilled
+            && !self.settings_open
+            && !matches!(
+                self.error,
+                Some((
+                    Field::Layer
+                        | Field::Nozzle
+                        | Field::Bed
+                        | Field::Hotend
+                        | Field::Infill
+                        | Field::Walls,
+                    _
+                ))
+            )
+    }
+
+    fn outcome(&self) -> Result<AttemptResult, (Field, String)> {
+        self.outcome
+            .ok_or_else(|| (Field::Outcome, t("form-error-outcome")))
+    }
+
     fn notes_text(&self) -> String {
         self.notes.text().trim_end().to_owned()
     }
@@ -495,9 +527,10 @@ impl LogForm {
     pub fn new_attempt(&self) -> Result<NewAttempt, (Field, String)> {
         let printed_at =
             parse_date(&self.date).ok_or_else(|| (Field::Date, t("form-error-date")))?;
+        let result = self.outcome()?;
         Ok(NewAttempt {
             printed_at,
-            result: self.outcome,
+            result,
             settings: self.settings()?,
             duration_min: self.duration_min()?,
             notes: self.notes_text(),
@@ -512,9 +545,10 @@ impl LogForm {
         } else {
             parse_date(&self.date).ok_or_else(|| (Field::Date, t("form-error-date")))?
         };
+        let result = self.outcome()?;
         Ok(Attempt {
             printed_at,
-            result: self.outcome,
+            result,
             settings: self.settings()?,
             duration_min: self.duration_min()?,
             notes: self.notes_text(),
@@ -569,8 +603,13 @@ mod tests {
 
     #[test]
     fn form_prefills_from_recipe() {
-        let f = LogForm::log(Some(&recipe()), Some("Voron"));
+        let mut f = LogForm::log(Some(&recipe()), Some("Voron"));
         assert!(f.prefilled);
+        // The recipe's settings fold into one line until opened.
+        assert!(f.settings_folded());
+        f.settings_open = true;
+        assert!(!f.settings_folded());
+        f.outcome = Some(AttemptResult::Success);
         assert_eq!(f.material, "PETG");
         assert_eq!(f.layer, "0.20");
         assert_eq!(f.nozzle, "0.4");
@@ -591,6 +630,10 @@ mod tests {
     #[test]
     fn form_rejects_out_of_range_with_message() {
         let mut f = LogForm::log(Some(&recipe()), None);
+        // Nothing is picked until the user says how it went.
+        assert_eq!(f.outcome, None);
+        assert_eq!(f.new_attempt().unwrap_err().0, Field::Outcome);
+        f.outcome = Some(AttemptResult::Failed);
         f.bed = "850".into();
         let (field, msg) = f.new_attempt().unwrap_err();
         assert_eq!(field, Field::Bed);
@@ -645,7 +688,7 @@ mod tests {
         };
         let mut f = LogForm::edit(&a);
         assert_eq!(f.duration, "1 h 30 m");
-        f.outcome = AttemptResult::Partial;
+        f.outcome = Some(AttemptResult::Partial);
         let b = f.updated(&a).unwrap();
         assert_eq!(b.printed_at, a.printed_at);
         assert_eq!(b.result, AttemptResult::Partial);

@@ -57,10 +57,19 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
 fn pane<'a>(app: &App, p: Palette, m: &GridMetrics, hit: &ModelHit) -> Element<'a, Message> {
     let hovered = app.hovered == Some(hit.id);
     let motion = &app.motion;
-    let selection = if !app.files.picked.is_empty() {
-        f32::from(u8::from(app.picked(hit.id)))
+    // One model selected: wash and ring together. Several picked: the
+    // wash and a check mark show what's picked, the ring alone shows the
+    // keyboard cursor (DESIGN.md "Model pane").
+    let picking = !app.files.picked.is_empty();
+    let picked = picking && app.picked(hit.id);
+    let (wash, ring) = if picking {
+        (
+            f32::from(u8::from(picked)),
+            f32::from(u8::from(app.selected == Some(hit.id))),
+        )
     } else {
-        motion.selection(hit.id, app.selected)
+        let s = motion.selection(hit.id, app.selected);
+        (s, s)
     };
     let inner_w = (m.pane_width - 2.0 * PANE_PADDING - 2.0 * theme::S5).max(0.0);
     let inner_h = (m.well_height - 2.0 * theme::S5).max(0.0);
@@ -83,6 +92,16 @@ fn pane<'a>(app: &App, p: Palette, m: &GridMetrics, hit: &ModelHit) -> Element<'
     ]
     .width(Length::Fill)
     .height(m.well_height);
+    if picked {
+        well = well.push(
+            container(
+                container(icons::icon(Icon::Check, theme::ICON_CHIP, p.t.on_primary))
+                    .padding(3)
+                    .style(move |_| p.check_badge()),
+            )
+            .padding(theme::S3),
+        );
+    }
     if hit.part_count > 1 {
         let n = u64::from(hit.part_count);
         well = well.push(
@@ -157,7 +176,7 @@ fn pane<'a>(app: &App, p: Palette, m: &GridMetrics, hit: &ModelHit) -> Element<'
         .width(m.pane_width)
         .height(m.row_height)
         .clip(true)
-        .style(move |_| p.pane_fade(selection, hovered));
+        .style(move |_| p.pane_look(wash, ring, hovered));
     let card = container(card).padding(iced::Padding {
         top: motion.sink(id),
         ..iced::Padding::ZERO

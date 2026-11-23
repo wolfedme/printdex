@@ -1,7 +1,9 @@
 //! Settings › Sync, the sidebar's sync line with its popover, and the
 //! model view's "Edited elsewhere" list.
 
-use iced::widget::{Space, button, column, container, row, text, text_input, toggler};
+use super::focus::button;
+use super::focus::toggler;
+use iced::widget::{Space, column, container, row, text, text_input};
 use iced::{Alignment, Element, Length};
 use printdex_core::ModelId;
 use printdex_core::db::SpaceKind;

@@ -439,29 +439,41 @@ impl Palette {
         }
     }
 
-    /// Model pane part way into its selected look (`amount` 0..=1), for
-    /// the selection cross-fade.
-    pub fn pane_fade(&self, amount: f32, hovered: bool) -> container::Style {
-        if amount <= 0.0 {
-            return self.pane(false, hovered);
-        }
-        if amount >= 1.0 {
-            return self.pane(true, hovered);
-        }
-        let off = self.pane(false, hovered);
-        let on = self.pane(true, hovered);
-        let bg = |s: &container::Style| match s.background {
+    /// Model pane with the wash and the ring set apart (each `0..=1`).
+    /// While several models are picked, the wash and a check mark mark
+    /// the picked ones and the ring alone marks the keyboard cursor, so
+    /// "these are picked" never reads as "the cursor is here".
+    pub fn pane_look(&self, wash: f32, ring: f32, hovered: bool) -> container::Style {
+        let base = self.pane(false, hovered);
+        let bg = match base.background {
             Some(Background::Color(c)) => c,
-            _ => Color::TRANSPARENT,
+            _ => self.t.surface,
         };
+        let ring = ring.clamp(0.0, 1.0);
         container::Style {
-            background: Some(lerp(bg(&off), bg(&on), amount).into()),
+            background: Some(lerp(bg, self.t.accent_soft, wash.clamp(0.0, 1.0)).into()),
             border: Border {
-                color: lerp(off.border.color, on.border.color, amount),
-                width: off.border.width + (on.border.width - off.border.width) * amount,
+                color: lerp(self.n.edge, self.t.accent, ring),
+                width: 1.0 + ring,
                 radius: RADIUS_PANE.into(),
             },
-            ..on
+            ..base
+        }
+    }
+
+    /// Part tile part way into its current look (`amount` 0..=1): an ink
+    /// edge, not the accent, because the accent belongs to selection and
+    /// focus and the tile only says which part the viewer shows.
+    pub fn part_tile(&self, amount: f32, hovered: bool) -> container::Style {
+        let base = self.pane(false, hovered);
+        let amount = amount.clamp(0.0, 1.0);
+        container::Style {
+            border: Border {
+                color: lerp(self.n.edge, self.n.ink_2, amount),
+                width: 1.0 + amount,
+                radius: RADIUS_PANE.into(),
+            },
+            ..base
         }
     }
 
@@ -499,21 +511,31 @@ impl Palette {
         }
     }
 
-    /// A list row part way into its selected look (`amount` 0..=1).
-    pub fn list_row_fade(&self, amount: f32, hovered: bool) -> container::Style {
+    /// A list row: `wash` fills it (selected or picked), `ring` outlines
+    /// it (the keyboard cursor while several rows are picked).
+    pub fn list_row_look(&self, wash: f32, ring: f32, hovered: bool) -> container::Style {
         let base = if hovered {
             self.n.rule_soft
         } else {
             Color::TRANSPARENT
         };
-        let bg = if amount <= 0.0 {
+        let bg = if wash <= 0.0 {
             base
         } else {
-            lerp(base, self.t.accent_soft, amount)
+            lerp(base, self.t.accent_soft, wash.clamp(0.0, 1.0))
         };
+        let ring = ring.clamp(0.0, 1.0);
         container::Style {
             background: (bg.a > 0.0).then(|| bg.into()),
             text_color: Some(self.n.ink),
+            border: Border {
+                color: Color {
+                    a: self.t.accent.a * ring,
+                    ..self.t.accent
+                },
+                width: 2.0 * ring,
+                radius: RADIUS_CONTROL.into(),
+            },
             ..container::Style::default()
         }
     }
@@ -649,6 +671,19 @@ impl Palette {
                 color: self.status.fail,
                 width: 1.0,
                 radius: RADIUS_CONTROL.into(),
+            },
+            ..container::Style::default()
+        }
+    }
+
+    /// Check mark on a picked model: Ink on Signal in a primary circle.
+    pub fn check_badge(&self) -> container::Style {
+        container::Style {
+            background: Some(self.t.primary.into()),
+            text_color: Some(self.t.on_primary),
+            border: Border {
+                radius: RADIUS_CHIP.into(),
+                ..Border::default()
             },
             ..container::Style::default()
         }

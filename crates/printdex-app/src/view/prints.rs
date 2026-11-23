@@ -1,8 +1,9 @@
 //! Recipe card, print log and the "Log a print" form (DESIGN.md "Recipe
 //! card and print log").
 
+use super::focus::button;
 use iced::widget::{
-    Space, button, column, container, image, mouse_area, row, text, text_editor, text_input,
+    Space, column, container, image, mouse_area, row, text, text_editor, text_input,
 };
 use iced::{Alignment, Color, Element, Length, Padding, keyboard};
 use printdex_core::{
@@ -696,7 +697,7 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
         let mut seg = row![].spacing(theme::S1);
         for o in outcomes {
             let (icon, word, color) = outcome(p, o);
-            let on = f.outcome == o;
+            let on = f.outcome == Some(o);
             seg = seg.push(
                 button(
                     row![
@@ -709,26 +710,52 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
                 .width(Length::Fill)
                 .padding([4.0, theme::S4])
                 .style(move |_, status| {
-                    let mut s = p.segment(on, status);
+                    // The chosen outcome takes its status wash and colour
+                    // (DESIGN.md "Outcome picker"), never the accent.
+                    let mut s = p.segment(false, status);
                     if on {
+                        let wash = match o {
+                            AttemptResult::Success => p.status.ok_soft,
+                            AttemptResult::Partial => p.status.partial_soft,
+                            AttemptResult::Failed => p.status.fail_soft,
+                        };
+                        s.background = Some(wash.into());
+                        s.text_color = color;
                         s.border.color = color;
                         s.border.width = 1.5;
                     }
                     s
                 })
+                .radius(theme::RADIUS_CONTROL - 3.0)
                 .on_press(pr(Pr::Outcome(o))),
             );
         }
+        let missing = has_error(f, Field::Outcome);
         body = body.push(
             column![
-                text(t("form-outcome"))
-                    .size(theme::SIZE_DATA)
-                    .color(p.n.ink_2),
-                container(seg).padding(2).style(move |_| p.segmented()),
+                row![
+                    text(t("form-outcome"))
+                        .size(theme::SIZE_DATA)
+                        .color(p.n.ink_2),
+                    Space::new().width(Length::Fill),
+                    text(t("form-outcome-keys"))
+                        .size(theme::SIZE_DATA)
+                        .font(theme::FONT_DATA)
+                        .color(p.n.ink_3),
+                ]
+                .align_y(Alignment::Center),
+                container(seg).padding(2).style(move |_| {
+                    let mut s = p.segmented();
+                    if missing {
+                        s.border.color = p.status.fail;
+                        s.border.width = 1.5;
+                    }
+                    s
+                }),
             ]
             .spacing(theme::S1),
         );
-        if f.prefilled {
+        if f.prefilled && !f.settings_folded() {
             body = body.push(
                 row![
                     icons::icon(Icon::Sparkle, theme::ICON_DENSE, p.t.accent_ink),
@@ -779,149 +806,158 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
         }));
     }
 
-    // Material.
-    body = body.push(
-        row![
-            field(
-                p,
-                t("form-material"),
-                Input::Material,
-                &f.material,
-                &f.hint(Input::Material),
-                None,
-                false
-            ),
-            field(
-                p,
-                t("form-filament"),
-                Input::Filament,
-                &f.filament,
-                &f.hint(Input::Filament),
-                None,
-                false
-            ),
-        ]
-        .spacing(theme::S4),
-    );
-    let known: Vec<String> = Material::KNOWN
-        .iter()
-        .map(|m| m.label().to_owned())
-        .filter(|m| !m.eq_ignore_ascii_case(f.material.trim()))
-        .collect();
-    body = body.push(suggestion_row(p, known, |s| {
-        pr(Pr::Input(Input::Material, s))
-    }));
-
-    // Numbers.
-    body = body.push(
-        row![
-            field(
-                p,
-                t("form-layer"),
-                Input::Layer,
-                &f.layer,
-                &f.hint(Input::Layer),
-                Some("mm"),
-                has_error(f, Field::Layer)
-            ),
-            field(
-                p,
-                t("form-nozzle"),
-                Input::Nozzle,
-                &f.nozzle,
-                &f.hint(Input::Nozzle),
-                Some("mm"),
-                has_error(f, Field::Nozzle)
-            ),
-            field(
-                p,
-                t("form-infill"),
-                Input::Infill,
-                &f.infill,
-                &f.hint(Input::Infill),
-                Some("%"),
-                has_error(f, Field::Infill)
-            ),
-        ]
-        .spacing(theme::S4),
-    );
-    body = body.push(
-        row![
-            field(
-                p,
-                t("form-bed"),
-                Input::Bed,
-                &f.bed,
-                &f.hint(Input::Bed),
-                Some("°C"),
-                has_error(f, Field::Bed)
-            ),
-            field(
-                p,
-                t("form-hotend"),
-                Input::Hotend,
-                &f.hotend,
-                &f.hint(Input::Hotend),
-                Some("°C"),
-                has_error(f, Field::Hotend)
-            ),
-            field(
-                p,
-                t("form-walls"),
-                Input::Walls,
-                &f.walls,
-                &f.hint(Input::Walls),
-                None,
-                has_error(f, Field::Walls)
-            ),
-        ]
-        .spacing(theme::S4),
-    );
-    let supports = f.supports;
-    // On a part, "not set" means "as the whole model".
-    let unset = if f.scope.is_some() {
-        t("form-as-model")
+    // Material and the numbers. A log filled in from the recipe folds
+    // them into one summary line: most prints follow the recipe, and the
+    // outcome and notes are what the user came to write.
+    if f.settings_folded() {
+        body = body.push(folded_settings(p, f));
     } else {
-        t("form-unset")
-    };
-    body = body.push(
-        column![
-            text(t("form-supports"))
-                .size(theme::SIZE_DATA)
-                .color(p.n.ink_2),
-            segmented(
-                p,
-                &[
-                    (None, None, Some(unset.clone())),
-                    (Some(Supports::None), None, Some(t("supports-none"))),
-                    (Some(Supports::Normal), None, Some(t("supports-normal"))),
-                    (Some(Supports::Tree), None, Some(t("supports-tree"))),
-                ],
-                supports,
-                |s| pr(Pr::Supports(s)),
-            ),
-        ]
-        .spacing(theme::S1),
-    );
-    body = body.push(
-        column![
-            text(t("form-adhesion"))
-                .size(theme::SIZE_DATA)
-                .color(p.n.ink_2),
-            segmented(
-                p,
-                &[
-                    (None, None, Some(unset.clone())),
-                    (Some(Adhesion::Skirt), None, Some(t("adhesion-skirt"))),
-                    (Some(Adhesion::Brim), None, Some(t("adhesion-brim"))),
-                    (Some(Adhesion::Raft), None, Some(t("adhesion-raft"))),
-                ],
-                f.adhesion,
-                |a| pr(Pr::Adhesion(a)),
-            ),
-        ]
-        .spacing(theme::S1),
-    );
+        let mut settings = column![].spacing(theme::S5);
+        // Material.
+        settings = settings.push(
+            row![
+                field(
+                    p,
+                    t("form-material"),
+                    Input::Material,
+                    &f.material,
+                    &f.hint(Input::Material),
+                    None,
+                    false
+                ),
+                field(
+                    p,
+                    t("form-filament"),
+                    Input::Filament,
+                    &f.filament,
+                    &f.hint(Input::Filament),
+                    None,
+                    false
+                ),
+            ]
+            .spacing(theme::S4),
+        );
+        let known: Vec<String> = Material::KNOWN
+            .iter()
+            .map(|m| m.label().to_owned())
+            .filter(|m| !m.eq_ignore_ascii_case(f.material.trim()))
+            .collect();
+        settings = settings.push(suggestion_row(p, known, |s| {
+            pr(Pr::Input(Input::Material, s))
+        }));
+
+        // Numbers.
+        settings = settings.push(
+            row![
+                field(
+                    p,
+                    t("form-layer"),
+                    Input::Layer,
+                    &f.layer,
+                    &f.hint(Input::Layer),
+                    Some("mm"),
+                    has_error(f, Field::Layer)
+                ),
+                field(
+                    p,
+                    t("form-nozzle"),
+                    Input::Nozzle,
+                    &f.nozzle,
+                    &f.hint(Input::Nozzle),
+                    Some("mm"),
+                    has_error(f, Field::Nozzle)
+                ),
+                field(
+                    p,
+                    t("form-infill"),
+                    Input::Infill,
+                    &f.infill,
+                    &f.hint(Input::Infill),
+                    Some("%"),
+                    has_error(f, Field::Infill)
+                ),
+            ]
+            .spacing(theme::S4),
+        );
+        settings = settings.push(
+            row![
+                field(
+                    p,
+                    t("form-bed"),
+                    Input::Bed,
+                    &f.bed,
+                    &f.hint(Input::Bed),
+                    Some("°C"),
+                    has_error(f, Field::Bed)
+                ),
+                field(
+                    p,
+                    t("form-hotend"),
+                    Input::Hotend,
+                    &f.hotend,
+                    &f.hint(Input::Hotend),
+                    Some("°C"),
+                    has_error(f, Field::Hotend)
+                ),
+                field(
+                    p,
+                    t("form-walls"),
+                    Input::Walls,
+                    &f.walls,
+                    &f.hint(Input::Walls),
+                    None,
+                    has_error(f, Field::Walls)
+                ),
+            ]
+            .spacing(theme::S4),
+        );
+        let supports = f.supports;
+        // On a part, "not set" means "as the whole model".
+        let unset = if f.scope.is_some() {
+            t("form-as-model")
+        } else {
+            t("form-unset")
+        };
+        settings = settings.push(
+            column![
+                text(t("form-supports"))
+                    .size(theme::SIZE_DATA)
+                    .color(p.n.ink_2),
+                segmented(
+                    p,
+                    &[
+                        (None, None, Some(unset.clone())),
+                        (Some(Supports::None), None, Some(t("supports-none"))),
+                        (Some(Supports::Normal), None, Some(t("supports-normal"))),
+                        (Some(Supports::Tree), None, Some(t("supports-tree"))),
+                    ],
+                    supports,
+                    |s| pr(Pr::Supports(s)),
+                ),
+            ]
+            .spacing(theme::S1),
+        );
+        settings = settings.push(
+            column![
+                text(t("form-adhesion"))
+                    .size(theme::SIZE_DATA)
+                    .color(p.n.ink_2),
+                segmented(
+                    p,
+                    &[
+                        (None, None, Some(unset.clone())),
+                        (Some(Adhesion::Skirt), None, Some(t("adhesion-skirt"))),
+                        (Some(Adhesion::Brim), None, Some(t("adhesion-brim"))),
+                        (Some(Adhesion::Raft), None, Some(t("adhesion-raft"))),
+                    ],
+                    f.adhesion,
+                    |a| pr(Pr::Adhesion(a)),
+                ),
+            ]
+            .spacing(theme::S1),
+        );
+        body = body.push(settings);
+    }
 
     if is_recipe && f.scope.is_some() {
         body = body.push(row![widgets::icon_button(
@@ -1006,16 +1042,15 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
                 t("form-duration"),
                 Input::Duration,
                 &f.duration,
-                &f.hint(Input::Duration),
+                &t("form-duration-hint"),
                 None,
                 has_error(f, Field::Duration)
             )]
             .push(Space::new().width(Length::FillPortion(1))),
         );
-        let label = if f.outcome == AttemptResult::Success {
-            t("form-notes")
-        } else {
-            t("form-what-went-wrong")
+        let label = match f.outcome {
+            Some(AttemptResult::Partial | AttemptResult::Failed) => t("form-what-went-wrong"),
+            _ => t("form-notes"),
         };
         body = body.push(
             column![
@@ -1092,36 +1127,6 @@ pub fn form<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message
             .align_y(Alignment::Center),
         );
     }
-
-    let save_label = match f.mode {
-        FormMode::Log => t("form-save-attempt"),
-        _ => t("action-save"),
-    };
-    let mut save = button(
-        row![
-            icons::icon(Icon::Check, theme::ICON_DENSE, p.t.on_primary),
-            text(save_label).size(theme::SIZE_BODY),
-        ]
-        .spacing(theme::S2)
-        .align_y(Alignment::Center),
-    )
-    .padding([6.0, theme::S5])
-    .style(move |_, status| p.button_primary(status));
-    if !app.prints.saving {
-        save = save.on_press(pr(Pr::Save));
-    }
-    let foot = row![
-        super::statusbar::hint(p, "Ctrl Enter", t("form-key-save")),
-        Space::new().width(Length::Fill),
-        button(text(t("action-cancel")).size(theme::SIZE_BODY))
-            .padding([6.0, theme::S5])
-            .style(move |_, status| p.button_ghost(status))
-            .on_press(pr(Pr::Close)),
-        save,
-    ]
-    .spacing(theme::S4)
-    .align_y(Alignment::Center);
-    body = body.push(widgets::hairline(p)).push(foot);
 
     let (offset, alpha) = app.motion.panel();
     container(
@@ -1259,4 +1264,94 @@ pub fn status_line<'a>(
         );
     }
     r.into()
+}
+
+/// The form's Save and Cancel row. The model view pins it to the bottom
+/// of the window, so Save never scrolls out of reach.
+pub fn form_foot<'a>(app: &'a App, p: Palette, f: &'a LogForm) -> Element<'a, Message> {
+    let save_label = match f.mode {
+        FormMode::Log => t("form-save-attempt"),
+        _ => t("action-save"),
+    };
+    let mut save = button(
+        row![
+            icons::icon(Icon::Check, theme::ICON_DENSE, p.t.on_primary),
+            text(save_label).size(theme::SIZE_BODY),
+        ]
+        .spacing(theme::S2)
+        .align_y(Alignment::Center),
+    )
+    .padding([6.0, theme::S5])
+    .style(move |_, status| p.button_primary(status));
+    if !app.prints.saving {
+        save = save.on_press(pr(Pr::Save));
+    }
+    let foot = row![
+        super::statusbar::hint(p, "Ctrl Enter", t("form-key-save")),
+        Space::new().width(Length::Fill),
+        button(text(t("action-cancel")).size(theme::SIZE_BODY))
+            .padding([6.0, theme::S5])
+            .style(move |_, status| p.button_ghost(status))
+            .on_press(pr(Pr::Close)),
+        save,
+    ]
+    .spacing(theme::S4)
+    .align_y(Alignment::Center);
+
+    let (offset, alpha) = app.motion.panel();
+    container(
+        container(foot)
+            .padding([theme::S4, theme::S6])
+            .width(Length::Fill)
+            .style(move |_| {
+                let mut s = p.pane(false, false);
+                s.background = Some(
+                    Color {
+                        a: alpha,
+                        ..p.t.surface
+                    }
+                    .into(),
+                );
+                s
+            }),
+    )
+    .padding(Padding {
+        left: offset,
+        ..Padding::ZERO
+    })
+    .into()
+}
+
+/// One line standing in for the settings of a log filled in from the
+/// recipe: what will be saved, and a way to change it.
+fn folded_settings<'a>(p: Palette, f: &'a LogForm) -> Element<'a, Message> {
+    let summary = f
+        .settings()
+        .map(|s| setting_chips(p, &s, None))
+        .unwrap_or_else(|_| Space::new().into());
+    button(
+        column![
+            row![
+                icons::icon(Icon::Sparkle, theme::ICON_DENSE, p.t.accent_ink),
+                text(t("form-settings-folded"))
+                    .size(theme::SIZE_CAPTION)
+                    .color(p.n.ink_2)
+                    .width(Length::Fill),
+                text(t("form-settings-change"))
+                    .size(theme::SIZE_CAPTION)
+                    .font(theme::FONT_MEDIUM)
+                    .color(p.n.ink),
+                icons::icon(Icon::ChevronDown, theme::ICON_DENSE, p.n.ink_2),
+            ]
+            .spacing(theme::S3)
+            .align_y(Alignment::Center),
+            summary,
+        ]
+        .spacing(theme::S3),
+    )
+    .width(Length::Fill)
+    .padding([theme::S4, theme::S4])
+    .style(move |_, status| p.button_secondary(status))
+    .on_press(pr(Pr::ShowSettings))
+    .into()
 }

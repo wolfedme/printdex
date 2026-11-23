@@ -1,8 +1,8 @@
 //! Settings › Backup and the sidebar's backup line.
 
-use iced::widget::{
-    Space, button, checkbox, column, container, progress_bar, row, text, text_input, toggler,
-};
+use super::focus::button;
+use super::focus::toggler;
+use iced::widget::{Space, checkbox, column, container, progress_bar, row, text, text_input};
 use iced::{Alignment, Element, Length};
 use printdex_core::backup::{Attention, ModelSchedule, Target};
 
@@ -244,14 +244,14 @@ pub(super) fn check<'a>(
     on: bool,
     msg: impl Fn(bool) -> Message + 'a,
 ) -> Element<'a, Message> {
-    checkbox(on)
+    let check = checkbox(on)
         .label(label)
         .size(16)
         .text_size(theme::SIZE_BODY)
         .spacing(theme::S3)
         .style(move |_, status| p.checkbox(status))
-        .on_toggle(msg)
-        .into()
+        .on_toggle(msg);
+    super::focus::wrap(check, 4.0)
 }
 
 fn library_name(app: &App, id: printdex_core::LibraryId) -> String {
