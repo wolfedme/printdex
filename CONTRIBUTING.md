@@ -41,6 +41,8 @@ compression run several times slower.
 
 ### Branches and releases
 
+Step-by-step guide: [docs/releasing.md](docs/releasing.md).
+
 - `dev` is the default branch. Feature and fix PRs go into `dev`; CI runs
   the Linux job (fmt, clippy, tests) on the PR and again on the push to
   `dev`, which also saves the build cache every PR starts from.
