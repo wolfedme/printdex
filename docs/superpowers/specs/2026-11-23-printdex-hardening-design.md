@@ -36,7 +36,8 @@ fix).
 ## Non-goals
 
 - New features. A missing feature only counts if its absence causes one of the failures
-  above. For example, a crash log counts, and a log viewer in the UI doesn't.
+  above. For example, a crash log counts, and a log viewer in the UI doesn't. The one
+  exception is "Report a bug" (pass 2), which Max asked for.
 - Telemetry or crash uploads. Records stay on the user's machine (local-first).
 - Rewriting subsystems that already pass the sweep.
 - Upstream fixes to iced, rustic or other dependencies, beyond working around them.
@@ -159,6 +160,16 @@ To build:
   `logs/crash-<time>.txt`. On the next start, the app shows a small notice that it
   closed unexpectedly last time, with a "Show file" action. The notice adds no upload
   and no dialog loop.
+- **Report a bug** (Max asked for it, 2026-11-23). It sits in Settings › About and in
+  the crash notice, and offers two actions:
+  - *Open a GitHub issue*: opens the browser on a new-issue page prefilled with the
+    version, OS, renderer (GPU or CPU) and the last crash's message and location.
+  - *Save diagnostics…*: saves a zip of the recent logs, crash files and a system
+    summary, for people without a GitHub account.
+
+  Nothing is sent automatically. Home-folder and library paths in what gets shared are
+  replaced with placeholders. Pending Max's pick: GitHub issue, diagnostics file, or
+  both (both recommended).
 - An audit of every non-test `unwrap`, `expect`, slice index and `as` cast in app and
   core code. Each one is either proven safe with a comment or replaced with handling.
   There are about 400 `unwrap` calls in total, most of them in tests.
