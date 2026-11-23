@@ -16,9 +16,10 @@
 //! - [`Action::Instead`] runs the closure *in place of* the operation, at
 //!   call sites that go through [`perform`] (moving to the trash and
 //!   removing, in file actions), so tests can keep the system trash out of
-//!   it. Where a call site only uses [`check`], it acts like `Before` and
-//!   the closure's result is ignored. A `Fail` firing on the same operation
-//!   wins over it.
+//!   it. Where a call site only uses [`check`], it still counts and
+//!   reports as fired, but is dropped: the closure never runs and the real
+//!   operation runs as usual. A `Fail` firing on the same operation wins
+//!   over it.
 //! - Dropping the [`FaultGuard`] disarms it.
 //!
 //! Which path each operation passes:
@@ -91,7 +92,8 @@ mod armed {
         Before(Box<dyn Fn(&Path) + Send + Sync>),
         /// The closure runs with the operation's path *instead of* the
         /// operation, and its result is the operation's, at call sites that
-        /// use [`perform`]; elsewhere it acts like `Before`.
+        /// use [`perform`]; elsewhere ([`check`] only) it is dropped: the
+        /// closure never runs and the operation runs as usual.
         Instead(Box<InsteadFn>),
     }
 
