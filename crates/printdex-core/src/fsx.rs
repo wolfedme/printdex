@@ -52,7 +52,7 @@ pub enum Durability {
 ///
 /// Fault injection: [`Op::Write`] and then [`Op::Rename`], both with `path`.
 pub fn durable_write(path: &Path, bytes: &[u8], d: Durability) -> io::Result<()> {
-    let tmp = temp_sibling(path)?;
+    let tmp = temp_sibling(path, TEMP_INFIX)?;
     let dir = parent_dir(path);
 
     let file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
@@ -84,14 +84,20 @@ fn write_then_rename(
     fs::rename(tmp, path)
 }
 
-/// Room for `<name>` in `.<name>.tmp-<32 hex>` within a 255-byte name.
-const TEMP_NAME_PART_MAX: usize = 255 - ".".len() - ".tmp-".len() - 32;
+/// Infix of [`durable_write`]'s temporary files, which
+/// [`sweep_temp_files`] removes.
+const TEMP_INFIX: &str = ".tmp-";
 
-/// A fresh `.<name>.tmp-<uuid v7 simple>` next to `path`, with `<name>` cut
-/// to [`TEMP_NAME_PART_MAX`] bytes on a character boundary. A name that
-/// isn't valid Unicode is converted lossily; the temporary name only has to
-/// be unique and recognisable to [`sweep_temp_files`].
-fn temp_sibling(path: &Path) -> io::Result<PathBuf> {
+/// Infix of the name a case-only rename parks the user's own entry under
+/// between its two steps. [`sweep_temp_files`] never matches it: a leftover
+/// is the user's file or folder, not a temporary.
+const CASE_INFIX: &str = ".case-";
+
+/// A fresh `.<name><infix><uuid v7 simple>` next to `path`, with `<name>`
+/// cut on a character boundary so the whole name stays within 255 bytes. A
+/// name that isn't valid Unicode is converted lossily; the name only has to
+/// be unique and recognisable by its infix.
+fn temp_sibling(path: &Path, infix: &str) -> io::Result<PathBuf> {
     let name = path.file_name().ok_or_else(|| {
         io::Error::new(
             ErrorKind::InvalidInput,
@@ -99,12 +105,13 @@ fn temp_sibling(path: &Path) -> io::Result<PathBuf> {
         )
     })?;
     let name = name.to_string_lossy();
-    let mut end = name.len().min(TEMP_NAME_PART_MAX);
+    let max = 255 - ".".len() - infix.len() - 32;
+    let mut end = name.len().min(max);
     while !name.is_char_boundary(end) {
         end -= 1;
     }
     let uuid = uuid::Uuid::now_v7().simple();
-    Ok(parent_dir(path).join(format!(".{}.tmp-{uuid}", &name[..end])))
+    Ok(parent_dir(path).join(format!(".{}{infix}{uuid}", &name[..end])))
 }
 
 /// The folder holding `path`; `.` for a bare file name.
@@ -152,8 +159,11 @@ fn sync_dir(_dir: &Path) -> io::Result<()> {
 /// `AlreadyExists`, `from` and `to` are the same file (same device and
 /// inode on Unix, same canonical path elsewhere) and their names differ
 /// only in case, it renames in two no-replace steps through a temporary
-/// sibling `.<name>.tmp-<uuid>`, moving it back to `from` if the second
-/// step fails. A hard link under a name differing only in case (possible
+/// sibling `.<name>.case-<uuid>`, moving it back to `from` if the second
+/// step fails. A leftover `.<name>.case-*` (after a crash between the
+/// steps, or if both the second step and the move back fail) is the user's
+/// own entry and must never be swept; [`sweep_temp_files`] doesn't match
+/// it. A hard link under a name differing only in case (possible
 /// on case-sensitive filesystems) is therefore still refused: the second
 /// step finds `to` in place.
 ///
@@ -272,7 +282,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
 /// sibling, then to `to`. If the second step fails, the temporary is moved
 /// back to `from`.
 fn case_rename(from: &Path, to: &Path) -> io::Result<()> {
-    let tmp = temp_sibling(from)?;
+    let tmp = temp_sibling(from, CASE_INFIX)?;
     rename_no_replace_imp(from, &tmp)?;
     if let Err(e) = rename_no_replace_imp(&tmp, to) {
         if let Err(back) = rename_no_replace_imp(&tmp, from) {
@@ -346,7 +356,8 @@ enum Entry {
 /// (`InvalidData`); the source tree is then listed again, and a file or
 /// folder added or removed during the copy fails it too (`InvalidData`).
 /// On any failure what this call created at `to` is removed (never
-/// something that appeared there meanwhile); `from` is never changed. Permissions and timestamps are not copied.
+/// something that appeared there meanwhile); `from` is never changed.
+/// Permissions and timestamps are not copied.
 ///
 /// Fault injection: [`Op::Copy`] before each file, with its destination
 /// path. Files are copied in sorted, depth-first order.
@@ -523,8 +534,10 @@ fn stream(r: &mut File, mut sink: impl FnMut(&[u8]) -> io::Result<()>) -> io::Re
 /// ago, named exactly as this code names them: `.<name>.tmp-<32 lowercase
 /// hex>` (a simple uuid, from [`durable_write`] and the sync store) or
 /// `.printdex-<16 lowercase hex>.tmp` (the sidecar writer's older form).
-/// Folders and symlinks are never removed, whatever their name. Errors are
-/// logged and skipped; a missing or unreadable `dir` does nothing.
+/// Folders and symlinks are never removed, whatever their name, and
+/// neither is `.<name>.case-<uuid>`, a user's entry parked by
+/// [`rename_no_replace`]. Errors are logged and skipped; a missing or
+/// unreadable `dir` does nothing.
 ///
 /// Fault injection: [`Op::Remove`] with each entry's path; a fault skips
 /// that entry.
@@ -908,6 +921,22 @@ mod tests {
         assert!(!is_case_only_alias(a, a, true));
         // Same name in a different folder.
         assert!(!is_case_only_alias(a, Path::new("other/benchy"), true));
+    }
+
+    #[test]
+    fn case_rename_parking_name_is_never_swept() {
+        let d = tempfile::tempdir().unwrap();
+        for name in ["Benchy.stl".to_string(), "é".repeat(120)] {
+            let p = d.path().join(&name);
+            let parked = temp_sibling(&p, CASE_INFIX).unwrap();
+            let parked = parked.file_name().unwrap().to_str().unwrap();
+            assert!(parked.contains(".case-"), "{parked}");
+            assert!(parked.len() <= 255, "{}", parked.len());
+            assert!(!is_temp_name(parked), "{parked} would be swept");
+            // The durable-write name for the same file still is.
+            let tmp = temp_sibling(&p, TEMP_INFIX).unwrap();
+            assert!(is_temp_name(tmp.file_name().unwrap().to_str().unwrap()));
+        }
     }
 
     #[test]
