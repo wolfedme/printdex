@@ -807,3 +807,37 @@ async fn reconcile_never_removes_the_only_copy() {
         "Storage/Hook"
     );
 }
+
+/// Trashing a single file whose sidecar goes first fails halfway: the model
+/// file is never the one left in the trash while the action reports a
+/// failure, so disk and database still agree that the model is there.
+#[tokio::test]
+async fn partly_failed_trash_keeps_the_model() {
+    let f = Fx::new(&["Misc/hook.stl", "Misc/Sub/x.stl"]).await;
+    let hook = f.find("hook").await;
+    f.engine.set_sidecars(f.lib.id, false).await.unwrap();
+    let side = f.root().join("Misc/.hook.stl.printdex.toml");
+    fs::write(&side, "notes").unwrap();
+    let bin = f.dir.path().join(".test-trash");
+    let _to_bin = {
+        let bin = bin.clone();
+        faults::arm(
+            f.root(),
+            Op::Trash,
+            0,
+            Action::Instead(Box::new(move |p| {
+                fs::create_dir_all(&bin)?;
+                fs::rename(p, bin.join("0"))
+            })),
+        )
+    };
+    let _fail = faults::arm(f.root(), Op::Trash, 1, Action::Fail(ErrorKind::Other));
+    assert!(f.engine.trash_models(&[hook]).await.is_err());
+    assert_eq!(
+        fs::read_to_string(f.root().join("Misc/hook.stl")).unwrap(),
+        "Misc/hook.stl"
+    );
+    let d = f.engine.model(hook).await.unwrap().unwrap();
+    assert!(d.missing_since.is_none());
+    assert_eq!(last_op_state(&f).await, OpState::Failed);
+}

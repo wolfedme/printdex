@@ -715,10 +715,13 @@ fn do_step(
         .then(|| sidecar::path_for(from_root, &s.from_rel, s.kind))
         .filter(|p| p.exists());
     if s.how == How::Trash {
-        let mut all = vec![from.clone()];
-        all.extend(side_from);
-        // Checked one by one, then trashed together; a test's `Instead`
-        // takes a path out of the batch.
+        // The sidecar first: if trashing stops halfway, the model is still
+        // in place (its data is in the database, and the sidecar in the
+        // trash), never the other way round.
+        let mut all: Vec<PathBuf> = side_from.into_iter().collect();
+        all.push(from.clone());
+        // Checked one by one, then trashed together in this order; a
+        // test's `Instead` takes a path out of the batch.
         let mut real = Vec::new();
         for p in &all {
             faults::perform(Op::Trash, p, || {
