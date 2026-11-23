@@ -772,9 +772,23 @@ impl Repo {
             .keep_weekly(i32::try_from(keep.weekly).unwrap_or(i32::MAX))
             .keep_monthly(i32::try_from(keep.monthly).unwrap_or(i32::MAX));
         let now = rustic_core::jiff::Zoned::now();
-        let ids: Vec<_> = opts
-            .apply(snaps, &now)
-            .map_err(classify)?
+        let mut decided = opts.apply(snaps, &now).map_err(classify)?;
+        // An unmounted share can look like an empty folder and back up as
+        // an empty snapshot, again and again: the newest snapshot that
+        // holds files is kept whatever the policy says.
+        let has_files = |s: &SnapshotFile| {
+            s.summary
+                .as_ref()
+                .is_some_and(|m| m.total_files_processed > 0)
+        };
+        if let Some(last) = decided
+            .iter_mut()
+            .filter(|d| has_files(&d.snapshot))
+            .max_by_key(|d| d.snapshot.time.timestamp())
+        {
+            last.keep = true;
+        }
+        let ids: Vec<_> = decided
             .into_iter()
             .filter(|s| !s.keep)
             .map(|s| s.snapshot.id)
