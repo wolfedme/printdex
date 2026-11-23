@@ -13,6 +13,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -353,13 +354,25 @@ pub async fn write_now(db: &Db, id: ModelId, install: Uuid) -> Result<bool> {
     let text = file.to_toml()?;
     let path = sidecar_path(&target);
     let p = path.clone();
-    let mtime = tokio::task::spawn_blocking(move || write_atomic(&p, &text))
-        .await
-        .map_err(|e| CoreError::Io {
-            path: path.clone(),
-            source: std::io::Error::other(e.to_string()),
-        })?
-        .map_err(|source| CoreError::Io { path, source })?;
+    // A single file's sidecar sits in a folder that outlives the file: if
+    // the file is gone (moved or deleted by hand), write nothing there.
+    let model =
+        (target.kind == ModelKind::SingleFile).then(|| join_rel(&target.root, &target.rel_path));
+    let mtime = tokio::task::spawn_blocking(move || {
+        if model.is_some_and(|m| !m.exists()) {
+            return Ok(None);
+        }
+        write_atomic(&p, &text).map(Some)
+    })
+    .await
+    .map_err(|e| CoreError::Io {
+        path: path.clone(),
+        source: std::io::Error::other(e.to_string()),
+    })?
+    .map_err(|source| CoreError::Io { path, source })?;
+    let Some(mtime) = mtime else {
+        return Ok(false);
+    };
     db.set_sidecar_mtime(id, Some(mtime)).await?;
     Ok(true)
 }
@@ -539,6 +552,9 @@ enum Cmd {
 #[derive(Clone, Debug)]
 pub struct SidecarWriter {
     tx: mpsc::UnboundedSender<Cmd>,
+    /// Held for each write, and by file actions while they move models, so
+    /// a write never lands at a path a model is being moved away from.
+    gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl std::fmt::Debug for Cmd {
@@ -554,8 +570,16 @@ impl SidecarWriter {
     /// Starts the writer task. Must be called inside a tokio runtime.
     pub fn start(db: Db, install: Uuid, delay: Duration) -> SidecarWriter {
         let (tx, rx) = mpsc::unbounded_channel();
-        tokio::spawn(run(db, install, delay, rx));
-        SidecarWriter { tx }
+        let gate = Arc::new(tokio::sync::Mutex::new(()));
+        tokio::spawn(run(db, install, delay, rx, gate.clone()));
+        SidecarWriter { tx, gate }
+    }
+
+    /// Waits for a write in progress and keeps new ones from starting until
+    /// the guard is dropped. File actions hold it while they move models
+    /// and update their paths.
+    pub(crate) async fn hold(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.gate.clone().lock_owned().await
     }
 
     /// Writes model `id`'s sidecar after the debounce delay.
@@ -572,7 +596,13 @@ impl SidecarWriter {
     }
 }
 
-async fn run(db: Db, install: Uuid, delay: Duration, mut rx: mpsc::UnboundedReceiver<Cmd>) {
+async fn run(
+    db: Db,
+    install: Uuid,
+    delay: Duration,
+    mut rx: mpsc::UnboundedReceiver<Cmd>,
+    gate: Arc<tokio::sync::Mutex<()>>,
+) {
     let mut pending: HashMap<ModelId, Instant> = HashMap::new();
     loop {
         let next = pending.values().min().copied();
@@ -582,16 +612,16 @@ async fn run(db: Db, install: Uuid, delay: Duration, mut rx: mpsc::UnboundedRece
                     pending.insert(id, Instant::now() + delay);
                 }
                 Some(Cmd::Flush(done)) => {
-                    write_due(&db, install, &mut pending, None).await;
+                    write_due(&db, install, &mut pending, None, &gate).await;
                     let _ = done.send(());
                 }
                 None => {
-                    write_due(&db, install, &mut pending, None).await;
+                    write_due(&db, install, &mut pending, None, &gate).await;
                     return;
                 }
             },
             () = tokio::time::sleep_until(next.unwrap_or_else(Instant::now)), if next.is_some() => {
-                write_due(&db, install, &mut pending, Some(Instant::now())).await;
+                write_due(&db, install, &mut pending, Some(Instant::now()), &gate).await;
             }
         }
     }
@@ -603,6 +633,7 @@ async fn write_due(
     install: Uuid,
     pending: &mut HashMap<ModelId, Instant>,
     now: Option<Instant>,
+    gate: &tokio::sync::Mutex<()>,
 ) {
     let due: Vec<ModelId> = pending
         .iter()
@@ -611,6 +642,7 @@ async fn write_due(
         .collect();
     for id in due {
         pending.remove(&id);
+        let _gate = gate.lock().await;
         match write_now(db, id, install).await {
             Ok(_) => {}
             Err(e) => {

@@ -307,6 +307,7 @@ impl Engine {
     /// the disk shows happened is written to the database. Returns the
     /// names of the models whose action was finished. Called on open.
     pub async fn reconcile_ops(&self) -> Result<Vec<String>> {
+        let _writes = self.sidecars.hold().await;
         let mut finished = Vec::new();
         for op in self.db.planned_ops().await? {
             let roots = self.roots(&op.steps).await?;
@@ -406,6 +407,9 @@ impl Engine {
         for lib in &libs {
             guards.push(self.claim(*lib)?);
         }
+        // No sidecar write may land at a path a model is leaving; held
+        // until the rows point at the new paths.
+        let writes = self.sidecars.hold().await;
 
         // Check everything before touching anything.
         for s in &steps {
@@ -537,6 +541,7 @@ impl Engine {
                 },
             )
             .await?;
+        drop(writes);
         drop(guards);
 
         if kind == OpKind::Trash {

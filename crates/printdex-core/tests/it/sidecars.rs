@@ -577,3 +577,71 @@ async fn non_utf8_sidecar_is_set_aside() {
     assert_eq!(kept.len(), 1);
     assert_eq!(fs::read(&kept[0]).unwrap(), bytes);
 }
+
+/// The debounced writer is about to write a single file's sidecar when a
+/// move of that file starts: the sidecar ends up next to the file at its
+/// new place, and none is recreated at the old one (its folder is still
+/// there, so the write would succeed).
+#[tokio::test]
+async fn sidecar_write_after_move_goes_to_new_path() {
+    use printdex_core::fsx::faults::{Action, Op, arm};
+    use std::sync::{Mutex, mpsc};
+    use std::time::Duration;
+    let f = Fx::new(&["Misc/hook.stl", "Misc/Sub/x.stl"]).await;
+    let hook = f.model("hook").await;
+    f.engine.add_tag(hook, "first").await.unwrap();
+    f.engine.flush_sidecars().await;
+    let old = f.root().join("Misc/.hook.stl.printdex.toml");
+    assert!(old.exists());
+
+    let (at_write, writing) = mpsc::channel::<()>();
+    let (moved, wait_moved) = mpsc::channel::<()>();
+    let (at_write, wait_moved) = (Mutex::new(at_write), Mutex::new(wait_moved));
+    let _g = arm(
+        &old,
+        Op::Write,
+        0,
+        Action::Before(Box::new(move |_| {
+            let _ = at_write.lock().unwrap().send(());
+            // The move runs now, unless it has to wait for this write.
+            let _ = wait_moved
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(3));
+        })),
+    );
+    f.engine.add_tag(hook, "second").await.unwrap();
+    let engine = f.engine.clone();
+    let flush = tokio::spawn(async move { engine.flush_sidecars().await });
+    tokio::task::spawn_blocking(move || writing.recv_timeout(Duration::from_secs(10)).unwrap())
+        .await
+        .unwrap();
+    f.engine
+        .move_models(&[hook], f.lib.id, "Away")
+        .await
+        .unwrap();
+    let _ = moved.send(());
+    flush.await.unwrap();
+    f.engine.flush_sidecars().await;
+    assert!(!old.exists(), "a sidecar was recreated at the old path");
+    let mut tags = f.read("Away/.hook.stl.printdex.toml").tags;
+    tags.sort();
+    assert_eq!(tags, ["first", "second"]);
+}
+
+/// A single file moved away by hand before its queued sidecar write: no
+/// sidecar appears next to the file that is gone.
+#[tokio::test]
+async fn sidecar_not_written_next_to_a_file_that_is_gone() {
+    let f = Fx::new(&["Misc/hook.stl", "Misc/Sub/x.stl"]).await;
+    let hook = f.model("hook").await;
+    f.engine.set_notes(hook, "Print flat.").await.unwrap();
+    fs::create_dir_all(f.root().join("Away")).unwrap();
+    fs::rename(
+        f.root().join("Misc/hook.stl"),
+        f.root().join("Away/hook.stl"),
+    )
+    .unwrap();
+    f.engine.flush_sidecars().await;
+    assert!(!f.root().join("Misc/.hook.stl.printdex.toml").exists());
+}
