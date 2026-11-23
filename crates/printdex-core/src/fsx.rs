@@ -175,11 +175,14 @@ fn sync_dir(_dir: &Path) -> io::Result<()> {
 ///   via `rustix::fs::renameat_with`, which is atomic.
 /// - Windows: a file is hard-linked to `to` and then `from` is removed; a
 ///   folder goes through `std::fs::rename`, which Windows refuses to let
-///   replace a folder, after checking that `to` is missing.
+///   replace a folder, after checking that `to` is missing. A read-only
+///   `from` (linked, but not removable) has its link undone and takes the
+///   fallback.
 /// - Where the filesystem doesn't support that (`EINVAL`, `ENOSYS`,
-///   `EOPNOTSUPP` on Unix; `Unsupported`, `ERROR_INVALID_FUNCTION` or
-///   `ERROR_NOT_SUPPORTED` from `hard_link` on FAT or SMB) and on other
-///   platforms, it falls back to the check-rename-verify of
+///   `EOPNOTSUPP` on Unix; `Unsupported`, `ERROR_INVALID_FUNCTION`,
+///   `ERROR_NOT_SUPPORTED` or, for a source that opens, `ERROR_ACCESS_DENIED`
+///   from `hard_link` on FAT, SMB or a NAS; see `link_failure_step`) and on
+///   other platforms, it falls back to the check-rename-verify of
 ///   `rename_fallback`, which has a race window (see there).
 ///
 /// A rename that only changes case ("Benchy" to "benchy" in the same
@@ -240,22 +243,76 @@ fn rename_no_replace_imp(from: &Path, to: &Path) -> io::Result<()> {
         return fs::rename(from, to);
     }
     match fs::hard_link(from, to) {
-        Ok(()) => {
-            if let Err(e) = fs::remove_file(from) {
-                // Undo, so the file isn't left in two places.
-                let _ = fs::remove_file(to);
-                return Err(e);
+        Ok(()) => match fs::remove_file(from) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // Undo, so the file isn't left in two places. Only when the
+                // undo worked may the fallback run: it checks `to` first.
+                if fs::remove_file(to).is_err() {
+                    return Err(e);
+                }
+                match remove_failure_step(e.kind()) {
+                    WinStep::Fallback => rename_fallback(from, to),
+                    WinStep::Fail => Err(e),
+                }
             }
-            Ok(())
+        },
+        Err(e) => {
+            match link_failure_step(e.kind(), e.raw_os_error(), || File::open(from).is_ok()) {
+                WinStep::Fallback => rename_fallback(from, to),
+                WinStep::Fail => Err(e),
+            }
         }
-        // ERROR_INVALID_FUNCTION (1) and ERROR_NOT_SUPPORTED (50): FAT, SMB.
-        // Not PermissionDenied: a locked or protected source must surface.
-        Err(e)
-            if e.kind() == ErrorKind::Unsupported || matches!(e.raw_os_error(), Some(1 | 50)) =>
-        {
-            rename_fallback(from, to)
-        }
-        Err(e) => Err(e),
+    }
+}
+
+/// What the Windows no-replace rename does after a step fails.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+enum WinStep {
+    /// Use the check-rename-verify of `rename_fallback`.
+    Fallback,
+    /// Surface the error.
+    Fail,
+}
+
+/// After `hard_link(from, to)` failed with `kind` and the raw Windows error
+/// `code`:
+///
+/// - `Unsupported`, `ERROR_INVALID_FUNCTION` (1), `ERROR_NOT_SUPPORTED`
+///   (50): FAT and SMB without hard links → fall back.
+/// - `ERROR_ACCESS_DENIED` (5): SMB shares and NAS boxes refuse
+///   `CreateHardLink` this way → fall back, but only if `from` can be
+///   opened (`source_opens`); a protected source surfaces the error. The
+///   trade-off: on such a share the move loses its atomic no-replace and
+///   takes `rename_fallback`'s race window, which beats failing every move
+///   there.
+/// - Anything else, a sharing violation (32) of a locked source included,
+///   surfaces.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn link_failure_step(
+    kind: ErrorKind,
+    code: Option<i32>,
+    source_opens: impl FnOnce() -> bool,
+) -> WinStep {
+    let unsupported = kind == ErrorKind::Unsupported || matches!(code, Some(1 | 50));
+    if unsupported || (code == Some(5) && source_opens()) {
+        WinStep::Fallback
+    } else {
+        WinStep::Fail
+    }
+}
+
+/// After the link worked but removing `from` failed with `kind` (and the
+/// link was undone): a read-only `from` can't be deleted
+/// (`PermissionDenied`) though `MoveFileEx` still moves it → fall back.
+/// Anything else surfaces.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn remove_failure_step(kind: ErrorKind) -> WinStep {
+    if kind == ErrorKind::PermissionDenied {
+        WinStep::Fallback
+    } else {
+        WinStep::Fail
     }
 }
 
@@ -721,6 +778,53 @@ mod tests {
     use std::io::ErrorKind;
     use std::path::PathBuf;
     use std::time::SystemTime;
+
+    #[test]
+    fn windows_hard_link_failures_fall_back_or_fail() {
+        use WinStep::{Fail, Fallback};
+        let opens = || true;
+        let locked = || false;
+        // FAT and SMB without hard links.
+        assert_eq!(
+            link_failure_step(ErrorKind::Unsupported, None, opens),
+            Fallback
+        );
+        assert_eq!(
+            link_failure_step(ErrorKind::Other, Some(1), opens),
+            Fallback
+        );
+        assert_eq!(
+            link_failure_step(ErrorKind::Other, Some(50), opens),
+            Fallback
+        );
+        // ERROR_ACCESS_DENIED: a NAS refusing CreateHardLink falls back,
+        // but a source that can't even be opened surfaces the error.
+        assert_eq!(
+            link_failure_step(ErrorKind::PermissionDenied, Some(5), opens),
+            Fallback
+        );
+        assert_eq!(
+            link_failure_step(ErrorKind::PermissionDenied, Some(5), locked),
+            Fail
+        );
+        // A sharing violation (32) or anything else surfaces.
+        assert_eq!(link_failure_step(ErrorKind::Other, Some(32), opens), Fail);
+        assert_eq!(link_failure_step(ErrorKind::NotFound, Some(2), opens), Fail);
+        assert_eq!(
+            link_failure_step(ErrorKind::AlreadyExists, Some(183), opens),
+            Fail
+        );
+    }
+
+    #[test]
+    fn windows_read_only_source_falls_back_after_the_link() {
+        use WinStep::{Fail, Fallback};
+        // A read-only file can be linked but not deleted; MoveFileEx can
+        // still move it.
+        assert_eq!(remove_failure_step(ErrorKind::PermissionDenied), Fallback);
+        assert_eq!(remove_failure_step(ErrorKind::Other), Fail);
+        assert_eq!(remove_failure_step(ErrorKind::NotFound), Fail);
+    }
 
     /// Names in `dir`, sorted.
     fn names(dir: &Path) -> Vec<String> {
