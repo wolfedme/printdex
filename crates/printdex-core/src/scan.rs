@@ -284,6 +284,7 @@ pub(crate) fn clone_error(e: &CoreError) -> CoreError {
         CoreError::Sync(s) => CoreError::Sync(s.clone()),
         CoreError::NameInvalid => CoreError::NameInvalid,
         CoreError::NameTaken(n) => CoreError::NameTaken(n.clone()),
+        CoreError::HasLinks(p) => CoreError::HasLinks(p.clone()),
         CoreError::TargetOffline => CoreError::TargetOffline,
         CoreError::TrashUnavailable => CoreError::TrashUnavailable,
         CoreError::UndoUnavailable => CoreError::UndoUnavailable,

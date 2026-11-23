@@ -15,6 +15,7 @@ pub use crate::db::file_ops::{How, OpKind, OpState, Step};
 use crate::engine::{Engine, ScanGuard};
 use crate::error::{CoreError, Result};
 use crate::events::EngineEvent;
+use crate::fsx::{self, faults, faults::Op};
 use crate::grouping::ModelKind;
 use crate::ids::{LibraryId, ModelId};
 use crate::sidecar;
@@ -206,7 +207,13 @@ impl Engine {
             if d.library_id == to_lib && to_rel == d.rel_path {
                 continue;
             }
-            if steps.iter().any(|s: &Step| s.to_rel == to_rel) {
+            // Two targets differing only in case would be one file on a
+            // case-insensitive drive; refused on every system alike.
+            let lower = to_rel.to_lowercase();
+            if steps
+                .iter()
+                .any(|s: &Step| s.to_rel.to_lowercase() == lower)
+            {
                 return Err(CoreError::NameTaken(base(&to_rel).to_owned()));
             }
             steps.push(Step {
@@ -334,7 +341,7 @@ impl Engine {
                             finished.push(s.new_name.clone());
                         } else if to.exists() && from.exists() && s.how == How::Copy {
                             // A copy that never finished: the original stays.
-                            let _ = remove_any(&to);
+                            let _ = remove_path(&to);
                         }
                     }
                 }
@@ -406,7 +413,8 @@ impl Engine {
             if !root_readable(&*self.fs, &roots[&s.to_lib]) {
                 return Err(CoreError::TargetOffline);
             }
-            let case_only = s.from_lib == s.to_lib && s.from_rel.eq_ignore_ascii_case(&s.to_rel);
+            let case_only =
+                s.from_lib == s.to_lib && s.from_rel.to_lowercase() == s.to_rel.to_lowercase();
             let taken = (!case_only
                 && self
                     .fs
@@ -416,34 +424,72 @@ impl Engine {
             if taken {
                 return Err(CoreError::NameTaken(base(&s.to_rel).to_owned()));
             }
+            // A single file's sidecar moves with it and must not land on
+            // another one.
+            if s.kind == ModelKind::SingleFile && !case_only {
+                let side_from = sidecar::path_for(from_root, &s.from_rel, s.kind);
+                let side_to = sidecar::path_for(&roots[&s.to_lib], &s.to_rel, s.kind);
+                if self.fs.metadata(&side_from).is_ok() && self.fs.metadata(&side_to).is_ok() {
+                    return Err(CoreError::NameTaken(file_name(&side_to)));
+                }
+            }
         }
 
         let op = self.db.insert_op(kind, &steps).await?;
         let work = steps.clone();
         let work_roots = roots.clone();
-        let (done, failure) = tokio::task::spawn_blocking(move || {
+        let outcome = tokio::task::spawn_blocking(move || {
             let mut done: Vec<How> = Vec::new();
-            for s in &work {
+            for (i, s) in work.iter().enumerate() {
                 match do_step(&work_roots[&s.from_lib], &work_roots[&s.to_lib], s) {
                     Ok(how) => done.push(how),
-                    Err(e) => {
+                    Err(f) => {
+                        let mut stuck: Vec<(usize, How)> =
+                            f.stuck.map(|h| (i, h)).into_iter().collect();
                         // Put back what was already done, newest first.
-                        for (s, how) in work.iter().zip(&done).rev() {
-                            undo_step(&work_roots[&s.from_lib], &work_roots[&s.to_lib], s, *how);
+                        for (j, (s, how)) in work.iter().zip(&done).enumerate().rev() {
+                            if !undo_step(&work_roots[&s.from_lib], &work_roots[&s.to_lib], s, *how)
+                            {
+                                stuck.push((j, *how));
+                            }
                         }
-                        return (done, Some(e));
+                        return Err((i, f.path, f.err, stuck));
                     }
                 }
             }
-            (done, None)
+            Ok(done)
         })
         .await
         .map_err(|e| io_err(&roots[&libs[0]], io::Error::other(e.to_string())))?;
-        if let Some((path, e)) = failure {
-            self.db.set_op_state(op, OpState::Failed).await?;
-            tracing::warn!(path = %path.display(), error = %e, "file action failed; undone");
-            return Err(io_err(&path, e));
-        }
+        let done = match outcome {
+            Ok(done) => done,
+            Err((i, path, e, stuck)) => {
+                // Steps that could not be put back stay where they went; the
+                // database follows the disk.
+                for (j, how) in &stuck {
+                    let s = &steps[*j];
+                    if *how != s.how {
+                        self.db.set_step_how(op, *j, *how).await?;
+                    }
+                    self.db
+                        .relocate_model(s.model, &s.from_rel, s.to_lib, &s.to_rel, &s.new_name)
+                        .await?;
+                }
+                self.db.set_op_state(op, OpState::Failed).await?;
+                if stuck.is_empty() {
+                    tracing::warn!(path = %path.display(), error = %e, "file action failed; undone");
+                } else {
+                    tracing::error!(
+                        path = %path.display(),
+                        error = %e,
+                        stuck = stuck.len(),
+                        "file action failed; some models could not be put back and stay at their new place"
+                    );
+                    let _ = self.events.send(EngineEvent::OrganizeChanged);
+                }
+                return Err(step_error(&path, e, &steps[i]));
+            }
+        };
         for (seq, how) in done.iter().enumerate() {
             if *how != steps[seq].how {
                 self.db.set_step_how(op, seq, *how).await?;
@@ -592,8 +638,52 @@ fn restore(_paths: &[PathBuf]) -> Result<()> {
     Err(CoreError::UndoUnavailable)
 }
 
-/// Does one step on disk. Returns how it was done, or the path that failed.
-fn do_step(from_root: &Path, to_root: &Path, s: &Step) -> Result<How, (PathBuf, io::Error)> {
+/// Why a step failed: the path and the error, and, when the model could
+/// not be put back, how it now sits at its target.
+struct StepFailure {
+    path: PathBuf,
+    err: io::Error,
+    stuck: Option<How>,
+}
+
+impl From<(PathBuf, io::Error)> for StepFailure {
+    fn from((path, err): (PathBuf, io::Error)) -> StepFailure {
+        StepFailure {
+            path,
+            err,
+            stuck: None,
+        }
+    }
+}
+
+/// The error for a failed step: a taken name, links that can't be copied
+/// between drives, or the I/O error.
+fn step_error(path: &Path, e: io::Error, s: &Step) -> CoreError {
+    match e.kind() {
+        io::ErrorKind::AlreadyExists => CoreError::NameTaken(path.file_name().map_or_else(
+            || base(&s.to_rel).to_owned(),
+            |n| n.to_string_lossy().into_owned(),
+        )),
+        _ if is_links_error(&e) => CoreError::HasLinks(path.to_path_buf()),
+        _ => io_err(path, e),
+    }
+}
+
+/// [`fsx::copy_tree_verified`]'s refusal of a tree with links or special
+/// files.
+fn is_links_error(e: &io::Error) -> bool {
+    e.kind() == io::ErrorKind::Unsupported && e.to_string().contains("links or special files")
+}
+
+fn file_name(p: &Path) -> String {
+    p.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Does one step on disk. Returns how it was done. On failure the step is
+/// undone, unless putting it back failed too (`stuck`).
+fn do_step(from_root: &Path, to_root: &Path, s: &Step) -> Result<How, StepFailure> {
     let from = join_rel(from_root, &s.from_rel);
     let side_from = (s.kind == ModelKind::SingleFile)
         .then(|| sidecar::path_for(from_root, &s.from_rel, s.kind))
@@ -601,6 +691,9 @@ fn do_step(from_root: &Path, to_root: &Path, s: &Step) -> Result<How, (PathBuf, 
     if s.how == How::Trash {
         let mut all = vec![from.clone()];
         all.extend(side_from);
+        for p in &all {
+            faults::check(Op::Trash, p).map_err(|e| (p.clone(), e))?;
+        }
         trash::delete_all(&all).map_err(|e| (from.clone(), io::Error::other(e.to_string())))?;
         return Ok(How::Trash);
     }
@@ -611,102 +704,110 @@ fn do_step(from_root: &Path, to_root: &Path, s: &Step) -> Result<How, (PathBuf, 
     let how = move_path(&from, &to)?;
     if let Some(side) = side_from {
         let side_to = sidecar::path_for(to_root, &s.to_rel, s.kind);
-        // Printdex's own small file: a failure here is not worth undoing
-        // the move for; the writer makes a new one.
-        if let Err(e) = move_path(&side, &side_to) {
-            tracing::warn!(error = %e.1, "could not move sidecar");
+        // The sidecar stays next to its model: if it can't follow, the
+        // model goes back.
+        if let Err((path, err)) = move_path(&side, &side_to) {
+            let stuck = match put_back(&from, &to, how) {
+                Ok(()) => None,
+                Err(e) => {
+                    tracing::error!(from = %to.display(), to = %from.display(), error = %e.1, "could not put a model back after its sidecar failed to move");
+                    Some(how)
+                }
+            };
+            return Err(StepFailure { path, err, stuck });
         }
     }
     Ok(how)
 }
 
-/// Renames `from` to `to`, or copies, checks and trashes `from` when they
-/// are on different drives.
+/// Moves `from` to `to` without ever replacing anything: a no-replace
+/// rename, or, when they are on different drives, a verified copy and then
+/// `from` to the trash. If trashing fails the copy is removed again.
 fn move_path(from: &Path, to: &Path) -> Result<How, (PathBuf, io::Error)> {
-    match std::fs::rename(from, to) {
+    match fsx::rename_no_replace(from, to) {
         Ok(()) => Ok(How::Rename),
         Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
-            copy_tree(from, to).map_err(|e| {
-                let _ = remove_any(to);
-                (to.to_path_buf(), e)
+            // On failure the copy removes only what it created.
+            fsx::copy_tree_verified(from, to).map_err(|e| {
+                let at = if is_links_error(&e) { from } else { to };
+                (at.to_path_buf(), e)
             })?;
-            if tree_listing(from).ok() != tree_listing(to).ok() {
-                let _ = remove_any(to);
-                return Err((
-                    to.to_path_buf(),
-                    io::Error::other("copy does not match the original"),
-                ));
-            }
-            if let Err(e) = trash::delete(from) {
-                let _ = remove_any(to);
-                return Err((from.to_path_buf(), io::Error::other(e.to_string())));
+            if let Err(e) = trash_path(from) {
+                if let Err(rm) = remove_path(to) {
+                    tracing::error!(path = %to.display(), error = %rm, "could not remove a copy after the original could not be trashed; it is in both places");
+                }
+                return Err((from.to_path_buf(), e));
             }
             Ok(How::Copy)
         }
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Err((to.to_path_buf(), e)),
         Err(e) => Err((from.to_path_buf(), e)),
     }
 }
 
-/// Reverses a finished step (rolling back a failed action). Best effort.
-fn undo_step(from_root: &Path, to_root: &Path, s: &Step, how: How) {
+/// Puts a model moved `from` → `to` (done `how`) back at `from`, never
+/// replacing anything there.
+fn put_back(from: &Path, to: &Path, how: How) -> Result<(), (PathBuf, io::Error)> {
+    match how {
+        How::Rename => move_path(to, from).map(|_| ()),
+        // `to` is our verified copy; the original is in the trash.
+        How::Copy => {
+            fsx::copy_tree_verified(to, from).map_err(|e| (from.to_path_buf(), e))?;
+            if let Err(e) = remove_path(to) {
+                // Keep it in one place: drop the copy just made instead.
+                if let Err(rm) = remove_path(from) {
+                    tracing::error!(path = %from.display(), error = %rm, "could not remove a copy; it is in both places");
+                }
+                return Err((to.to_path_buf(), e));
+            }
+            Ok(())
+        }
+        How::Trash => restore(&[from.to_path_buf()])
+            .map_err(|e| (from.to_path_buf(), io::Error::other(e.to_string()))),
+    }
+}
+
+/// Reverses a finished step (rolling back a failed action). Returns false
+/// when the model could not be put back and stays at its target, with its
+/// sidecar.
+fn undo_step(from_root: &Path, to_root: &Path, s: &Step, how: How) -> bool {
     let from = join_rel(from_root, &s.from_rel);
     let to = join_rel(to_root, &s.to_rel);
-    let result = match how {
-        How::Rename => std::fs::rename(&to, &from),
-        How::Copy => copy_tree(&to, &from).and_then(|()| remove_any(&to)),
-        How::Trash => {
-            restore(std::slice::from_ref(&from)).map_err(|e| io::Error::other(e.to_string()))
-        }
-    };
-    if let Err(e) = result {
-        tracing::error!(from = %to.display(), to = %from.display(), error = %e, "could not roll back a file action step");
+    let side = (s.kind == ModelKind::SingleFile && how != How::Trash)
+        .then(|| {
+            (
+                sidecar::path_for(to_root, &s.to_rel, s.kind),
+                sidecar::path_for(from_root, &s.from_rel, s.kind),
+            )
+        })
+        .filter(|(side_to, _)| side_to.exists());
+    // The sidecar first: if it can't go back, neither does the model.
+    if let Some((side_to, side_from)) = &side
+        && let Err(e) = move_path(side_to, side_from)
+    {
+        tracing::error!(from = %side_to.display(), to = %side_from.display(), error = %e.1, "could not roll back a sidecar");
+        return false;
     }
-    if s.kind == ModelKind::SingleFile && how != How::Trash {
-        let side_to = sidecar::path_for(to_root, &s.to_rel, s.kind);
-        if side_to.exists() {
-            let _ = std::fs::rename(&side_to, sidecar::path_for(from_root, &s.from_rel, s.kind));
+    if let Err(e) = put_back(&from, &to, how) {
+        tracing::error!(from = %to.display(), to = %from.display(), error = %e.1, "could not roll back a file action step");
+        if let Some((side_to, side_from)) = &side
+            && let Err(e) = move_path(side_from, side_to)
+        {
+            tracing::error!(path = %side_from.display(), error = %e.1, "sidecar left apart from its model");
         }
+        return false;
     }
+    true
 }
 
-fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
-    let meta = std::fs::symlink_metadata(from)?;
-    if meta.is_dir() {
-        std::fs::create_dir(to)?;
-        for entry in std::fs::read_dir(from)? {
-            let entry = entry?;
-            copy_tree(&entry.path(), &to.join(entry.file_name()))?;
-        }
-        Ok(())
-    } else if meta.is_file() {
-        std::fs::copy(from, to).map(|_| ())
-    } else {
-        // Symlinks and specials are not followed or copied.
-        Ok(())
-    }
+fn trash_path(p: &Path) -> io::Result<()> {
+    faults::check(Op::Trash, p)?;
+    trash::delete(p).map_err(|e| io::Error::other(e.to_string()))
 }
 
-/// Every regular file under `root` with its size, for comparing a copy.
-fn tree_listing(root: &Path) -> io::Result<Vec<(PathBuf, u64)>> {
-    let mut out = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(p) = stack.pop() {
-        let meta = std::fs::symlink_metadata(&p)?;
-        if meta.is_dir() {
-            for e in std::fs::read_dir(&p)? {
-                stack.push(e?.path());
-            }
-        } else if meta.is_file() {
-            let rel = p.strip_prefix(root).unwrap_or(&p).to_path_buf();
-            out.push((rel, meta.len()));
-        }
-    }
-    out.sort();
-    Ok(out)
-}
-
-fn remove_any(p: &Path) -> io::Result<()> {
-    if p.is_dir() {
+fn remove_path(p: &Path) -> io::Result<()> {
+    faults::check(Op::Remove, p)?;
+    if std::fs::symlink_metadata(p)?.is_dir() {
         std::fs::remove_dir_all(p)
     } else {
         std::fs::remove_file(p)
@@ -754,19 +855,5 @@ mod tests {
         assert!(!inside("ab", "a"));
         assert_eq!(model_name("hook.stl", ModelKind::SingleFile), "hook");
         assert_eq!(model_name("Hook v2", ModelKind::Folder), "Hook v2");
-    }
-
-    #[test]
-    fn copy_tree_copies_and_lists_equal() {
-        let d = tempfile::tempdir().unwrap();
-        let a = d.path().join("a");
-        std::fs::create_dir_all(a.join("sub")).unwrap();
-        std::fs::write(a.join("x.stl"), b"xx").unwrap();
-        std::fs::write(a.join("sub/y.stl"), b"y").unwrap();
-        copy_tree(&a, &d.path().join("b")).unwrap();
-        assert_eq!(
-            tree_listing(&a).unwrap(),
-            tree_listing(&d.path().join("b")).unwrap()
-        );
     }
 }

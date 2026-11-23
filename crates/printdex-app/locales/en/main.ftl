@@ -450,6 +450,7 @@ files-undone = Undone
 files-undo = Undo
 files-error-name = That name can't be used. Avoid / \ : * ? " < > | and names starting with a dot.
 files-error-taken = Something named { $name } is already there.
+files-has-links = This folder contains links, which Printdex can't move between drives.
 files-error-offline = The destination folder can't be reached right now.
 files-error-source-offline = The model's library can't be reached right now.
 files-error-busy = The library is being scanned. Try again in a moment.

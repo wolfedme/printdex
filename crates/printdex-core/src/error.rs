@@ -52,6 +52,8 @@ pub enum CoreError {
     NameInvalid,
     #[error("something named {0} is already there")]
     NameTaken(String),
+    #[error("this folder contains links, which Printdex can't move between drives")]
+    HasLinks(PathBuf),
     #[error("the destination folder is offline or unreadable")]
     TargetOffline,
     #[error("the system trash cannot be used here")]
