@@ -344,12 +344,28 @@ async fn last_op_state(f: &Fx) -> OpState {
     db.last_op().await.unwrap().unwrap().state
 }
 
-/// Makes every rename under `root` report another drive, so moves take
-/// the copy branch.
-fn force_cross_device(root: &Path) -> Vec<FaultGuard> {
-    (0..64)
+/// Makes every rename in the fixture's library report another drive, so
+/// moves take the copy branch, and sends what they trash to a
+/// `.test-trash` folder in the fixture instead of the system trash.
+fn cross_drive(f: &Fx) -> Vec<FaultGuard> {
+    let root = f.root();
+    let bin = f.dir.path().join(".test-trash");
+    let mut guards: Vec<FaultGuard> = (0..64)
         .map(|k| faults::arm(root, Op::Rename, k, Action::Fail(ErrorKind::CrossesDevices)))
-        .collect()
+        .collect();
+    guards.extend((0..64).map(|k| {
+        let bin = bin.clone();
+        faults::arm(
+            root,
+            Op::Trash,
+            k,
+            Action::Instead(Box::new(move |p| {
+                fs::create_dir_all(&bin)?;
+                fs::rename(p, bin.join(k.to_string()))
+            })),
+        )
+    }));
+    guards
 }
 
 #[tokio::test]
@@ -410,12 +426,7 @@ async fn cross_drive_move_with_symlink_is_refused() {
     let f = Fx::new(&["Hook/hook.stl", "Storage/Bin/bin.stl"]).await;
     let id = f.find("Hook").await;
     std::os::unix::fs::symlink("hook.stl", f.root().join("Hook/link")).unwrap();
-    let _g = faults::arm(
-        f.root(),
-        Op::Rename,
-        0,
-        Action::Fail(ErrorKind::CrossesDevices),
-    );
+    let _cross = cross_drive(&f);
     let r = f.engine.move_models(&[id], f.lib.id, "Storage").await;
     assert!(matches!(r, Err(CoreError::HasLinks(_))), "{r:?}");
     assert_eq!(
@@ -436,13 +447,8 @@ async fn cross_drive_move_with_symlink_is_refused() {
 async fn cross_drive_move_full_target_cleans_up() {
     let f = Fx::new(&["Hook/a.stl", "Hook/b.stl", "Storage/Bin/bin.stl"]).await;
     let id = f.find("Hook").await;
-    let _cross = faults::arm(
-        f.root(),
-        Op::Rename,
-        0,
-        Action::Fail(ErrorKind::CrossesDevices),
-    );
     let full = faults::arm(f.root(), Op::Copy, 1, Action::Fail(ErrorKind::StorageFull));
+    let _cross = cross_drive(&f);
     let r = f.engine.move_models(&[id], f.lib.id, "Storage").await;
     assert!(r.is_err());
     assert_eq!(full.fired(), 1);
@@ -595,54 +601,209 @@ async fn assert_nothing_lost(f: &Fx, ids: &[ModelId], what: &str) {
 /// fault fire. Same drive and across drives (every rename forced to report
 /// another drive). With `rollback`, the move's last step always fails as
 /// well, so the faults also land in the rollback (where removes happen).
+/// With `crash`, the n-th operation panics instead: the work stops dead,
+/// nothing is rolled back and the journal entry stays Planned, as after a
+/// real crash; `reconcile_ops` must then make disk and database agree.
 #[tokio::test]
 async fn fault_at_every_step_loses_nothing() {
     let ops = [Op::Write, Op::Rename, Op::Copy, Op::Remove, Op::Trash];
     let mut runs = 0;
-    for rollback in [false, true] {
-        for cross in [false, true] {
-            for op in ops {
-                for n in 0.. {
-                    assert!(n < 200, "{op:?} never ran out of faults");
-                    runs += 1;
-                    let what = format!("rollback={rollback} cross={cross} {op:?} #{n}");
-                    let (f, ids) = fault_fixture().await;
-                    // Armed first, so it wins over the forced cross-device error.
-                    let fault = faults::arm(f.root(), op, n, Action::Fail(ErrorKind::Other));
-                    // The last step moves three's sidecar: the 5th rename,
-                    // or across drives the 7th file copied.
-                    let last = rollback.then(|| match cross {
-                        false => {
-                            faults::arm(f.root(), Op::Rename, 4, Action::Fail(ErrorKind::Other))
+    for crash in [false, true] {
+        for rollback in [false, true] {
+            for cross in [false, true] {
+                for op in ops {
+                    for n in 0.. {
+                        assert!(n < 200, "{op:?} never ran out of faults");
+                        runs += 1;
+                        let what =
+                            format!("crash={crash} rollback={rollback} cross={cross} {op:?} #{n}");
+                        let (f, ids) = fault_fixture().await;
+                        // Armed first, so it wins over the forced
+                        // cross-device error.
+                        let action = if crash {
+                            Action::Before(Box::new(|_| panic!("simulated crash")))
+                        } else {
+                            Action::Fail(ErrorKind::Other)
+                        };
+                        let fault = faults::arm(f.root(), op, n, action);
+                        // The last step moves three's sidecar: the 5th
+                        // rename, or across drives the 7th file copied.
+                        let last = rollback.then(|| {
+                            let (op, nth) = if cross {
+                                (Op::Copy, 6)
+                            } else {
+                                (Op::Rename, 4)
+                            };
+                            faults::arm(f.root(), op, nth, Action::Fail(ErrorKind::Other))
+                        });
+                        let forced = if cross { cross_drive(&f) } else { Vec::new() };
+                        let r = f.engine.move_models(&ids, f.lib.id, "C").await;
+                        let fired = fault.fired();
+                        drop(forced);
+                        drop(last);
+                        drop(fault);
+                        if fired == 0 {
+                            assert_nothing_lost(&f, &ids, &what).await;
+                            assert_eq!(r.is_ok(), !rollback, "{what}: {r:?}");
+                            for (src, dst) in MOVED {
+                                let p = if rollback { src } else { dst };
+                                assert!(f.root().join(p).exists(), "{what}: {p}");
+                            }
+                            break;
                         }
-                        true => faults::arm(f.root(), Op::Copy, 6, Action::Fail(ErrorKind::Other)),
-                    });
-                    let forced = if cross {
-                        force_cross_device(f.root())
-                    } else {
-                        Vec::new()
-                    };
-                    let r = f.engine.move_models(&ids, f.lib.id, "C").await;
-                    let fired = fault.fired();
-                    drop(forced);
-                    drop(last);
-                    drop(fault);
-                    assert_nothing_lost(&f, &ids, &what).await;
-                    if fired == 0 {
-                        let (expect_ok, at) = if rollback { (false, 0) } else { (true, 1) };
-                        assert_eq!(r.is_ok(), expect_ok, "{what}: {r:?}");
-                        for pair in MOVED {
-                            let p = if at == 0 { pair.0 } else { pair.1 };
-                            assert!(f.root().join(p).exists(), "{what}: {p}");
+                        assert!(r.is_err(), "{what}: a fault fired but the move succeeded");
+                        if crash {
+                            assert_eq!(last_op_state(&f).await, OpState::Planned, "{what}");
+                        } else {
+                            assert_nothing_lost(&f, &ids, &what).await;
                         }
-                        break;
+                        f.engine.reconcile_ops().await.unwrap();
+                        assert_nothing_lost(&f, &ids, &format!("{what} reconciled")).await;
                     }
-                    assert!(r.is_err(), "{what}: a fault fired but the move succeeded");
-                    f.engine.reconcile_ops().await.unwrap();
-                    assert_nothing_lost(&f, &ids, &format!("{what} reconciled")).await;
                 }
             }
         }
     }
-    assert!(runs > 40, "only {runs} runs");
+    assert!(runs > 80, "only {runs} runs");
+}
+
+/// A rollback whose removal of the copy stops halfway keeps the complete
+/// copy it just put back, never the broken one.
+#[tokio::test]
+async fn partly_failed_remove_keeps_the_complete_copy() {
+    let f = Fx::new(&[
+        "Hook/a.stl",
+        "Hook/b.stl",
+        "Vase/vase.stl",
+        "Storage/Bin/bin.stl",
+    ])
+    .await;
+    let hook = f.find("Hook").await;
+    let vase = f.find("Vase").await;
+    // Hook's two files are copies 0 and 1; Vase's copy fails.
+    let _vase = faults::arm(f.root(), Op::Copy, 2, Action::Fail(ErrorKind::StorageFull));
+    // Removing Hook's copy takes one file and then fails.
+    let _half = faults::arm(
+        f.root(),
+        Op::Remove,
+        0,
+        Action::Instead(Box::new(|p| {
+            fs::remove_file(p.join("a.stl"))?;
+            Err(std::io::Error::other("stopped halfway"))
+        })),
+    );
+    let _cross = cross_drive(&f);
+    let r = f
+        .engine
+        .move_models(&[hook, vase], f.lib.id, "Storage")
+        .await;
+    assert!(r.is_err());
+    for p in ["Hook/a.stl", "Hook/b.stl", "Vase/vase.stl"] {
+        assert_eq!(fs::read_to_string(f.root().join(p)).unwrap(), p);
+    }
+    assert_eq!(
+        f.engine.model(hook).await.unwrap().unwrap().rel_path,
+        "Hook"
+    );
+    assert_eq!(last_op_state(&f).await, OpState::Failed);
+}
+
+/// Journals a one-step Copy move of folder model `Hook` to `Storage/Hook`
+/// and leaves it Planned, as a crash would; returns the engine reopened.
+async fn planned_copy(prepare: impl FnOnce(&Path)) -> (tempfile::TempDir, Engine, ModelId) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("lib");
+    write(&root, "Hook/hook.stl", "hook");
+    write(&root, "Other/x.stl", "x");
+    let data = dir.path().join("data");
+    let (id, lib) = {
+        let engine = Engine::open(&data).await.unwrap();
+        let lib = engine.add_library(&root, None).await.unwrap();
+        engine
+            .rescan(lib.id, CancellationToken::new())
+            .await
+            .unwrap();
+        let id = engine
+            .search("Hook", 10)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|h| h.name == "Hook")
+            .unwrap()
+            .id;
+        (id, lib)
+    };
+    let db = Db::open(&data.join("printdex.db")).await.unwrap();
+    db.insert_op(
+        OpKind::Move,
+        &[Step {
+            model: id,
+            kind: ModelKind::Folder,
+            name: "Hook".into(),
+            new_name: "Hook".into(),
+            from_lib: lib.id,
+            from_rel: "Hook".into(),
+            to_lib: lib.id,
+            to_rel: "Storage/Hook".into(),
+            how: How::Copy,
+        }],
+    )
+    .await
+    .unwrap();
+    drop(db);
+    prepare(&root);
+    let engine = Engine::open(&data).await.unwrap();
+    (dir, engine, id)
+}
+
+#[tokio::test]
+async fn reconcile_removes_a_partial_copy() {
+    let (dir, engine, id) = planned_copy(|root| {
+        write(root, "Storage/Hook/hook.stl", "ho");
+    })
+    .await;
+    let root = dir.path().join("lib");
+    assert!(!root.join("Storage/Hook").exists());
+    assert_eq!(
+        fs::read_to_string(root.join("Hook/hook.stl")).unwrap(),
+        "hook"
+    );
+    assert_eq!(engine.model(id).await.unwrap().unwrap().rel_path, "Hook");
+}
+
+#[tokio::test]
+async fn reconcile_keeps_a_target_that_is_not_a_copy() {
+    let (dir, engine, id) = planned_copy(|root| {
+        write(root, "Storage/Hook/hook.stl", "someone else's");
+    })
+    .await;
+    let root = dir.path().join("lib");
+    assert_eq!(
+        fs::read_to_string(root.join("Storage/Hook/hook.stl")).unwrap(),
+        "someone else's"
+    );
+    assert_eq!(
+        fs::read_to_string(root.join("Hook/hook.stl")).unwrap(),
+        "hook"
+    );
+    assert_eq!(engine.model(id).await.unwrap().unwrap().rel_path, "Hook");
+}
+
+#[tokio::test]
+async fn reconcile_never_removes_the_only_copy() {
+    // The copy finished and the original went to the trash.
+    let (dir, engine, id) = planned_copy(|root| {
+        write(root, "Storage/Hook/hook.stl", "hook");
+        fs::remove_dir_all(root.join("Hook")).unwrap();
+    })
+    .await;
+    let root = dir.path().join("lib");
+    assert_eq!(
+        fs::read_to_string(root.join("Storage/Hook/hook.stl")).unwrap(),
+        "hook"
+    );
+    assert_eq!(
+        engine.model(id).await.unwrap().unwrap().rel_path,
+        "Storage/Hook"
+    );
 }

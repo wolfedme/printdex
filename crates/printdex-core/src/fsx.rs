@@ -359,8 +359,29 @@ fn already_exists(to: &Path) -> io::Error {
     )
 }
 
+/// The inner error of [`copy_tree_verified`]'s refusal of a tree holding
+/// links or special files; see [`is_links_error`].
+#[derive(Debug)]
+struct LinksError;
+
+impl std::fmt::Display for LinksError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("contains links or special files")
+    }
+}
+
+impl std::error::Error for LinksError {}
+
+/// Whether `e` is [`copy_tree_verified`]'s refusal of a tree holding links
+/// or special files (not just any `Unsupported` error).
+pub fn is_links_error(e: &io::Error) -> bool {
+    e.kind() == ErrorKind::Unsupported
+        && e.get_ref()
+            .is_some_and(|inner| inner.downcast_ref::<LinksError>().is_some())
+}
+
 /// One entry of a tree to copy, relative to its root (empty for the root).
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Hash)]
 enum Entry {
     Dir(PathBuf),
     File(PathBuf),
@@ -413,7 +434,7 @@ pub fn copy_tree_verified(from: &Path, to: &Path) -> io::Result<()> {
 /// Lists the tree under `from` root first, sorted, refusing links and
 /// special files.
 fn scan_tree(from: &Path) -> io::Result<Vec<Entry>> {
-    let refuse = || io::Error::new(ErrorKind::Unsupported, "contains links or special files");
+    let refuse = || io::Error::new(ErrorKind::Unsupported, LinksError);
     let root = fs::symlink_metadata(from)?;
     if root.is_file() {
         return Ok(vec![Entry::File(PathBuf::new())]);
@@ -515,6 +536,75 @@ fn copy_and_verify(
     }
     let _ = sync_dir(parent_dir(to));
     Ok(())
+}
+
+/// How a tree `to` relates to a tree `from`, as [`copy_state`] finds it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CopyState {
+    /// The same entries with the same contents.
+    Complete,
+    /// What an interrupted [`copy_tree_verified`] of `from` could have left:
+    /// only entries `from` has, of the same kind, each file's bytes the
+    /// start of the source file's.
+    Partial,
+    /// Anything else: something `from` doesn't have, or different bytes.
+    NotACopy,
+}
+
+/// Compares `to` with `from` as a (possibly interrupted) copy of it, by
+/// listing both trees and reading every file in `to`. Symlinks or special
+/// files in `to` make it [`CopyState::NotACopy`]; in `from` they are an
+/// error. Read-only.
+pub fn copy_state(from: &Path, to: &Path) -> io::Result<CopyState> {
+    let src = scan_tree(from)?;
+    let dst = match scan_tree(to) {
+        Ok(d) => d,
+        Err(e) if is_links_error(&e) => return Ok(CopyState::NotACopy),
+        Err(e) => return Err(e),
+    };
+    if std::mem::discriminant(&src[0]) != std::mem::discriminant(&dst[0]) {
+        return Ok(CopyState::NotACopy);
+    }
+    let known: std::collections::HashSet<&Entry> = src.iter().collect();
+    let mut complete = src.len() == dst.len();
+    for e in &dst {
+        if !known.contains(e) {
+            return Ok(CopyState::NotACopy);
+        }
+        if let Entry::File(rel) = e {
+            match prefix_of(&under(from, rel), &under(to, rel))? {
+                None => return Ok(CopyState::NotACopy),
+                Some(whole) => complete &= whole,
+            }
+        }
+    }
+    Ok(if complete {
+        CopyState::Complete
+    } else {
+        CopyState::Partial
+    })
+}
+
+/// Whether the file `part`'s bytes are the start of `whole`'s: `None` if
+/// not, `Some(true)` if they are all of it.
+fn prefix_of(whole: &Path, part: &Path) -> io::Result<Option<bool>> {
+    let (mut w, mut p) = (File::open(whole)?, File::open(part)?);
+    let (wl, pl) = (w.metadata()?.len(), p.metadata()?.len());
+    if pl > wl {
+        return Ok(None);
+    }
+    let (mut wb, mut pb) = (vec![0u8; 64 * 1024], vec![0u8; 64 * 1024]);
+    let mut left = pl;
+    while left > 0 {
+        let n = (left as usize).min(pb.len());
+        p.read_exact(&mut pb[..n])?;
+        w.read_exact(&mut wb[..n])?;
+        if pb[..n] != wb[..n] {
+            return Ok(None);
+        }
+        left -= n as u64;
+    }
+    Ok(Some(pl == wl))
 }
 
 /// Size and xxh3-64 of a file's contents.
@@ -791,7 +881,97 @@ mod tests {
         let err = copy_tree_verified(&from, &to).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Unsupported);
         assert_eq!(err.to_string(), "contains links or special files");
+        assert!(is_links_error(&err));
+        assert!(!is_links_error(&io::Error::new(
+            ErrorKind::Unsupported,
+            "contains links or special files"
+        )));
         assert!(!to.exists());
+    }
+
+    #[test]
+    fn copy_state_tells_copies_from_strangers() {
+        let d = tempfile::tempdir().unwrap();
+        let from = d.path().join("from");
+        tree(&from, &[("a.stl", b"abcdef"), ("sub/b.stl", b"bb")]);
+        let at = |name: &str, files: &[(&str, &[u8])]| {
+            let p = d.path().join(name);
+            fs::create_dir_all(&p).unwrap();
+            tree(&p, files);
+            p
+        };
+        let same = at("same", &[("a.stl", b"abcdef"), ("sub/b.stl", b"bb")]);
+        let empty = at("empty", &[]);
+        let part = at("part", &[("a.stl", b"abc")]);
+        let other = at("other", &[("a.stl", b"abX")]);
+        let extra = at("extra", &[("a.stl", b"abcdef"), ("new.stl", b"n")]);
+        let longer = at("longer", &[("a.stl", b"abcdefg")]);
+        assert_eq!(copy_state(&from, &same).unwrap(), CopyState::Complete);
+        assert_eq!(copy_state(&from, &empty).unwrap(), CopyState::Partial);
+        assert_eq!(copy_state(&from, &part).unwrap(), CopyState::Partial);
+        assert_eq!(copy_state(&part, &from).unwrap(), CopyState::NotACopy);
+        assert_eq!(copy_state(&from, &other).unwrap(), CopyState::NotACopy);
+        assert_eq!(copy_state(&from, &extra).unwrap(), CopyState::NotACopy);
+        assert_eq!(copy_state(&from, &longer).unwrap(), CopyState::NotACopy);
+        // Single files.
+        let (f1, f2, f3) = (
+            d.path().join("f1"),
+            d.path().join("f2"),
+            d.path().join("f3"),
+        );
+        fs::write(&f1, b"hello").unwrap();
+        fs::write(&f2, b"he").unwrap();
+        fs::write(&f3, b"hello").unwrap();
+        assert_eq!(copy_state(&f1, &f2).unwrap(), CopyState::Partial);
+        assert_eq!(copy_state(&f1, &f3).unwrap(), CopyState::Complete);
+        assert_eq!(copy_state(&f1, &from).unwrap(), CopyState::NotACopy);
+    }
+
+    #[test]
+    fn instead_replaces_the_operation() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("x");
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let s2 = seen.clone();
+        let g = faults::arm(
+            d.path(),
+            Op::Trash,
+            0,
+            Action::Instead(Box::new(move |p| {
+                s2.lock().unwrap().push(p.to_path_buf());
+                Ok(())
+            })),
+        );
+        let mut ran = false;
+        faults::perform(Op::Trash, &p, || {
+            ran = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(!ran, "replaced");
+        assert_eq!(seen.lock().unwrap().as_slice(), std::slice::from_ref(&p));
+        assert_eq!(g.fired(), 1);
+        faults::perform(Op::Trash, &p, || {
+            ran = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(ran, "only once");
+        // A Fail wins over an Instead on the same operation.
+        let _i = faults::arm(
+            d.path(),
+            Op::Remove,
+            0,
+            Action::Instead(Box::new(|_| Ok(()))),
+        );
+        let _f = faults::arm(
+            d.path(),
+            Op::Remove,
+            0,
+            Action::Fail(ErrorKind::StorageFull),
+        );
+        let err = faults::perform(Op::Remove, &p, || Ok(())).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::StorageFull);
     }
 
     #[test]

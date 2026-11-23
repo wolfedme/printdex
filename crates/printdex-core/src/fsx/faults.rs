@@ -13,6 +13,12 @@
 //! - [`Action::Fail`] makes that operation return an error of that kind
 //!   instead of running. [`Action::Before`] calls the closure with the path,
 //!   then lets the real operation run.
+//! - [`Action::Instead`] runs the closure *in place of* the operation, at
+//!   call sites that go through [`perform`] (moving to the trash and
+//!   removing, in file actions), so tests can keep the system trash out of
+//!   it. Where a call site only uses [`check`], it acts like `Before` and
+//!   the closure's result is ignored. A `Fail` firing on the same operation
+//!   wins over it.
 //! - Dropping the [`FaultGuard`] disarms it.
 //!
 //! Which path each operation passes:
@@ -48,8 +54,20 @@ pub fn check(_op: Op, _path: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Runs `real`, the operation `op` on `path`, after [`check`]; an armed
+/// [`Action::Instead`] that fires replaces it.
+#[cfg(not(any(test, feature = "fault-injection")))]
+#[inline]
+pub fn perform(
+    _op: Op,
+    _path: &std::path::Path,
+    real: impl FnOnce() -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    real()
+}
+
 #[cfg(any(test, feature = "fault-injection"))]
-pub use armed::{Action, FaultGuard, arm, check};
+pub use armed::{Action, FaultGuard, InsteadFn, arm, check, perform};
 
 #[cfg(any(test, feature = "fault-injection"))]
 mod armed {
@@ -60,6 +78,9 @@ mod armed {
 
     use super::Op;
 
+    /// The closure of an [`Action::Instead`].
+    pub type InsteadFn = dyn Fn(&Path) -> io::Result<()> + Send + Sync;
+
     /// What an armed fault does to the operation it fires on.
     pub enum Action {
         /// The operation returns an error of this kind instead of running.
@@ -68,6 +89,10 @@ mod armed {
         /// runs as usual (for example, to change a file mid-copy, or to
         /// create the target of a rename).
         Before(Box<dyn Fn(&Path) + Send + Sync>),
+        /// The closure runs with the operation's path *instead of* the
+        /// operation, and its result is the operation's, at call sites that
+        /// use [`perform`]; elsewhere it acts like `Before`.
+        Instead(Box<InsteadFn>),
     }
 
     struct Armed {
@@ -131,6 +156,24 @@ mod armed {
     /// and returns the error of an [`Action::Fail`] that fires; callers
     /// return it instead of doing the operation.
     pub fn check(op: Op, path: &Path) -> io::Result<()> {
+        fire(op, path).map(|_| ())
+    }
+
+    /// Runs `real`, the operation `op` on `path`, after the checks of
+    /// [`check`]; an [`Action::Instead`] that fires runs in its place.
+    pub fn perform(op: Op, path: &Path, real: impl FnOnce() -> io::Result<()>) -> io::Result<()> {
+        match fire(op, path)? {
+            Some(instead) => match &*instead {
+                Action::Instead(f) => f(path),
+                _ => unreachable!("fire only returns Instead actions"),
+            },
+            None => real(),
+        }
+    }
+
+    /// Counts the operation, runs `Before` closures, and returns a `Fail`
+    /// error, or else the first `Instead` that fired.
+    fn fire(op: Op, path: &Path) -> io::Result<Option<Arc<Action>>> {
         let firing: Vec<Arc<Action>> = {
             let mut reg = registry();
             reg.iter_mut()
@@ -147,10 +190,16 @@ mod armed {
         };
         // Outside the lock: a `Before` closure may do file work of its own.
         let mut fail = None;
+        let mut instead = None;
         for action in firing {
             match &*action {
                 Action::Before(f) => f(path),
                 Action::Fail(kind) => fail = fail.or(Some(*kind)),
+                Action::Instead(_) => {
+                    if instead.is_none() {
+                        instead = Some(action.clone());
+                    }
+                }
             }
         }
         match fail {
@@ -158,7 +207,7 @@ mod armed {
                 kind,
                 format!("injected fault: {op:?} at {}", path.display()),
             )),
-            None => Ok(()),
+            None => Ok(instead),
         }
     }
 
