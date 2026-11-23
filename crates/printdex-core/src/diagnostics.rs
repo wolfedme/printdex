@@ -1,0 +1,430 @@
+//! Log file, crash records and the diagnostics bundle.
+//!
+//! [`init`] installs the tracing subscriber (stderr plus a daily rolling log
+//! file), [`install_panic_hook`] writes a `crash-<unix_ms>.txt` for every
+//! panic, and [`save_bundle`] zips the newest logs and crash records, with
+//! user paths removed by a [`Redactor`], for a bug report.
+
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, Layer};
+
+const LOG_PREFIX: &str = "printdex.log";
+const CRASH_PREFIX: &str = "crash-";
+const CRASH_SUFFIX: &str = ".txt";
+const SEEN_MARKER: &str = ".crash-seen";
+const MAX_LOG_FILES: usize = 7;
+const BUNDLE_LOGS: usize = 3;
+const BUNDLE_CRASHES: usize = 5;
+
+/// The folder holding logs and crash records inside the data directory.
+pub fn log_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join("logs")
+}
+
+fn make_file_writer(dir: &Path) -> io::Result<(NonBlocking, WorkerGuard)> {
+    std::fs::create_dir_all(dir)?;
+    let appender = tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix(LOG_PREFIX)
+        .max_log_files(MAX_LOG_FILES)
+        .build(dir)
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    Ok(tracing_appender::non_blocking(appender))
+}
+
+/// Installs the global subscriber: stderr plus a daily rolling file
+/// `printdex.log` keeping 7 files. If the folder can't be created or
+/// written, only stderr is used and `None` is returned. Keep the guard alive
+/// for the life of the process so buffered lines are flushed.
+pub fn init(log_dir: &Path, filter: &str) -> Option<WorkerGuard> {
+    let filter = || EnvFilter::try_new(filter).unwrap_or_else(|_| EnvFilter::new("info"));
+    let stderr = tracing_subscriber::fmt::layer()
+        .with_writer(io::stderr)
+        .with_filter(filter());
+    let (file_layer, guard) = match make_file_writer(log_dir) {
+        Ok((writer, guard)) => {
+            let layer = tracing_subscriber::fmt::layer()
+                .with_writer(writer)
+                .with_ansi(false)
+                .with_filter(filter());
+            (Some(layer), Some(guard))
+        }
+        Err(e) => {
+            eprintln!("printdex: log file unavailable ({e}); logging to stderr only");
+            (None, None)
+        }
+    };
+    // A second call finds the global subscriber taken; that is not an error.
+    let _ = tracing_subscriber::registry()
+        .with(stderr)
+        .with(file_layer)
+        .try_init();
+    guard
+}
+
+fn unix_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+}
+
+/// Writes one crash file. Never panics.
+fn write_crash(
+    dir: &Path,
+    version: &str,
+    message: &str,
+    location: &str,
+    thread: &str,
+) -> io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let at = unix_ms();
+    let path = dir.join(format!("{CRASH_PREFIX}{at}{CRASH_SUFFIX}"));
+    let backtrace = std::backtrace::Backtrace::force_capture();
+    let body = format!(
+        "Printdex {version} crashed\ntime: {at}\nos: {} {}\nthread: {thread}\nmessage: {}\nlocation: {location}\nbacktrace:\n{backtrace}\n",
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        message.replace(['\r', '\n'], " "),
+    );
+    std::fs::write(&path, body)?;
+    Ok(path)
+}
+
+/// Writes `crash-<unix_ms>.txt` into `log_dir` on every panic, then calls
+/// the previous hook.
+pub fn install_panic_hook(log_dir: PathBuf, version: &'static str) {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info.payload();
+        let message = payload
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "non-string panic".to_string());
+        let location = info.location().map_or_else(
+            || "unknown".to_string(),
+            |l| format!("{}:{}:{}", l.file(), l.line(), l.column()),
+        );
+        let thread = std::thread::current();
+        let name = thread.name().unwrap_or("unnamed");
+        let _ = write_crash(&log_dir, version, &message, &location, name);
+        previous(info);
+    }));
+}
+
+/// A crash record left by an earlier run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CrashReport {
+    /// The crash file.
+    pub path: PathBuf,
+    /// When the crash happened, in unix milliseconds.
+    pub at_ms: i64,
+    /// The panic message.
+    pub message: String,
+    /// Where it panicked, `file:line:col`.
+    pub location: String,
+}
+
+fn crash_files(dir: &Path) -> Vec<(i64, PathBuf)> {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<(i64, PathBuf)> = read
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let ms = name
+                .strip_prefix(CRASH_PREFIX)?
+                .strip_suffix(CRASH_SUFFIX)?
+                .parse()
+                .ok()?;
+            Some((ms, e.path()))
+        })
+        .collect();
+    files.sort_by(|a, b| b.cmp(a));
+    files
+}
+
+/// The newest crash file written after the last [`mark_crashes_seen`].
+pub fn unseen_crash(log_dir: &Path) -> Option<CrashReport> {
+    let seen = std::fs::metadata(log_dir.join(SEEN_MARKER))
+        .and_then(|m| m.modified())
+        .ok();
+    let (at_ms, path) = crash_files(log_dir).into_iter().next()?;
+    if let Some(seen) = seen {
+        let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok()?;
+        if modified <= seen {
+            return None;
+        }
+    }
+    let text = std::fs::read_to_string(&path).ok()?;
+    let field = |key: &str| {
+        text.lines()
+            .find_map(|l| l.strip_prefix(key))
+            .unwrap_or_default()
+            .to_string()
+    };
+    Some(CrashReport {
+        path,
+        at_ms,
+        message: field("message: "),
+        location: field("location: "),
+    })
+}
+
+/// Hides the crashes written so far from [`unseen_crash`].
+pub fn mark_crashes_seen(log_dir: &Path) -> io::Result<()> {
+    std::fs::create_dir_all(log_dir)?;
+    std::fs::write(log_dir.join(SEEN_MARKER), b"")
+}
+
+/// Replaces library folders with `<library N>` and the home folder with `~`.
+#[derive(Debug, Clone)]
+pub struct Redactor {
+    /// Normalised needle and its replacement, most specific first.
+    rules: Vec<(Vec<u8>, String)>,
+}
+
+fn normalise(s: &str) -> Vec<u8> {
+    // ASCII-only changes keep every byte offset equal to the original's.
+    s.bytes()
+        .map(|b| {
+            if b == b'\\' {
+                b'/'
+            } else {
+                b.to_ascii_lowercase()
+            }
+        })
+        .collect()
+}
+
+/// Whether `b` may follow a matched folder: a separator or punctuation, not
+/// the middle of a longer name.
+fn ends_component(b: u8) -> bool {
+    b == b'/' || (b.is_ascii() && !b.is_ascii_alphanumeric() && !matches!(b, b'_' | b'-' | b'.'))
+}
+
+impl Redactor {
+    /// Libraries are numbered from 1 in the order given.
+    pub fn new(home: Option<&Path>, libraries: &[PathBuf]) -> Redactor {
+        let mut rules = Vec::new();
+        let mut add = |path: &Path, replacement: String| {
+            let mut needle = normalise(&path.to_string_lossy());
+            while needle.last() == Some(&b'/') {
+                needle.pop();
+            }
+            if !needle.is_empty() {
+                rules.push((needle, replacement));
+            }
+        };
+        for (i, lib) in libraries.iter().enumerate() {
+            add(lib, format!("<library {}>", i + 1));
+        }
+        if let Some(home) = home {
+            add(home, "~".to_string());
+        }
+        Redactor { rules }
+    }
+
+    /// Returns `text` with the known folders replaced. Only whole path
+    /// components match, so `/home/max` leaves `/home/maxwell` alone.
+    pub fn apply(&self, text: &str) -> String {
+        let norm = normalise(text);
+        let mut out = String::with_capacity(text.len());
+        let mut i = 0;
+        let mut copied = 0;
+        while i < norm.len() {
+            let hit = self.rules.iter().find(|(needle, _)| {
+                norm[i..].starts_with(needle)
+                    && norm
+                        .get(i + needle.len())
+                        .is_none_or(|&b| ends_component(b))
+            });
+            match hit {
+                Some((needle, replacement)) => {
+                    out.push_str(&text[copied..i]);
+                    out.push_str(replacement);
+                    i += needle.len();
+                    copied = i;
+                }
+                None => i += 1,
+            }
+        }
+        out.push_str(&text[copied..]);
+        out
+    }
+}
+
+/// The version, OS and renderer, as plain text for a bug report.
+pub fn system_summary(version: &str, renderer: &str) -> String {
+    let os_version = sysinfo::System::long_os_version().unwrap_or_else(|_| "unknown".to_string());
+    format!(
+        "Printdex {version}\nos: {} {}\nos version: {os_version}\nrenderer: {renderer}\n",
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    )
+}
+
+/// Writes a zip with `summary.txt`, the 3 newest `printdex.log*` files and
+/// the 5 newest `crash-*.txt`, each passed through `redactor`.
+pub fn save_bundle(
+    log_dir: &Path,
+    dest: &Path,
+    summary: &str,
+    redactor: &Redactor,
+) -> io::Result<()> {
+    let mut logs: Vec<PathBuf> = std::fs::read_dir(log_dir)
+        .map(|r| r.flatten().map(|e| e.path()).collect())
+        .unwrap_or_default();
+    logs.retain(|p| {
+        p.file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with(LOG_PREFIX))
+    });
+    // Dated suffixes sort chronologically, so the largest names are newest.
+    logs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    logs.truncate(BUNDLE_LOGS);
+    let crashes: Vec<PathBuf> = crash_files(log_dir)
+        .into_iter()
+        .take(BUNDLE_CRASHES)
+        .map(|(_, p)| p)
+        .collect();
+
+    let zip_err = |e: zip::result::ZipError| io::Error::other(e.to_string());
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(dest)?);
+    let options = zip::write::SimpleFileOptions::default();
+    zip.start_file("summary.txt", options).map_err(zip_err)?;
+    zip.write_all(redactor.apply(summary).as_bytes())?;
+    for path in logs.iter().chain(&crashes) {
+        let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        let bytes = std::fs::read(path)?;
+        zip.start_file(name, options).map_err(zip_err)?;
+        zip.write_all(redactor.apply(&String::from_utf8_lossy(&bytes)).as_bytes())?;
+    }
+    zip.finish().map_err(zip_err)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+    use std::time::Duration;
+
+    #[test]
+    fn init_without_writable_folder_falls_back_to_stderr() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("afile");
+        std::fs::write(&file, b"x").unwrap();
+        assert!(make_file_writer(&file.join("logs")).is_err());
+        assert!(init(&file.join("logs"), "info").is_none());
+    }
+
+    #[test]
+    fn panic_hook_writes_crash_file_from_any_thread() {
+        let tmp = tempfile::tempdir().unwrap();
+        install_panic_hook(tmp.path().to_path_buf(), "9.9.9");
+        let joined = std::thread::spawn(|| panic!("boom")).join();
+        assert!(joined.is_err());
+        // Restore the default hook so later panics do not write here.
+        let _ = std::panic::take_hook();
+        let crash = unseen_crash(tmp.path()).expect("crash file written");
+        assert_eq!(crash.message, "boom");
+        let (file, rest) = crash.location.rsplit_once(':').unwrap();
+        let (file, line) = file.rsplit_once(':').unwrap();
+        assert!(file.ends_with("diagnostics.rs"), "{file}");
+        assert!(line.parse::<u32>().is_ok() && rest.parse::<u32>().is_ok());
+        let text = std::fs::read_to_string(&crash.path).unwrap();
+        assert!(text.starts_with("Printdex 9.9.9 crashed\ntime: "));
+        assert!(text.contains("\nthread: unnamed\n"));
+        assert!(text.contains("\nbacktrace:\n"));
+    }
+
+    #[test]
+    fn write_crash_records_non_string_parts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = write_crash(
+            tmp.path(),
+            "1.0",
+            "line one\nline two",
+            "a.rs:1:2",
+            "worker",
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(path).unwrap();
+        assert!(text.contains("thread: worker\nmessage: line one line two\nlocation: a.rs:1:2\n"));
+    }
+
+    #[test]
+    fn crash_seen_marker_hides_older_crashes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        write_crash(dir, "1", "first", "a.rs:1:1", "t").unwrap();
+        assert_eq!(unseen_crash(dir).unwrap().message, "first");
+        std::thread::sleep(Duration::from_millis(50));
+        mark_crashes_seen(dir).unwrap();
+        assert!(unseen_crash(dir).is_none());
+        std::thread::sleep(Duration::from_millis(50));
+        write_crash(dir, "1", "second", "a.rs:2:2", "t").unwrap();
+        assert_eq!(unseen_crash(dir).unwrap().message, "second");
+    }
+
+    #[test]
+    fn redacts_home_and_libraries_any_slash_any_case() {
+        let r = Redactor::new(Some(Path::new("C:\\Users\\Max")), &["D:\\Prints".into()]);
+        assert_eq!(
+            r.apply("c:/users/max/x and D:\\prints\\a.stl"),
+            "~/x and <library 1>\\a.stl"
+        );
+        let r = Redactor::new(Some(Path::new("/home/max")), &[]);
+        assert_eq!(r.apply("/home/max/.local"), "~/.local");
+        assert_eq!(r.apply("/home/maxwell/x"), "/home/maxwell/x");
+        assert_eq!(r.apply("é /home/max"), "é ~");
+    }
+
+    #[test]
+    fn bundle_holds_summary_logs_and_crashes_redacted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("logs");
+        std::fs::create_dir_all(&dir).unwrap();
+        let home = "/home/max";
+        for d in 1..=4 {
+            let name = format!("printdex.log.2026-11-0{d}");
+            std::fs::write(dir.join(name), format!("opened {home}/Prints/{d}")).unwrap();
+        }
+        for ms in 1..=6 {
+            std::fs::write(dir.join(format!("crash-{ms}.txt")), format!("at {home}/x")).unwrap();
+        }
+        let dest = tmp.path().join("bundle.zip");
+        let r = Redactor::new(Some(Path::new(home)), &[]);
+        save_bundle(&dir, &dest, &format!("summary {home}"), &r).unwrap();
+
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();
+        let mut names: Vec<String> = zip.file_names().map(|n| n.unwrap().into_owned()).collect();
+        names.sort();
+        assert_eq!(names.len(), 1 + 3 + 5, "{names:?}");
+        assert!(names.contains(&"summary.txt".to_string()));
+        assert!(!names.contains(&"crash-1.txt".to_string()));
+        assert!(!names.contains(&"printdex.log.2026-11-01".to_string()));
+        for name in &names {
+            let mut s = String::new();
+            zip.by_name(name).unwrap().read_to_string(&mut s).unwrap();
+            assert!(!s.contains(home), "{name}: {s}");
+            assert!(s.contains('~'), "{name}: {s}");
+        }
+    }
+
+    #[test]
+    fn system_summary_lists_parts() {
+        let s = system_summary("1.2.3", "software");
+        assert!(s.contains("Printdex 1.2.3") && s.contains("renderer: software"));
+        assert!(s.contains(std::env::consts::OS));
+    }
+}
