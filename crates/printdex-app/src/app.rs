@@ -78,6 +78,17 @@ pub struct Options {
     pub crash: Option<CrashReport>,
 }
 
+/// What Settings > About > Report a bug does.
+#[derive(Clone, Debug)]
+pub enum ReportUx {
+    /// Open a prefilled GitHub issue in the browser.
+    OpenIssue,
+    /// Ask where to save the diagnostics zip, then write it.
+    SaveDiagnostics,
+    /// The zip was written to this path, or why it wasn't.
+    Saved(Result<PathBuf, String>),
+}
+
 /// What the crash notice's buttons do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CrashUx {
@@ -241,6 +252,7 @@ pub enum Message {
     MonitorStarted(Arc<printdex_core::Monitor>),
     Files(crate::files::Fx),
     CrashNotice(CrashUx),
+    Report(ReportUx),
     Updates(crate::updates::Ux),
     Backup(crate::backup_ui::Bx),
     Sync(crate::sync_ui::Sx),
@@ -1055,6 +1067,7 @@ impl App {
                     Task::none()
                 }
             },
+            Message::Report(ux) => self.on_report(ux),
             Message::OpenSettings => {
                 self.screen = Screen::Settings;
                 Task::none()
@@ -1435,6 +1448,69 @@ impl App {
         }
     }
 
+    fn redactor(&self) -> diagnostics::Redactor {
+        let home = directories::BaseDirs::new().map(|b| b.home_dir().to_path_buf());
+        let roots: Vec<PathBuf> = self.libraries.iter().map(|l| l.path.clone()).collect();
+        diagnostics::Redactor::new(home.as_deref(), &roots)
+    }
+
+    fn system_summary(&self) -> String {
+        let backend = std::env::var("ICED_BACKEND").ok();
+        let renderer = crate::report::renderer_label(self.viewer.software, backend.as_deref());
+        diagnostics::system_summary(env!("CARGO_PKG_VERSION"), renderer)
+    }
+
+    fn on_report(&mut self, ux: ReportUx) -> Task<Message> {
+        match ux {
+            ReportUx::OpenIssue => {
+                // The record from startup, which Dismiss doesn't clear.
+                let url = crate::report::issue_url(
+                    &self.system_summary(),
+                    self.options.crash.as_ref(),
+                    &self.redactor(),
+                );
+                launch(move || opener::open_browser(url))
+            }
+            ReportUx::SaveDiagnostics => {
+                let log_dir = diagnostics::log_dir(&self.options.data_dir);
+                let summary = self.system_summary();
+                let redactor = self.redactor();
+                let name =
+                    crate::report::bundle_name(&jiff::ZonedDateTime::now().date().to_string());
+                Task::perform(
+                    async move {
+                        let dest = rfd::AsyncFileDialog::new()
+                            .set_file_name(name)
+                            .add_filter("zip", &["zip"])
+                            .save_file()
+                            .await?
+                            .path()
+                            .to_path_buf();
+                        let out = dest.clone();
+                        let done = tokio::task::spawn_blocking(move || {
+                            diagnostics::save_bundle(&log_dir, &dest, &summary, &redactor)
+                        })
+                        .await;
+                        Some(match done {
+                            Ok(Ok(())) => Ok(out),
+                            Ok(Err(e)) => Err(e.to_string()),
+                            Err(e) => Err(e.to_string()),
+                        })
+                    },
+                    |r| match r {
+                        Some(r) => Message::Report(ReportUx::Saved(r)),
+                        None => Message::Launched(Ok(())),
+                    },
+                )
+            }
+            ReportUx::Saved(Ok(_)) => self.show_info(t("report-saved")),
+            ReportUx::Saved(Err(e)) => {
+                tracing::warn!(error = %e, "could not save diagnostics");
+                self.show_info(t_args("report-save-failed", &[("error", Arg::str(e))]))
+            }
+        }
+    }
+
     /// A short success note, bottom centre, in the undo toast's place.
     pub(crate) fn show_info(&mut self, text: String) -> Task<Message> {
         if self.files.toast.is_some() {
@@ -1782,6 +1858,19 @@ mod tests {
             message: "boom".into(),
             location: "x.rs:1:1".into(),
         }
+    }
+
+    #[tokio::test]
+    async fn report_saved_and_failed_show_a_note() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut a = App::new(Options::in_memory(dir.path().to_path_buf()));
+        let _ = a.update(Message::Report(ReportUx::Saved(Ok(dir
+            .path()
+            .join("d.zip")))));
+        assert_eq!(a.files.info.as_deref(), Some("Diagnostics saved"));
+        a.files.info = None;
+        let _ = a.update(Message::Report(ReportUx::Saved(Err("disk full".into()))));
+        assert!(a.files.info.as_deref().unwrap().contains("disk full"));
     }
 
     #[test]

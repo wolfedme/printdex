@@ -868,6 +868,7 @@ fn about(app: &App, p: Palette) -> Element<'_, Message> {
         .width(Length::Fill)
         .style(move |_| p.pane(false, false)),
         updates(app, p),
+        report(p),
     ]
     .spacing(theme::S6)
     .into()
@@ -950,6 +951,41 @@ fn updates(app: &App, p: Palette) -> Element<'_, Message> {
         ]
         .spacing(theme::S6)
         .align_y(Alignment::Center),
+    ]
+    .spacing(theme::S5)
+    .into()
+}
+
+/// Settings › About › Report a bug: a prefilled GitHub issue, or a file
+/// with logs to send another way.
+fn report(p: Palette) -> Element<'static, Message> {
+    use crate::app::ReportUx;
+    column![
+        text(t("report-title"))
+            .size(theme::SIZE_SECTION)
+            .font(theme::FONT_BOLD)
+            .color(p.n.ink),
+        widgets::hairline(p),
+        text(t("report-body"))
+            .size(theme::SIZE_BODY)
+            .color(p.n.ink_2),
+        row![
+            widgets::icon_button(
+                p,
+                Icon::ExternalLink,
+                t("report-open-issue"),
+                Palette::button_primary,
+                Some(Message::Report(ReportUx::OpenIssue)),
+            ),
+            widgets::icon_button(
+                p,
+                Icon::File,
+                t("report-save"),
+                Palette::button_secondary,
+                Some(Message::Report(ReportUx::SaveDiagnostics)),
+            ),
+        ]
+        .spacing(theme::S4),
     ]
     .spacing(theme::S5)
     .into()
