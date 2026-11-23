@@ -880,3 +880,175 @@ async fn partly_failed_trash_keeps_the_model() {
     assert!(d.missing_since.is_none());
     assert_eq!(last_op_state(&f).await, OpState::Failed);
 }
+
+/// Sends what the fixture's actions trash to a `.test-trash` folder
+/// instead of the system trash.
+fn test_trash(f: &Fx) -> Vec<FaultGuard> {
+    let bin = f.dir.path().join(".test-trash");
+    (0..64)
+        .map(|k| {
+            let bin = bin.clone();
+            faults::arm(
+                f.root(),
+                Op::Trash,
+                k,
+                Action::Instead(Box::new(move |p| {
+                    fs::create_dir_all(&bin)?;
+                    fs::rename(p, bin.join(k.to_string()))
+                })),
+            )
+        })
+        .collect()
+}
+
+/// What [`fault_at_every_step_of_rename_undo_and_trash`] runs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Action1 {
+    Rename,
+    Undo,
+    Trash,
+}
+
+/// A single-file model `A/one.stl` with its sidecar, sidecar writer off.
+async fn one_file_fixture() -> (Fx, ModelId) {
+    let f = Fx::new(&["A/one.stl", "A/Sub/x.stl"]).await;
+    fs::write(f.root().join("A/.one.stl.printdex.toml"), "side").unwrap();
+    f.engine.set_sidecars(f.lib.id, false).await.unwrap();
+    let id = f.find("one").await;
+    (f, id)
+}
+
+/// The model file and its sidecar are each at most once, intact, at the
+/// old or the new name, side by side, and otherwise in the test trash;
+/// nothing else appeared; the database points where the file is.
+async fn assert_one_file_kept(f: &Fx, id: ModelId, what: &str) {
+    let root = f.root();
+    let bin = f.dir.path().join(".test-trash");
+    let mut binned = Vec::new();
+    if bin.exists() {
+        for e in fs::read_dir(&bin).unwrap() {
+            binned.push(fs::read_to_string(e.unwrap().path()).unwrap());
+        }
+    }
+    let mut sides = Vec::new();
+    for (name, body) in [("one.stl", "A/one.stl"), (".one.stl.printdex.toml", "side")] {
+        let at: Vec<String> = [name.to_owned(), name.replace("one", "uno")]
+            .into_iter()
+            .filter(|n| root.join("A").join(n).exists())
+            .collect();
+        // Across drives the original of a copy goes to the trash as well.
+        let in_bin = binned.iter().filter(|b| *b == body).count();
+        assert!(
+            at.len() <= 1 && at.len() + in_bin >= 1,
+            "{what}: {name} at {at:?}, {in_bin} in the trash"
+        );
+        if let Some(n) = at.first() {
+            assert_eq!(
+                fs::read_to_string(root.join("A").join(n)).unwrap(),
+                body,
+                "{what}"
+            );
+        }
+        sides.push(at.first().map(|n| n.contains("uno")));
+    }
+    let mut all = Vec::new();
+    files_under(root, root, &mut all);
+    for p in &all {
+        assert!(
+            [
+                "A/one.stl",
+                "A/uno.stl",
+                "A/.one.stl.printdex.toml",
+                "A/.uno.stl.printdex.toml",
+                "A/Sub/x.stl"
+            ]
+            .contains(&p.as_str()),
+            "{what}: stray file {p}"
+        );
+    }
+    match sides[0] {
+        Some(renamed) => {
+            if let Some(side) = sides[1] {
+                assert_eq!(side, renamed, "{what}: sidecar apart from its model");
+            }
+            let d = f.engine.model(id).await.unwrap().unwrap();
+            let rel = if renamed { "A/uno.stl" } else { "A/one.stl" };
+            assert_eq!(d.rel_path, rel, "{what}: database disagrees with disk");
+            assert!(d.missing_since.is_none(), "{what}");
+        }
+        // Trashed: the database may still show it until the next scan,
+        // but never at another path.
+        None => {
+            if let Some(d) = f.engine.model(id).await.unwrap() {
+                assert_eq!(d.rel_path, "A/one.stl", "{what}");
+            }
+        }
+    }
+}
+
+/// Like [`fault_at_every_step_loses_nothing`], for renaming a model,
+/// undoing that rename and trashing a model: fails (or crashes at) the n-th
+/// operation of each kind in turn until none fires, same drive and across
+/// drives, and checks nothing is lost before and after `reconcile_ops`.
+#[tokio::test]
+async fn fault_at_every_step_of_rename_undo_and_trash() {
+    let ops = [Op::Write, Op::Rename, Op::Copy, Op::Remove, Op::Trash];
+    let mut runs = 0;
+    for action in [Action1::Rename, Action1::Undo, Action1::Trash] {
+        for crash in [false, true] {
+            for cross in [false, true] {
+                for op in ops {
+                    for n in 0.. {
+                        assert!(n < 100, "{op:?} never ran out of faults");
+                        runs += 1;
+                        let what = format!("{action:?} crash={crash} cross={cross} {op:?} #{n}");
+                        let (f, id) = one_file_fixture().await;
+                        let undo = match action {
+                            Action1::Undo => {
+                                Some(f.engine.rename_model(id, "uno").await.unwrap().id)
+                            }
+                            _ => None,
+                        };
+                        let fa = if crash {
+                            Action::Before(Box::new(|_| panic!("simulated crash")))
+                        } else {
+                            Action::Fail(ErrorKind::Other)
+                        };
+                        // Armed after the rename an undo needs, so the n-th
+                        // counts only this action's operations, and before
+                        // the forced cross-drive errors, so it wins.
+                        let fault = faults::arm(f.root(), op, n, fa);
+                        let forced = if cross {
+                            cross_drive(&f)
+                        } else {
+                            test_trash(&f)
+                        };
+                        let r = match (action, undo) {
+                            (Action1::Rename, _) => f.engine.rename_model(id, "uno").await,
+                            (Action1::Undo, Some(op)) => f.engine.undo(op).await,
+                            _ => f.engine.trash_models(&[id]).await,
+                        };
+                        let fired = fault.fired();
+                        drop(fault);
+                        if fired == 0 {
+                            assert!(r.is_ok(), "{what}: {r:?}");
+                            drop(forced);
+                            assert_one_file_kept(&f, id, &what).await;
+                            break;
+                        }
+                        assert!(r.is_err(), "{what}: a fault fired but it succeeded");
+                        if crash {
+                            assert_eq!(last_op_state(&f).await, OpState::Planned, "{what}");
+                        } else {
+                            assert_one_file_kept(&f, id, &what).await;
+                        }
+                        f.engine.reconcile_ops().await.unwrap();
+                        drop(forced);
+                        assert_one_file_kept(&f, id, &format!("{what} reconciled")).await;
+                    }
+                }
+            }
+        }
+    }
+    assert!(runs > 30, "only {runs} runs");
+}

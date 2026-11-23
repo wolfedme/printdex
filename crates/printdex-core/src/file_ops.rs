@@ -866,16 +866,25 @@ fn settle_step(from: &Path, to: &Path, how: How, sides: Option<(PathBuf, PathBuf
         (true, true) if how == How::Copy => drop_copy(from, to) == Some(false),
         _ => false,
     };
-    if let Some((side_from, side_to)) = sides
-        && side_from.exists()
-        && side_to.exists()
-    {
-        let (keep, other) = if at_target {
+    if let Some((side_from, side_to)) = sides {
+        let (here, there) = if at_target {
             (side_to, side_from)
         } else {
             (side_from, side_to)
         };
-        drop_copy(&keep, &other);
+        match (here.exists(), there.exists()) {
+            (true, true) => {
+                drop_copy(&here, &there);
+            }
+            // The crash came between the model and its sidecar: the
+            // sidecar joins the model.
+            (false, true) => {
+                if let Err((path, e)) = move_path(&there, &here, &no_journal) {
+                    tracing::warn!(path = %path.display(), error = %e, "after a crash a sidecar stays apart from its model");
+                }
+            }
+            _ => {}
+        }
     }
     at_target
 }
