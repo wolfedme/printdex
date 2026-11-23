@@ -44,8 +44,17 @@ gethostname.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 opendal = { workspace = true, features = ["services-sftp"] }
+# fsx::rename_no_replace: renameat2(RENAME_NOREPLACE) / renameatx_np(RENAME_EXCL).
+rustix = { version = "1", features = ["fs"] }
+
+[features]
+# Turns on fsx::faults::arm so integration tests can fail or interfere with
+# the n-th file operation under a folder. Never enabled in release builds.
+fault-injection = []
 
 [dev-dependencies]
+# Itself, with fault injection on, for tests/it.
+printdex-core = { path = ".", features = ["fault-injection"] }
 tempfile.workspace = true
 
 [lints]
