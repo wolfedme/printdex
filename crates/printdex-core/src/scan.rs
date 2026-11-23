@@ -1147,7 +1147,7 @@ mod tests {
         let f = Fixture::new(&[]).await;
         write(&f.root, "Box/box.3mf", &threemf_with("PETG"));
         f.scan().await;
-        // As a database from before migration 0008 left it.
+        // As a database from before migration 0009 left it.
         sqlx::query(
             "UPDATE parts SET file_material = NULL, material_fp = NULL, path_material = NULL",
         )

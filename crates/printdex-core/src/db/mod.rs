@@ -75,7 +75,7 @@ impl Db {
             reader,
             photo_dir,
         };
-        // Parts from before path materials were stored (migration 0008).
+        // Parts from before path materials were stored (migration 0009).
         db.fill_path_materials().await?;
         Ok(db)
     }
@@ -93,5 +93,23 @@ impl Db {
     /// The reader pool, so searches never wait behind a scan's writes.
     pub(crate) fn reader(&self) -> &SqlitePool {
         &self.reader
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    /// Two branches merged migrations with the same number once (0008),
+    /// which made every fresh database fail to open.
+    #[test]
+    fn migration_versions_are_unique() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        let mut seen = std::collections::HashMap::new();
+        for e in std::fs::read_dir(&dir).expect("migrations folder") {
+            let name = e.expect("entry").file_name().to_string_lossy().into_owned();
+            let version = name.split('_').next().unwrap_or_default().to_owned();
+            if let Some(other) = seen.insert(version.clone(), name.clone()) {
+                panic!("migrations {other} and {name} share version {version}");
+            }
+        }
     }
 }
