@@ -9,7 +9,6 @@
 
 pub mod faults;
 
-use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
@@ -42,21 +41,19 @@ pub enum Durability {
 /// file and, on Unix, the folder (filesystems that can't fsync a folder,
 /// like some network mounts, are tolerated).
 ///
+/// With `UserData`, an `Err` from the final folder fsync means the rename
+/// already happened: the new contents are in place, but may not survive a
+/// power cut.
+///
+/// The `<name>` part of the temporary name is cut (on a character
+/// boundary) so the whole name stays within 255 bytes.
+///
 /// The new file gets default permissions, not the old file's.
 ///
 /// Fault injection: [`Op::Write`] and then [`Op::Rename`], both with `path`.
 pub fn durable_write(path: &Path, bytes: &[u8], d: Durability) -> io::Result<()> {
-    let name = path.file_name().ok_or_else(|| {
-        io::Error::new(
-            ErrorKind::InvalidInput,
-            format!("no file name in {}", path.display()),
-        )
-    })?;
+    let tmp = temp_sibling(path)?;
     let dir = parent_dir(path);
-    let mut tmp_name = OsString::from(".");
-    tmp_name.push(name);
-    tmp_name.push(format!(".tmp-{}", uuid::Uuid::now_v7().simple()));
-    let tmp = dir.join(tmp_name);
 
     let file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
     if let Err(e) = write_then_rename(file, &tmp, path, bytes, d) {
@@ -85,6 +82,29 @@ fn write_then_rename(
     drop(file);
     faults::check(Op::Rename, path)?;
     fs::rename(tmp, path)
+}
+
+/// Room for `<name>` in `.<name>.tmp-<32 hex>` within a 255-byte name.
+const TEMP_NAME_PART_MAX: usize = 255 - ".".len() - ".tmp-".len() - 32;
+
+/// A fresh `.<name>.tmp-<uuid v7 simple>` next to `path`, with `<name>` cut
+/// to [`TEMP_NAME_PART_MAX`] bytes on a character boundary. A name that
+/// isn't valid Unicode is converted lossily; the temporary name only has to
+/// be unique and recognisable to [`sweep_temp_files`].
+fn temp_sibling(path: &Path) -> io::Result<PathBuf> {
+    let name = path.file_name().ok_or_else(|| {
+        io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("no file name in {}", path.display()),
+        )
+    })?;
+    let name = name.to_string_lossy();
+    let mut end = name.len().min(TEMP_NAME_PART_MAX);
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    let uuid = uuid::Uuid::now_v7().simple();
+    Ok(parent_dir(path).join(format!(".{}.tmp-{uuid}", &name[..end])))
 }
 
 /// The folder holding `path`; `.` for a bare file name.
@@ -121,19 +141,35 @@ fn sync_dir(_dir: &Path) -> io::Result<()> {
 ///   folder goes through `std::fs::rename`, which Windows refuses to let
 ///   replace a folder, after checking that `to` is missing.
 /// - Where the filesystem doesn't support that (`EINVAL`, `ENOSYS`,
-///   `EOPNOTSUPP` on Unix; `Unsupported` or `PermissionDenied` from
-///   `hard_link` on FAT or SMB) and on other platforms, it falls back to:
-///   check `to` is missing, `std::fs::rename`, then check `from` is gone and
-///   `to` exists. That fallback has a small race window between the check
-///   and the rename.
+///   `EOPNOTSUPP` on Unix; `Unsupported`, `ERROR_INVALID_FUNCTION` or
+///   `ERROR_NOT_SUPPORTED` from `hard_link` on FAT or SMB) and on other
+///   platforms, it falls back to the check-rename-verify of
+///   `rename_fallback`, which has a race window (see there).
 ///
-/// On a case-insensitive filesystem a rename that only changes case is
-/// refused, because `to` already "exists".
+/// A rename that only changes case ("Benchy" to "benchy" in the same
+/// folder) works on case-insensitive filesystems too, where `to` "exists"
+/// because it names `from` itself. When the no-replace rename reports
+/// `AlreadyExists`, `from` and `to` are the same file (same device and
+/// inode on Unix, same canonical path elsewhere) and their names differ
+/// only in case, it renames in two no-replace steps through a temporary
+/// sibling `.<name>.tmp-<uuid>`, moving it back to `from` if the second
+/// step fails. A hard link under a name differing only in case (possible
+/// on case-sensitive filesystems) is therefore still refused: the second
+/// step finds `to` in place.
 ///
-/// Fault injection: [`Op::Rename`] with `to`.
+/// Fault injection: [`Op::Rename`] with `to`, once per call (the two steps
+/// of a case-only rename aren't counted separately).
 pub fn rename_no_replace(from: &Path, to: &Path) -> io::Result<()> {
     faults::check(Op::Rename, to)?;
-    rename_no_replace_imp(from, to)
+    match rename_no_replace_imp(from, to) {
+        Err(e)
+            if e.kind() == ErrorKind::AlreadyExists
+                && is_case_only_alias(from, to, same_file(from, to)) =>
+        {
+            case_rename(from, to)
+        }
+        r => r,
+    }
 }
 
 #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
@@ -174,11 +210,9 @@ fn rename_no_replace_imp(from: &Path, to: &Path) -> io::Result<()> {
             Ok(())
         }
         // ERROR_INVALID_FUNCTION (1) and ERROR_NOT_SUPPORTED (50): FAT, SMB.
+        // Not PermissionDenied: a locked or protected source must surface.
         Err(e)
-            if matches!(
-                e.kind(),
-                ErrorKind::Unsupported | ErrorKind::PermissionDenied
-            ) || matches!(e.raw_os_error(), Some(1 | 50)) =>
+            if e.kind() == ErrorKind::Unsupported || matches!(e.raw_os_error(), Some(1 | 50)) =>
         {
             rename_fallback(from, to)
         }
@@ -196,8 +230,72 @@ fn rename_no_replace_imp(from: &Path, to: &Path) -> io::Result<()> {
     rename_fallback(from, to)
 }
 
+/// Whether `to` is `from` under a name that differs only in case: the same
+/// file (`same_file`), in the same folder, with names that differ but are
+/// equal ignoring case. Both conditions are needed: equal-ignoring-case
+/// names alone may be two distinct files, and the same file alone may be a
+/// hard link under an unrelated name.
+fn is_case_only_alias(from: &Path, to: &Path, same_file: bool) -> bool {
+    if !same_file || from.parent() != to.parent() {
+        return false;
+    }
+    match (
+        from.file_name().and_then(|n| n.to_str()),
+        to.file_name().and_then(|n| n.to_str()),
+    ) {
+        (Some(a), Some(b)) => a != b && a.to_lowercase() == b.to_lowercase(),
+        _ => false,
+    }
+}
+
+/// Whether `a` and `b` name the same file (not following a final symlink).
+#[cfg(unix)]
+fn same_file(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (fs::symlink_metadata(a), fs::symlink_metadata(b)) {
+        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
+        _ => false,
+    }
+}
+
+/// Whether `a` and `b` name the same file: their canonical paths, which
+/// carry the on-disk case, are equal.
+#[cfg(not(unix))]
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// A case-only rename in two no-replace steps: `from` to a temporary
+/// sibling, then to `to`. If the second step fails, the temporary is moved
+/// back to `from`.
+fn case_rename(from: &Path, to: &Path) -> io::Result<()> {
+    let tmp = temp_sibling(from)?;
+    rename_no_replace_imp(from, &tmp)?;
+    if let Err(e) = rename_no_replace_imp(&tmp, to) {
+        if let Err(back) = rename_no_replace_imp(&tmp, from) {
+            return Err(io::Error::new(
+                back.kind(),
+                format!(
+                    "renaming {} to {} failed ({e}) and moving it back failed too ({back}); \
+                     it is now at {}",
+                    from.display(),
+                    to.display(),
+                    tmp.display()
+                ),
+            ));
+        }
+        return Err(e);
+    }
+    Ok(())
+}
+
 /// Check, rename, verify: for filesystems without an atomic no-replace
-/// rename. Racy between the check and the rename.
+/// rename. Racy: something created at `to` between the check and the
+/// rename is replaced, and the check afterwards can't tell, because `to`
+/// exists either way. It only catches a rename that didn't move `from`.
 fn rename_fallback(from: &Path, to: &Path) -> io::Result<()> {
     if exists_no_follow(to)? {
         return Err(already_exists(to));
@@ -229,6 +327,7 @@ fn already_exists(to: &Path) -> io::Error {
 }
 
 /// One entry of a tree to copy, relative to its root (empty for the root).
+#[derive(Debug, PartialEq, Eq)]
 enum Entry {
     Dir(PathBuf),
     File(PathBuf),
@@ -244,30 +343,34 @@ enum Entry {
 /// Each copied file is fsynced. After everything is copied, every file's
 /// size and xxh3-64 are checked in both the source and the copy against
 /// what was copied, so a source that changed during the copy is caught
-/// (`InvalidData`). On any failure `to` is removed; `from` is never
-/// changed. Permissions and timestamps are not copied.
+/// (`InvalidData`); the source tree is then listed again, and a file or
+/// folder added or removed during the copy fails it too (`InvalidData`).
+/// On any failure what this call created at `to` is removed (never
+/// something that appeared there meanwhile); `from` is never changed. Permissions and timestamps are not copied.
 ///
 /// Fault injection: [`Op::Copy`] before each file, with its destination
 /// path. Files are copied in sorted, depth-first order.
 pub fn copy_tree_verified(from: &Path, to: &Path) -> io::Result<()> {
     let entries = scan_tree(from)?;
-    // Creating the root also proves `to` didn't exist, so the cleanup below
-    // only ever removes what this call made.
-    match entries.first() {
-        Some(Entry::Dir(_)) => fs::create_dir(to)?,
-        _ => {
-            if exists_no_follow(to)? {
-                return Err(already_exists(to));
-            }
-        }
+    let root_is_dir = matches!(entries.first(), Some(Entry::Dir(_)));
+    // Creating the root with `create_dir` / `create_new` also proves `to`
+    // didn't exist, so the cleanup below only removes what this call made.
+    if root_is_dir {
+        fs::create_dir(to)?;
+    } else if exists_no_follow(to)? {
+        return Err(already_exists(to));
     }
-    match copy_and_verify(from, to, &entries) {
+    let mut created_root = root_is_dir;
+    match copy_and_verify(from, to, &entries, &mut created_root) {
         Ok(()) => Ok(()),
         Err(e) => {
-            let _ = match entries.first() {
-                Some(Entry::Dir(_)) => fs::remove_dir_all(to),
-                _ => fs::remove_file(to),
-            };
+            if created_root {
+                let _ = if root_is_dir {
+                    fs::remove_dir_all(to)
+                } else {
+                    fs::remove_file(to)
+                };
+            }
             Err(e)
         }
     }
@@ -328,7 +431,14 @@ fn under(root: &Path, rel: &Path) -> PathBuf {
     }
 }
 
-fn copy_and_verify(from: &Path, to: &Path, entries: &[Entry]) -> io::Result<()> {
+/// Copies `entries`, then verifies them. Sets `created_root` once a file
+/// root has been created at `to`.
+fn copy_and_verify(
+    from: &Path,
+    to: &Path,
+    entries: &[Entry],
+    created_root: &mut bool,
+) -> io::Result<()> {
     let mut copied = Vec::new();
     for e in entries {
         match e {
@@ -338,7 +448,11 @@ fn copy_and_verify(from: &Path, to: &Path, entries: &[Entry]) -> io::Result<()> 
             Entry::File(rel) => {
                 let dst = under(to, rel);
                 faults::check(Op::Copy, &dst)?;
-                let sum = copy_file_hashed(&under(from, rel), &dst)?;
+                let mut w = OpenOptions::new().write(true).create_new(true).open(&dst)?;
+                if rel.as_os_str().is_empty() {
+                    *created_root = true;
+                }
+                let sum = copy_file_hashed(&under(from, rel), &mut w)?;
                 copied.push((rel, sum));
             }
         }
@@ -354,6 +468,12 @@ fn copy_and_verify(from: &Path, to: &Path, entries: &[Entry]) -> io::Result<()> 
             ));
         }
     }
+    if scan_tree(from)? != entries {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            format!("{} changed during the copy", from.display()),
+        ));
+    }
     for e in entries {
         if let Entry::Dir(rel) = e {
             let _ = sync_dir(&under(to, rel));
@@ -366,11 +486,10 @@ fn copy_and_verify(from: &Path, to: &Path, entries: &[Entry]) -> io::Result<()> 
 /// Size and xxh3-64 of a file's contents.
 type Sum = (u64, u64);
 
-/// Copies `src` to a new file `dst`, fsyncs it, and returns the size and
+/// Copies `src` into the new file `w`, fsyncs it, and returns the size and
 /// hash of the bytes written.
-fn copy_file_hashed(src: &Path, dst: &Path) -> io::Result<Sum> {
+fn copy_file_hashed(src: &Path, w: &mut File) -> io::Result<Sum> {
     let mut r = File::open(src)?;
-    let mut w = OpenOptions::new().write(true).create_new(true).open(dst)?;
     let sum = stream(&mut r, |chunk| w.write_all(chunk))?;
     w.sync_all()?;
     Ok(sum)
@@ -399,11 +518,13 @@ fn stream(r: &mut File, mut sink: impl FnMut(&[u8]) -> io::Result<()>) -> io::Re
     Ok((len, h.digest()))
 }
 
-/// Removes temporary files left behind by a crash: entries in `dir` (one
-/// level deep, not recursive) named `.*.tmp-*` (from [`durable_write`]) or
-/// `.printdex-*.tmp`, last modified more than `older_than` ago. A matching
-/// folder is removed with its contents. Errors are logged and skipped; a
-/// missing or unreadable `dir` does nothing.
+/// Removes temporary files left behind by a crash: regular files in `dir`
+/// (one level deep, not recursive) last modified more than `older_than`
+/// ago, named exactly as this code names them: `.<name>.tmp-<32 lowercase
+/// hex>` (a simple uuid, from [`durable_write`] and the sync store) or
+/// `.printdex-<16 lowercase hex>.tmp` (the sidecar writer's older form).
+/// Folders and symlinks are never removed, whatever their name. Errors are
+/// logged and skipped; a missing or unreadable `dir` does nothing.
 ///
 /// Fault injection: [`Op::Remove`] with each entry's path; a fault skips
 /// that entry.
@@ -422,30 +543,42 @@ pub fn sweep_temp_files(dir: &Path, older_than: Duration) {
         }
         // `DirEntry::metadata` doesn't follow symlinks.
         let Ok(meta) = e.metadata() else { continue };
-        if meta.modified().map_or(true, |m| m > cutoff) {
+        if !meta.is_file() || meta.modified().map_or(true, |m| m > cutoff) {
             continue;
         }
         let path = e.path();
         if faults::check(Op::Remove, &path).is_err() {
             continue;
         }
-        let r = if meta.is_dir() {
-            fs::remove_dir_all(&path)
-        } else {
-            fs::remove_file(&path)
-        };
-        if let Err(err) = r {
+        if let Err(err) = fs::remove_file(&path) {
             tracing::debug!(path = %path.display(), %err, "could not sweep temporary file");
         }
     }
 }
 
-/// `.*.tmp-*` or `.printdex-*.tmp`.
+/// `.<name>.tmp-<32 lowercase hex>` (non-empty name) or
+/// `.printdex-<16 lowercase hex>.tmp`.
 fn is_temp_name(n: &str) -> bool {
+    fn is_hex(s: &str, len: usize) -> bool {
+        s.len() == len && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    }
     let Some(rest) = n.strip_prefix('.') else {
         return false;
     };
-    rest.contains(".tmp-") || (rest.starts_with("printdex-") && rest.ends_with(".tmp"))
+    if let Some(hex) = rest
+        .strip_prefix("printdex-")
+        .and_then(|r| r.strip_suffix(".tmp"))
+        && is_hex(hex, 16)
+    {
+        return true;
+    }
+    // ".tmp-" plus 32 hex digits, after a non-empty name.
+    let tail = ".tmp-".len() + 32;
+    rest.len() > tail
+        && rest.is_char_boundary(rest.len() - tail)
+        && rest[rest.len() - tail..]
+            .strip_prefix(".tmp-")
+            .is_some_and(|hex| is_hex(hex, 32))
 }
 
 #[cfg(test)]
@@ -677,23 +810,35 @@ mod tests {
 
     #[test]
     fn sweep_removes_old_temp_only() {
+        const U: &str = "0190aaaabbbbccccddddeeeeffff0000"; // a uuid, simple
         let d = tempfile::tempdir().unwrap();
         let old = SystemTime::now() - Duration::from_secs(2 * 3600);
-        let entries = [
-            ".a.toml.tmp-0190aaaa",
-            ".printdex-00ff.tmp",
-            ".b.json.tmp-0190bbbb",
-            "keep.stl",
-            ".hidden",
-            "x.tmp-1",
-            ".printdex.toml.tmp",
+        let swept = [
+            format!(".a.toml.tmp-{U}"),
+            ".printdex-00000000000000ff.tmp".to_string(),
         ];
-        for n in entries {
+        let kept = [
+            // Too new.
+            format!(".b.json.tmp-{U}"),
+            "keep.stl".to_string(),
+            ".hidden".to_string(),
+            "x.tmp-1".to_string(),
+            ".printdex.toml.tmp".to_string(),
+            // User files that only look like temporary files.
+            ".notes.tmp-old".to_string(),
+            format!(".c.tmp-{}", &U[1..]),
+            format!(".c.tmp-{}", U.to_uppercase()),
+            format!(".tmp-{U}"),
+            ".printdex-00ff.tmp".to_string(),
+            ".printdex-zzzzzzzzzzzzzzzz.tmp".to_string(),
+        ];
+        for n in swept.iter().chain(&kept) {
             fs::write(d.path().join(n), b"x").unwrap();
         }
-        fs::create_dir(d.path().join(".dir.tmp-1")).unwrap();
-        fs::write(d.path().join(".dir.tmp-1/inner"), b"x").unwrap();
-        tree(d.path(), &[("sub/.c.tmp-1", b"x")]);
+        // A folder with a matching name is never removed.
+        let dir_name = format!(".dir.tmp-{U}");
+        tree(d.path(), &[(&format!("{dir_name}/inner"), b"x")]);
+        tree(d.path(), &[(&format!("sub/.c.tmp-{U}"), b"x")]);
         let set_old = |rel: &str| {
             let f = fs::File::options()
                 .write(true)
@@ -701,45 +846,145 @@ mod tests {
                 .unwrap();
             f.set_modified(old).unwrap();
         };
-        for n in [
-            ".a.toml.tmp-0190aaaa",
-            ".printdex-00ff.tmp",
-            "keep.stl",
-            ".hidden",
-            "x.tmp-1",
-        ] {
+        for n in swept.iter().chain(&kept[1..]) {
             set_old(n);
         }
-        set_old(".printdex.toml.tmp");
-        set_old("sub/.c.tmp-1");
+        set_old(&format!("sub/.c.tmp-{U}"));
         // A folder's mtime: set it last, after its contents were written.
-        fs::File::open(d.path().join(".dir.tmp-1"))
+        fs::File::open(d.path().join(&dir_name))
             .and_then(|f| f.set_modified(old))
             .ok();
 
         sweep_temp_files(d.path(), Duration::from_secs(3600));
 
         let left = names(d.path());
-        assert!(!left.contains(&".a.toml.tmp-0190aaaa".to_string()));
-        assert!(!left.contains(&".printdex-00ff.tmp".to_string()));
-        for keep in [
-            ".b.json.tmp-0190bbbb",
-            "keep.stl",
-            ".hidden",
-            "x.tmp-1",
-            ".printdex.toml.tmp",
-            "sub",
-        ] {
-            assert!(
-                left.contains(&keep.to_string()),
-                "{keep} was removed: {left:?}"
-            );
+        for n in &swept {
+            assert!(!left.contains(n), "{n} was kept: {left:?}");
         }
+        for n in kept.iter().chain([&dir_name, &"sub".to_string()]) {
+            assert!(left.contains(n), "{n} was removed: {left:?}");
+        }
+        assert!(d.path().join(&dir_name).join("inner").exists());
         assert!(
-            d.path().join("sub/.c.tmp-1").exists(),
+            d.path().join(format!("sub/.c.tmp-{U}")).exists(),
             "only one level deep"
         );
-        #[cfg(unix)]
-        assert!(!left.contains(&".dir.tmp-1".to_string()));
+    }
+
+    #[test]
+    fn durable_write_long_name_keeps_temp_name_short() {
+        let d = tempfile::tempdir().unwrap();
+        // 240 bytes of two-byte characters: the temporary name must be cut on
+        // a character boundary and stay within 255 bytes.
+        let name = "é".repeat(120);
+        let p = d.path().join(&name);
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let s = seen.clone();
+        let dir = d.path().to_path_buf();
+        let _g = faults::arm(
+            d.path(),
+            Op::Write,
+            0,
+            Action::Before(Box::new(move |_| *s.lock().unwrap() = names(&dir))),
+        );
+        durable_write(&p, b"x", Durability::UserData).unwrap();
+        assert_eq!(fs::read(&p).unwrap(), b"x");
+        assert_eq!(names(d.path()), [name]);
+        let during = seen.lock().unwrap().clone();
+        assert_eq!(during.len(), 1, "{during:?}");
+        assert!(during[0].len() <= 255, "{}", during[0].len());
+        assert!(is_temp_name(&during[0]), "{}", during[0]);
+    }
+
+    #[test]
+    fn is_case_only_alias_needs_same_file_and_other_case() {
+        let (a, b) = (Path::new("lib/Benchy"), Path::new("lib/benchy"));
+        assert!(is_case_only_alias(a, b, true));
+        // A different file that happens to differ only in case.
+        assert!(!is_case_only_alias(a, b, false));
+        // A hard link under a genuinely different name.
+        assert!(!is_case_only_alias(a, Path::new("lib/other"), true));
+        // The very same name.
+        assert!(!is_case_only_alias(a, a, true));
+        // Same name in a different folder.
+        assert!(!is_case_only_alias(a, Path::new("other/benchy"), true));
+    }
+
+    #[test]
+    fn case_rename_two_step_moves_through_temp() {
+        let d = tempfile::tempdir().unwrap();
+        let (from, to) = (d.path().join("Benchy"), d.path().join("benchy"));
+        tree(&from, &[("a.stl", b"a")]);
+        case_rename(&from, &to).unwrap();
+        assert_eq!(names(d.path()), ["benchy"]);
+        assert_eq!(fs::read(to.join("a.stl")).unwrap(), b"a");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rename_no_replace_refuses_hard_link_with_other_case() {
+        let d = tempfile::tempdir().unwrap();
+        let (from, to) = (d.path().join("Benchy.stl"), d.path().join("benchy.stl"));
+        fs::write(&from, b"solid").unwrap();
+        if fs::hard_link(&from, &to).is_err() {
+            return; // case-insensitive filesystem: the names are one entry
+        }
+        let err = rename_no_replace(&from, &to).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::AlreadyExists);
+        assert_eq!(names(d.path()), ["Benchy.stl", "benchy.stl"]);
+        assert_eq!(fs::read(&from).unwrap(), b"solid");
+    }
+
+    #[test]
+    fn rename_no_replace_refuses_distinct_file_with_other_case() {
+        let d = tempfile::tempdir().unwrap();
+        let (from, to) = (d.path().join("Benchy.stl"), d.path().join("benchy.stl"));
+        fs::write(&from, b"one").unwrap();
+        fs::write(&to, b"two").unwrap();
+        if names(d.path()).len() != 2 {
+            return; // case-insensitive filesystem
+        }
+        let err = rename_no_replace(&from, &to).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&from).unwrap(), b"one");
+        assert_eq!(fs::read(&to).unwrap(), b"two");
+    }
+
+    #[test]
+    fn copy_tree_file_root_keeps_target_that_appeared() {
+        let d = tempfile::tempdir().unwrap();
+        let (from, to) = (d.path().join("a.stl"), d.path().join("b.stl"));
+        fs::write(&from, b"mine").unwrap();
+        let t = to.clone();
+        let _g = faults::arm(
+            &to,
+            Op::Copy,
+            0,
+            Action::Before(Box::new(move |_| fs::write(&t, b"theirs").unwrap())),
+        );
+        let err = copy_tree_verified(&from, &to).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&to).unwrap(), b"theirs");
+        assert_eq!(fs::read(&from).unwrap(), b"mine");
+    }
+
+    #[test]
+    fn copy_tree_detects_added_source_file() {
+        let d = tempfile::tempdir().unwrap();
+        let (from, to) = (d.path().join("from"), d.path().join("to"));
+        tree(&from, &[("a.stl", b"a")]);
+        let added = from.join("sub");
+        let _g = faults::arm(
+            &to,
+            Op::Copy,
+            0,
+            Action::Before(Box::new(move |_| {
+                tree(&added, &[("new.stl", b"n")]);
+            })),
+        );
+        let err = copy_tree_verified(&from, &to).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
+        assert!(!to.exists());
+        assert!(from.join("sub/new.stl").exists());
     }
 }
