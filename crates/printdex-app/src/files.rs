@@ -547,6 +547,10 @@ impl App {
     }
 
     fn save_apps(&self) -> Task<Message> {
+        if self.apps_kept {
+            tracing::warn!("apps.toml is unreadable and was kept; not saving apps");
+            return Task::none();
+        }
         let Some(dir) = self.options.config_dir.clone() else {
             return Task::none();
         };

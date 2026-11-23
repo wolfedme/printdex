@@ -469,6 +469,8 @@ report-open-issue = Open a GitHub issue
 report-save = Save diagnostics…
 settings-broken = Settings file was unreadable and was set aside
 apps-broken = Apps file was unreadable and was set aside
+settings-broken-kept = Settings file is unreadable and could not be set aside, so changes won't be saved this time
+apps-broken-kept = Apps file is unreadable and could not be set aside, so changes won't be saved this time
 report-saved = Diagnostics saved
 report-save-failed = Could not save diagnostics: { $error }
 

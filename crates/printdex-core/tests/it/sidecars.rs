@@ -539,3 +539,41 @@ async fn broken_sidecar_is_set_aside_before_rewrite() {
         &broken[0].file_name().unwrap().to_string_lossy()
     ));
 }
+
+#[tokio::test]
+async fn failed_set_aside_keeps_broken_sidecar() {
+    use printdex_core::fsx::faults::{Action, Op, arm};
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    let bin = f.model("Bin").await;
+    let path = f.root().join("Bin/.printdex.toml");
+    fs::write(&path, "garbage = [").unwrap();
+    let g = arm(
+        &f.root(),
+        Op::Rename,
+        0,
+        Action::Fail(std::io::ErrorKind::PermissionDenied),
+    );
+    f.engine.add_tag(bin, "x").await.unwrap();
+    f.engine.flush_sidecars().await;
+    assert_eq!(g.fired(), 1);
+    assert_eq!(fs::read(&path).unwrap(), b"garbage = [");
+}
+
+#[tokio::test]
+async fn non_utf8_sidecar_is_set_aside() {
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    let bin = f.model("Bin").await;
+    let path = f.root().join("Bin/.printdex.toml");
+    let bytes = b"schema = 1\nnotes = \"\xff\xfe\"\n";
+    fs::write(&path, bytes).unwrap();
+    f.engine.add_tag(bin, "x").await.unwrap();
+    f.engine.flush_sidecars().await;
+    assert_eq!(f.read("Bin/.printdex.toml").tags, ["x"]);
+    let kept: Vec<_> = fs::read_dir(f.root().join("Bin"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.to_string_lossy().contains(".printdex.toml.broken-"))
+        .collect();
+    assert_eq!(kept.len(), 1);
+    assert_eq!(fs::read(&kept[0]).unwrap(), bytes);
+}

@@ -245,7 +245,7 @@ fn write_atomic(path: &Path, text: &str) -> std::io::Result<i64> {
             "model folder not found",
         ));
     }
-    set_aside_if_broken(path);
+    set_aside_if_broken(path)?;
     crate::fsx::durable_write(path, text.as_bytes(), crate::fsx::Durability::UserData)?;
     Ok(std::fs::metadata(path)?
         .modified()
@@ -258,16 +258,32 @@ fn write_atomic(path: &Path, text: &str) -> std::io::Result<i64> {
 /// that follows doesn't destroy the person's file. Other read errors leave
 /// the file alone. Best effort: a failed rename is logged and the write
 /// goes on. Blocking.
-fn set_aside_if_broken(path: &Path) {
-    let broken = match read_capped(path) {
-        Ok((text, _)) => SidecarFile::parse(&text).is_err(),
-        Err(e) => e.kind() == std::io::ErrorKind::Other,
+fn set_aside_if_broken(path: &Path) -> std::io::Result<()> {
+    use std::io::Read;
+    // Broken: too large, not UTF-8, or not a sidecar. Missing: nothing to
+    // do. Any other I/O error is returned, so the write doesn't go over a
+    // file that couldn't be looked at.
+    let broken = match std::fs::File::open(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+        Ok(f) => {
+            if f.metadata()?.len() > MAX_BYTES {
+                true
+            } else {
+                let mut bytes = Vec::new();
+                f.take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
+                match String::from_utf8(bytes) {
+                    Ok(text) => bytes_too_big(&text) || SidecarFile::parse(&text).is_err(),
+                    Err(_) => true,
+                }
+            }
+        }
     };
     if !broken {
-        return;
+        return Ok(());
     }
     let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
-        return;
+        return Err(std::io::Error::other("sidecar has no folder"));
     };
     // Sidecar names start with a dot already.
     let name = name.to_string_lossy();
@@ -284,15 +300,22 @@ fn set_aside_if_broken(path: &Path) {
         match crate::fsx::rename_no_replace(path, &to) {
             Ok(()) => {
                 tracing::warn!(from = %path.display(), to = %to.display(), "unreadable sidecar set aside");
-                return;
+                return Ok(());
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(e) => {
-                tracing::warn!(error = %e, path = %path.display(), "could not set aside unreadable sidecar");
-                return;
+                tracing::warn!(error = %e, path = %path.display(), "could not set aside unreadable sidecar; not overwriting it");
+                return Err(e);
             }
         }
     }
+    Err(std::io::Error::other(
+        "no free name to set the sidecar aside",
+    ))
+}
+
+fn bytes_too_big(text: &str) -> bool {
+    text.len() as u64 > MAX_BYTES
 }
 
 /// Reads a sidecar, refusing files over [`MAX_BYTES`]. Blocking.

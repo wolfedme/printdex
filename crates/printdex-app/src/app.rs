@@ -71,8 +71,8 @@ pub struct Options {
     pub mode: Option<Mode>,
     /// Settings as loaded at startup.
     pub settings: Settings,
-    /// `settings.toml` didn't parse and was set aside at startup.
-    pub settings_set_aside: bool,
+    /// What loading `settings.toml` found at startup.
+    pub settings_status: crate::settings::ConfigStatus,
     /// Whether the window was created transparent with an OS blur. Fixed
     /// for the window's lifetime.
     pub glass_window: bool,
@@ -112,7 +112,7 @@ impl Options {
             config_dir: None,
             mode: None,
             settings: Settings::default(),
-            settings_set_aside: false,
+            settings_status: crate::settings::ConfigStatus::Ok,
             glass_window: false,
             crash: None,
         }
@@ -221,6 +221,10 @@ pub struct App {
     pub crash: Option<CrashReport>,
     /// A startup note (a config file was set aside), shown once at boot.
     pub config_notice: Option<String>,
+    /// `settings.toml` is broken and couldn't be set aside: never save over it.
+    pub settings_kept: bool,
+    /// Likewise for `apps.toml`.
+    pub apps_kept: bool,
     /// The library whose "Remove" asks for confirmation.
     pub confirm_remove: Option<LibraryId>,
     /// Libraries whose folder can't be reached, with the time it was
@@ -334,14 +338,21 @@ pub enum Message {
 impl App {
     /// State before the engine is open.
     pub fn new(options: Options) -> App {
-        let (apps, apps_aside) = options
+        let (apps, apps_status) = options
             .config_dir
             .as_deref()
             .map(crate::apps::Apps::load_with_status)
             .unwrap_or_default();
-        let config_notice = if options.settings_set_aside {
+        use crate::settings::ConfigStatus as Cs;
+        let settings_kept = options.settings_status == Cs::BrokenKept;
+        let apps_kept = apps_status == Cs::BrokenKept;
+        let config_notice = if settings_kept {
+            Some(t("settings-broken-kept"))
+        } else if apps_kept {
+            Some(t("apps-broken-kept"))
+        } else if matches!(options.settings_status, Cs::SetAside(_)) {
             Some(t("settings-broken"))
-        } else if apps_aside.is_some() {
+        } else if matches!(apps_status, Cs::SetAside(_)) {
             Some(t("apps-broken"))
         } else {
             None
@@ -383,6 +394,8 @@ impl App {
             settings_section: SettingsSection::default(),
             crash,
             config_notice,
+            settings_kept,
+            apps_kept,
             confirm_remove: None,
             offline: HashMap::new(),
             renaming: None,
@@ -1229,6 +1242,10 @@ impl App {
 
     /// Writes the settings file off the UI thread.
     pub(crate) fn save_settings(&self) -> Task<Message> {
+        if self.settings_kept {
+            tracing::warn!("settings.toml is unreadable and was kept; not saving settings");
+            return Task::none();
+        }
         let Some(dir) = self.options.config_dir.clone() else {
             return Task::none();
         };
@@ -1888,6 +1905,24 @@ mod tests {
         a.files.info = None;
         let _ = a.update(Message::Report(ReportUx::Saved(Err("disk full".into()))));
         assert!(a.files.info.as_deref().unwrap().contains("disk full"));
+    }
+
+    #[test]
+    fn kept_broken_settings_block_saving_and_say_so() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = App::new(Options {
+            settings_status: crate::settings::ConfigStatus::BrokenKept,
+            ..Options::in_memory(tmp.path().to_path_buf())
+        });
+        assert!(a.settings_kept);
+        assert!(!a.apps_kept);
+        assert_eq!(a.config_notice, Some(t("settings-broken-kept")));
+        let b = App::new(Options {
+            settings_status: crate::settings::ConfigStatus::SetAside("x".into()),
+            ..Options::in_memory(tmp.path().to_path_buf())
+        });
+        assert!(!b.settings_kept);
+        assert_eq!(b.config_notice, Some(t("settings-broken")));
     }
 
     #[test]
