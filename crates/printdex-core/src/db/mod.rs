@@ -75,7 +75,7 @@ impl Db {
             reader,
             photo_dir,
         };
-        // Parts from before path materials were stored (migration 0008).
+        // Parts from before path materials were stored (migration 0009).
         db.fill_path_materials().await?;
         Ok(db)
     }
