@@ -105,6 +105,72 @@ async fn rescan_of_offline_library_marks_nothing_missing() {
     assert_eq!((stats.models, stats.missing_models), (2, 0));
 }
 
+/// A share offline for 31 days and then back: what the scan finds again is
+/// kept (same models, same ids), and only a model really gone and missing
+/// for over 30 days is forgotten, once the scan has reached the folder.
+#[tokio::test]
+async fn offline_library_is_not_purged() {
+    use sqlx::Connection;
+    let f = Fx::new().await;
+    let root = f.lib(&["Hook/hook.stl", "Plain/plain.stl", "Gone/gone.stl"]);
+    let lib = f.engine.add_library(&root, None).await.unwrap();
+    f.engine.rescan(lib.id, go()).await.unwrap();
+    let id = |name: &'static str| {
+        let e = f.engine.clone();
+        async move {
+            e.search(name, 10)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|h| h.name == name)
+                .unwrap()
+                .id
+        }
+    };
+    let (hook, plain, gone) = (id("Hook").await, id("Plain").await, id("Gone").await);
+    f.engine.add_tag(hook, "keeper").await.unwrap();
+    fs::remove_dir_all(root.join("Gone")).unwrap();
+    f.engine.rescan(lib.id, go()).await.unwrap();
+
+    // Everything looks missing since 31 days ago, as if the share had
+    // dropped then.
+    let since = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64
+        - 31 * 24 * 60 * 60 * 1000;
+    let db = f.dir.path().join("data/printdex.db");
+    let mut c = sqlx::SqliteConnection::connect(&format!("sqlite://{}", db.display()))
+        .await
+        .unwrap();
+    for sql in [
+        "UPDATE models SET missing_since = ?",
+        "UPDATE parts SET missing_since = ?",
+    ] {
+        sqlx::query(sql).bind(since).execute(&mut c).await.unwrap();
+    }
+    drop(c);
+
+    let away = f.dir.path().join("away");
+    fs::rename(&root, &away).unwrap();
+    assert!(matches!(
+        f.engine.rescan(lib.id, go()).await,
+        Err(CoreError::LibraryOffline(_))
+    ));
+    for m in [hook, plain, gone] {
+        assert!(f.engine.model(m).await.unwrap().is_some(), "offline: {m}");
+    }
+
+    fs::rename(&away, &root).unwrap();
+    f.engine.rescan(lib.id, go()).await.unwrap();
+    for m in [hook, plain] {
+        let d = f.engine.model(m).await.unwrap().unwrap();
+        assert_eq!(d.missing_since, None, "{}", d.name);
+    }
+    assert_eq!(f.engine.model(gone).await.unwrap(), None);
+    assert_eq!(id("Plain").await, plain);
+}
+
 #[tokio::test]
 async fn rejects_overlapping_libraries() {
     let f = Fx::new().await;

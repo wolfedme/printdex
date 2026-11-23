@@ -502,6 +502,45 @@ async fn undo_never_overwrites_what_took_the_old_name() {
     assert!(f.root().join("Wall hook/hook.stl").exists());
 }
 
+/// Undo of a move after the user renamed the moved folder by hand (and the
+/// scan saw it): refused with the reason that the files are not where
+/// Printdex put them, and nothing on disk changes.
+#[tokio::test]
+async fn undo_after_external_rename_is_refused() {
+    let f = Fx::new(&["Hook/hook.stl", "Storage/Bin/bin.stl"]).await;
+    let id = f.find("Hook").await;
+    let op = f
+        .engine
+        .move_models(&[id], f.lib.id, "Storage")
+        .await
+        .unwrap();
+    fs::rename(
+        f.root().join("Storage/Hook"),
+        f.root().join("Storage/Wall hook"),
+    )
+    .unwrap();
+    // Before and after the scan notices.
+    for rescan in [false, true] {
+        if rescan {
+            f.engine
+                .rescan(f.lib.id, CancellationToken::new())
+                .await
+                .unwrap();
+        }
+        let r = f.engine.undo(op.id).await;
+        assert!(matches!(r, Err(CoreError::ModelNotFound)), "{r:?}");
+        assert!(!f.root().join("Hook").exists());
+        assert_eq!(
+            fs::read_to_string(f.root().join("Storage/Wall hook/hook.stl")).unwrap(),
+            "Hook/hook.stl"
+        );
+    }
+    assert_eq!(
+        f.engine.model(id).await.unwrap().unwrap().rel_path,
+        "Storage/Wall hook"
+    );
+}
+
 /// One source file and where the move puts it, relative to the library.
 const MOVED: &[(&str, &str)] = &[
     ("A/one.stl", "C/one.stl"),
