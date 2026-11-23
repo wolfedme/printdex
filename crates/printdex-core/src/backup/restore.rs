@@ -101,6 +101,7 @@ fn put_restored(from: &Path, to: &Path, replace: bool) -> std::io::Result<()> {
     }
     let placed = (|| {
         if replace {
+            // Safe because the restored copy is ready beside it, and the trash keeps the old file.
             faults::perform(Op::Trash, to, || {
                 trash::delete(to).map_err(|e| std::io::Error::other(e.to_string()))
             })?;
@@ -123,6 +124,7 @@ fn move_any(from: &Path, to: &Path) -> std::io::Result<()> {
     match crate::fsx::rename_no_replace(from, to) {
         Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
             crate::fsx::copy_tree_verified(from, to)?;
+            // Safe because the source goes only after its verified copy is complete.
             if from.is_dir() {
                 std::fs::remove_dir_all(from)
             } else {
@@ -188,6 +190,7 @@ pub(crate) fn apply_staged(data_dir: &Path) -> Result<bool> {
     }
     if !staging.join(READY).exists() {
         tracing::warn!("removing an unfinished restore");
+        // Safe because without READY the staging folder is a half-done download; the backup has it all.
         std::fs::remove_dir_all(&staging).map_err(|e| io_err(&staging, e))?;
         return Ok(false);
     }
@@ -230,6 +233,7 @@ pub(crate) fn apply_staged(data_dir: &Path) -> Result<bool> {
         let to = data_dir.join(name);
         move_any(&staged, &to).map_err(|e| io_err(&staged, e))?;
     }
+    // Safe because everything staged has moved in; only SWAP and READY are left.
     std::fs::remove_dir_all(&staging).map_err(|e| io_err(&staging, e))?;
     tracing::info!(previous = %old.display(), "applied a restored backup");
     Ok(true)
@@ -242,6 +246,7 @@ pub(crate) fn remove_pre_restore(data_dir: &Path) {
     };
     for e in entries.flatten() {
         if e.file_name().to_string_lossy().starts_with("pre-restore-")
+            // Safe because the user chose to restore, and a backup of the restored data now exists.
             && let Err(err) = std::fs::remove_dir_all(e.path())
         {
             tracing::warn!(error = %err, "could not remove data a restore replaced");
@@ -300,6 +305,7 @@ impl Engine {
         remember: bool,
     ) -> Result<RestoredData> {
         let staging = self.data_dir.join(STAGING);
+        // Safe because a staging folder is only a restore not yet applied; the backup still has it.
         if staging.exists() {
             std::fs::remove_dir_all(&staging).map_err(|e| io_err(&staging, e))?;
         }
@@ -540,6 +546,7 @@ impl Engine {
         .map_err(join_err)?;
         match files {
             Ok(f) => Ok((tmp, f)),
+            // Safe because `tmp` holds only files just restored from the backup.
             Err(e) => {
                 let _ = std::fs::remove_dir_all(&tmp);
                 Err(e)
@@ -571,6 +578,7 @@ impl Engine {
                     FileDiff { rel, change }
                 })
                 .collect::<Vec<_>>();
+            // Safe because `tmp` holds only files just restored from the backup.
             let _ = std::fs::remove_dir_all(&tmp);
             out
         })
@@ -629,6 +637,7 @@ impl Engine {
         })
         .await
         .map_err(join_err);
+        // Safe because `tmp` holds only files just restored from the backup.
         let _ = std::fs::remove_dir_all(&tmp);
         let written = written??;
         if dest == ModelRestoreDest::Original {

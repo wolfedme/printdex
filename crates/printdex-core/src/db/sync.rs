@@ -192,6 +192,7 @@ impl Db {
     }
 
     pub(crate) async fn remove_space(&self, id: i64) -> Result<()> {
+        // Safe because the user left the space; local data and the space's folder stay.
         sqlx::query("DELETE FROM sync_spaces WHERE id = ?")
             .bind(id)
             .execute(self.writer())
@@ -262,6 +263,7 @@ impl Db {
     }
 
     pub(crate) async fn unlink_library(&self, space: i64, lib: LibraryId) -> Result<bool> {
+        // Safe because the user unlinked the library; its data stays.
         let done = sqlx::query("DELETE FROM sync_links WHERE space = ? AND library_id = ?")
             .bind(space)
             .bind(lib)
@@ -573,6 +575,7 @@ impl Db {
     pub(crate) async fn delete_fields(&self, space: i64, keys: &[String]) -> Result<()> {
         let mut tx = self.writer().begin().await?;
         for k in keys {
+            // Safe because the merged rows under the winning id are written right after.
             sqlx::query("DELETE FROM sync_fields WHERE space = ? AND key = ?")
                 .bind(space)
                 .bind(k)
@@ -606,6 +609,7 @@ impl Db {
     pub(crate) async fn clear_sync_dirty(&self, ids: &[ModelId]) -> Result<()> {
         let mut tx = self.writer().begin().await?;
         for id in ids {
+            // Safe because these models were just published to every space.
             sqlx::query("DELETE FROM sync_dirty WHERE model_id = ?")
                 .bind(id)
                 .execute(&mut *tx)
@@ -673,11 +677,13 @@ impl Db {
     }
 
     pub(crate) async fn remove_device(&self, space: i64, install: Uuid) -> Result<()> {
+        // Safe because the user forgot a device unseen for 30 days.
         sqlx::query("DELETE FROM sync_devices WHERE space = ? AND install = ?")
             .bind(space)
             .bind(install)
             .execute(self.writer())
             .await?;
+        // Safe because the user forgot a device unseen for 30 days.
         sqlx::query("DELETE FROM sync_cursors WHERE space = ? AND install = ?")
             .bind(space)
             .bind(install)

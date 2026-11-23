@@ -26,6 +26,7 @@ impl Db {
         let cutoff = now - MISSING_GRACE_MS;
         let mut tx = self.writer().begin().await?;
         let models = sqlx::query!(
+            // Safe because only rows without user data, missing for 30 days after a walk that reached the folder.
             "DELETE FROM models
              WHERE library_id = ? AND missing_since IS NOT NULL AND missing_since < ?
                AND notes = '' AND source_url IS NULL
@@ -42,6 +43,7 @@ impl Db {
         // Files gone from models that are still there (a part deleted from
         // a folder). Missing models keep theirs, to show where they were.
         let parts = sqlx::query!(
+            // Safe because only gone files of models that are still there, missing for 30 days.
             "DELETE FROM parts
              WHERE library_id = ? AND missing_since IS NOT NULL AND missing_since < ?
                AND model_id IN (SELECT id FROM models WHERE missing_since IS NULL)",
@@ -52,6 +54,7 @@ impl Db {
         .await?
         .rows_affected();
         let assets = sqlx::query!(
+            // Safe because only gone files of models that are still there, missing for 30 days.
             "DELETE FROM assets
              WHERE library_id = ? AND missing_since IS NOT NULL AND missing_since < ?
                AND model_id IN (SELECT id FROM models WHERE missing_since IS NULL)",
@@ -74,6 +77,7 @@ impl Db {
     pub async fn forget_model(&self, id: ModelId) -> Result<()> {
         let mut tx = self.writer().begin().await?;
         let n = sqlx::query!(
+            // Safe because the user asked to forget this missing model.
             "DELETE FROM models WHERE id = ? AND missing_since IS NOT NULL",
             id
         )

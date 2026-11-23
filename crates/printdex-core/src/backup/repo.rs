@@ -485,6 +485,7 @@ pub(crate) fn probe(target: &Target, secrets: &TargetSecrets) -> Result<()> {
             }
             let file = path.join(NAME);
             std::fs::write(&file, b"printdex").map_err(|e| classify_io(&e))?;
+            // Safe because it is the probe file written just above.
             std::fs::remove_file(&file).map_err(|e| classify_io(&e))?;
             Ok(())
         }

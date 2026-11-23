@@ -197,6 +197,7 @@ impl SpaceStore for FolderStore {
     fn delete<'a>(&'a self, path: &'a str) -> StoreFuture<'a, ()> {
         Box::pin(async move {
             let full = self.full(checked(path)?);
+            // Safe because callers delete only batches a newer snapshot covers, or a forgotten device's files.
             blocking(move || match std::fs::remove_file(&full) {
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
                 _ => Ok(()),

@@ -132,6 +132,7 @@ impl Db {
         match recipe {
             Some(r) => write_recipe(&mut tx, id, r, now_ms()).await?,
             None => {
+                // Safe because the user removed the recipe (it stays in sidecars and backups until rewritten).
                 sqlx::query!("DELETE FROM recipes WHERE model_id = ?", id)
                     .execute(&mut *tx)
                     .await?;
@@ -294,6 +295,7 @@ impl Db {
             path: self.photo_dir().join(id.to_string()).join(p.file_name),
         })
         .collect();
+        // Safe because the user (here or synced) deleted this attempt.
         sqlx::query!("DELETE FROM attempts WHERE id = ?", id)
             .execute(&mut *tx)
             .await?;
@@ -356,6 +358,7 @@ impl Db {
         .fetch_optional(&mut *tx)
         .await?
         .ok_or(CoreError::PhotoInvalid)?;
+        // Safe because the user (here or synced) removed this photo.
         sqlx::query!("DELETE FROM attempt_photos WHERE id = ?", id)
             .execute(&mut *tx)
             .await?;

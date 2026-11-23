@@ -628,6 +628,7 @@ impl Engine {
     )
 ))]
 fn restore(paths: &[PathBuf]) -> Result<()> {
+    // Safe because listing the trash changes nothing.
     let items = trash::os_limited::list().map_err(|_| CoreError::TrashUnavailable)?;
     let mut pick = Vec::new();
     for p in paths {
@@ -642,6 +643,7 @@ fn restore(paths: &[PathBuf]) -> Result<()> {
     if pick.is_empty() {
         return Err(CoreError::UndoUnavailable);
     }
+    // Safe because restore_all claims each name with create_new first and stops at a taken one.
     trash::os_limited::restore_all(pick).map_err(|e| match e {
         trash::Error::RestoreCollision { path, .. } => CoreError::NameTaken(
             path.file_name()
@@ -731,6 +733,7 @@ fn do_step(
             .map_err(|e| (p.clone(), e))?;
         }
         if !real.is_empty() {
+            // Safe because the trash keeps them and the step is journaled (undo restores them).
             trash::delete_all(&real)
                 .map_err(|e| (from.clone(), io::Error::other(e.to_string())))?;
         }
@@ -913,12 +916,14 @@ fn drop_copy(a: &Path, b: &Path) -> Option<bool> {
 
 fn trash_path(p: &Path) -> io::Result<()> {
     faults::perform(Op::Trash, p, || {
+        // Safe because only originals whose verified copy is in place are trashed, and the trash keeps them.
         trash::delete(p).map_err(|e| io::Error::other(e.to_string()))
     })
 }
 
 fn remove_path(p: &Path) -> io::Result<()> {
     faults::perform(Op::Remove, p, || {
+        // Safe because callers remove only our own copies, after checking the other copy is whole.
         if std::fs::symlink_metadata(p)?.is_dir() {
             std::fs::remove_dir_all(p)
         } else {

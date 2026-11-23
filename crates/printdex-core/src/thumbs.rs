@@ -395,6 +395,7 @@ impl ThumbnailService {
     /// shown.
     pub async fn clear_cache(&self) -> std::io::Result<()> {
         let root = self.inner.root().to_owned();
+        // Safe because the cache holds only thumbnails, which are rendered again.
         tokio::task::spawn_blocking(move || match std::fs::remove_dir_all(&root) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),
@@ -454,6 +455,7 @@ fn evict(root: &Path, limit: u64) -> u64 {
         if total <= goal {
             break;
         }
+        // Safe because the cache holds only thumbnails, which are rendered again.
         if std::fs::remove_file(&f.path).is_ok() {
             total -= f.size;
             freed += f.size;

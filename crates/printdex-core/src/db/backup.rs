@@ -54,6 +54,7 @@ impl Db {
             .fetch_all(&mut *tx)
             .await?;
         for id in existing.iter().filter(|id| !keep.contains(id)) {
+            // Safe because the user removed this target in settings; the backups on it stay.
             sqlx::query!("DELETE FROM backup_targets WHERE id = ?", id)
                 .execute(&mut *tx)
                 .await?;

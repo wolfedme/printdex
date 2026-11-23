@@ -69,6 +69,7 @@ pub(crate) async fn refresh_fts(conn: &mut SqliteConnection, id: ModelId) -> Res
 
 /// Removes tags no model uses any more.
 pub(crate) async fn drop_unused_tags(conn: &mut SqliteConnection) -> Result<()> {
+    // Safe because only tags no model uses are dropped.
     sqlx::query!("DELETE FROM tags WHERE id NOT IN (SELECT tag_id FROM model_tags)")
         .execute(&mut *conn)
         .await?;
@@ -206,6 +207,7 @@ impl Db {
         let mut tx = self.writer().begin().await?;
         ensure_model(&mut tx, id).await?;
         let done = sqlx::query!(
+            // Safe because the user removed this tag.
             "DELETE FROM model_tags WHERE model_id = ? AND tag_id = (SELECT id FROM tags WHERE name_key = ?)",
             id,
             key
@@ -347,6 +349,7 @@ impl Db {
         )
         .execute(&mut *tx)
         .await?;
+        // Safe because the user deleted this collection; its models stay.
         let done = sqlx::query!("DELETE FROM collections WHERE id = ?", id)
             .execute(&mut *tx)
             .await?;
@@ -382,6 +385,7 @@ impl Db {
     pub async fn remove_from_collection(&self, id: CollectionId, model: ModelId) -> Result<bool> {
         let mut tx = self.writer().begin().await?;
         let done = sqlx::query!(
+            // Safe because the user took the model out of this collection.
             "DELETE FROM collection_models WHERE collection_id = ? AND model_id = ?",
             id,
             model
@@ -484,6 +488,7 @@ impl Db {
         )
         .execute(&mut *tx)
         .await?;
+        // Safe because the newer sidecar's tags replace them in the same transaction.
         sqlx::query!("DELETE FROM model_tags WHERE model_id = ?", id)
             .execute(&mut *tx)
             .await?;
@@ -496,6 +501,7 @@ impl Db {
             }
         }
         drop_unused_tags(&mut tx).await?;
+        // Safe because the newer sidecar's collections replace them in the same transaction.
         sqlx::query!("DELETE FROM collection_models WHERE model_id = ?", id)
             .execute(&mut *tx)
             .await?;

@@ -57,6 +57,7 @@ pub fn store_photo(
 /// logged.
 pub fn delete_files(paths: &[std::path::PathBuf]) {
     for p in paths {
+        // Safe because callers pass only photos whose rows a delete (here or synced) already removed.
         if let Err(e) = std::fs::remove_file(p)
             && e.kind() != std::io::ErrorKind::NotFound
         {
