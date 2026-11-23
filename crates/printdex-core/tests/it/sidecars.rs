@@ -506,3 +506,36 @@ async fn scan_sweeps_stale_temp_next_to_sidecar() {
     assert!(fresh.exists(), "a recent temp may still be in use");
     assert!(elsewhere.exists());
 }
+
+#[tokio::test]
+async fn broken_sidecar_is_set_aside_before_rewrite() {
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    let bin = f.model("Bin").await;
+    let path = f.root().join("Bin/.printdex.toml");
+    fs::write(&path, "garbage = [").unwrap();
+    // A scan only reads: the broken file stays where it is.
+    f.rescan().await;
+    assert_eq!(fs::read_to_string(&path).unwrap(), "garbage = [");
+    f.engine.add_tag(bin, "kept").await.unwrap();
+    f.engine.flush_sidecars().await;
+    assert_eq!(f.read("Bin/.printdex.toml").tags, ["kept"]);
+    let broken: Vec<_> = fs::read_dir(f.root().join("Bin"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(".printdex.toml.broken-")
+        })
+        .collect();
+    assert_eq!(broken.len(), 1, "{broken:?}");
+    assert_eq!(fs::read_to_string(&broken[0]).unwrap(), "garbage = [");
+    // Neither a later scan nor the temp sweep takes the set-aside file, and
+    // it is never read as a sidecar.
+    f.rescan().await;
+    assert!(broken[0].exists());
+    assert!(!printdex_core::walk::is_sidecar_name(
+        &broken[0].file_name().unwrap().to_string_lossy()
+    ));
+}

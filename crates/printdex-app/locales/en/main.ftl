@@ -467,6 +467,8 @@ report-title = Report a bug
 report-body = Opens a new issue on GitHub, or saves a file with logs you can send another way. Nothing is sent without you.
 report-open-issue = Open a GitHub issue
 report-save = Save diagnostics…
+settings-broken = Settings file was unreadable and was set aside
+apps-broken = Apps file was unreadable and was set aside
 report-saved = Diagnostics saved
 report-save-failed = Could not save diagnostics: { $error }
 

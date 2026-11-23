@@ -245,11 +245,54 @@ fn write_atomic(path: &Path, text: &str) -> std::io::Result<i64> {
             "model folder not found",
         ));
     }
+    set_aside_if_broken(path);
     crate::fsx::durable_write(path, text.as_bytes(), crate::fsx::Durability::UserData)?;
     Ok(std::fs::metadata(path)?
         .modified()
         .map(system_time_to_ns)
         .unwrap_or(0))
+}
+
+/// Renames an existing sidecar that cannot be read as one (bad TOML, wrong
+/// schema, too large) to `.<name>.broken-<unix_ms>` beside it, so the write
+/// that follows doesn't destroy the person's file. Other read errors leave
+/// the file alone. Best effort: a failed rename is logged and the write
+/// goes on. Blocking.
+fn set_aside_if_broken(path: &Path) {
+    let broken = match read_capped(path) {
+        Ok((text, _)) => SidecarFile::parse(&text).is_err(),
+        Err(e) => e.kind() == std::io::ErrorKind::Other,
+    };
+    if !broken {
+        return;
+    }
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        return;
+    };
+    // Sidecar names start with a dot already.
+    let name = name.to_string_lossy();
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    for n in 0..100 {
+        let suffix = if n == 0 {
+            format!("{at}")
+        } else {
+            format!("{at}-{n}")
+        };
+        let to = dir.join(format!("{name}.broken-{suffix}"));
+        match crate::fsx::rename_no_replace(path, &to) {
+            Ok(()) => {
+                tracing::warn!(from = %path.display(), to = %to.display(), "unreadable sidecar set aside");
+                return;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => {
+                tracing::warn!(error = %e, path = %path.display(), "could not set aside unreadable sidecar");
+                return;
+            }
+        }
+    }
 }
 
 /// Reads a sidecar, refusing files over [`MAX_BYTES`]. Blocking.

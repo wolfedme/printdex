@@ -117,6 +117,35 @@ fn translucency_key(t: Translucency) -> &'static str {
     }
 }
 
+/// Renames a config file that doesn't parse to `<name>.broken-<unix_ms>`
+/// beside it and says where it went; `None` when the rename failed (logged).
+pub(crate) fn set_aside(path: &Path) -> Option<PathBuf> {
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    for n in 0..100 {
+        let suffix = if n == 0 {
+            format!("{at}")
+        } else {
+            format!("{at}-{n}")
+        };
+        let to = path.with_file_name(format!("{name}.broken-{suffix}"));
+        match printdex_core::fsx::rename_no_replace(path, &to) {
+            Ok(()) => {
+                tracing::warn!(from = %path.display(), to = %to.display(), "config file does not parse; set aside");
+                return Some(to);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => {
+                tracing::warn!(error = %e, path = %path.display(), "could not set aside broken config file");
+                return None;
+            }
+        }
+    }
+    None
+}
+
 impl Settings {
     /// The settings file in the OS config folder.
     pub fn default_dir() -> Option<PathBuf> {
@@ -197,13 +226,29 @@ impl Settings {
     }
 
     /// Loads `dir/settings.toml`; defaults when it is missing or unreadable.
+    /// A file that doesn't parse is set aside (see [`Settings::load_with_status`]).
+    #[cfg(test)]
     pub fn load(dir: &Path) -> Settings {
-        match std::fs::read_to_string(dir.join(FILE_NAME)) {
-            Ok(text) => Settings::parse(&text),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Settings::default(),
+        Settings::load_with_status(dir).0
+    }
+
+    /// Like [`Settings::load`], plus where a file that didn't parse was set
+    /// aside (`settings.toml.broken-<unix_ms>`). A file that can't be read
+    /// at all is left where it is.
+    pub fn load_with_status(dir: &Path) -> (Settings, Option<PathBuf>) {
+        let path = dir.join(FILE_NAME);
+        match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                if text.parse::<toml::Table>().is_err() {
+                    let aside = set_aside(&path);
+                    return (Settings::default(), aside);
+                }
+                (Settings::parse(&text), None)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Settings::default(), None),
             Err(e) => {
                 tracing::warn!(error = %e, "could not read settings; using defaults");
-                Settings::default()
+                (Settings::default(), None)
             }
         }
     }
@@ -265,6 +310,37 @@ mod tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, [FILE_NAME]);
+    }
+
+    #[test]
+    fn broken_settings_are_set_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(FILE_NAME), "mode = 3 =").unwrap();
+        let (s, aside) = Settings::load_with_status(dir.path());
+        assert_eq!(s, Settings::default());
+        let aside = aside.expect("set aside");
+        assert!(
+            aside
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("settings.toml.broken-")
+        );
+        assert_eq!(std::fs::read_to_string(&aside).unwrap(), "mode = 3 =");
+        assert!(!dir.path().join(FILE_NAME).exists());
+        // Loading again finds nothing to set aside.
+        assert_eq!(Settings::load_with_status(dir.path()).1, None);
+    }
+
+    #[test]
+    fn unreadable_settings_are_not_renamed() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory in the file's place: reading fails, parsing never runs.
+        std::fs::create_dir(dir.path().join(FILE_NAME)).unwrap();
+        let (s, aside) = Settings::load_with_status(dir.path());
+        assert_eq!(s, Settings::default());
+        assert_eq!(aside, None);
+        assert!(dir.path().join(FILE_NAME).is_dir());
     }
 
     #[test]

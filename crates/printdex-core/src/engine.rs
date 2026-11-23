@@ -72,7 +72,6 @@ pub(crate) struct ScanGuard<'a> {
     _lock: std::fs::File,
 }
 
-/// Takes the cross-process scan lock for library `id`.
 /// Removes stale temporary files a crash left in the data folder and in each
 /// photo attempt folder. Runs on the blocking pool.
 async fn sweep_data_dir(data_dir: &Path) {
@@ -91,6 +90,7 @@ async fn sweep_data_dir(data_dir: &Path) {
     .await;
 }
 
+/// Takes the cross-process scan lock for library `id`.
 fn scan_lock(data_dir: &Path, id: LibraryId) -> Result<std::fs::File> {
     let dir = data_dir.join("locks");
     std::fs::create_dir_all(&dir).map_err(|source| CoreError::Io {

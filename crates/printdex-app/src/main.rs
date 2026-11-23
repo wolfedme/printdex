@@ -80,9 +80,9 @@ fn main() -> anyhow::Result<()> {
     let crash = printdex_core::diagnostics::unseen_crash(&log_dir);
     printdex_core::diagnostics::install_panic_hook(log_dir, env!("CARGO_PKG_VERSION"));
     let config_dir = cli.config_dir.or_else(settings::Settings::default_dir);
-    let settings = config_dir
+    let (settings, settings_set_aside) = config_dir
         .as_deref()
-        .map(settings::Settings::load)
+        .map(settings::Settings::load_with_status)
         .unwrap_or_default();
     // The window's transparency is fixed at creation: glass only where the
     // OS blurs and translucency is on.
@@ -93,6 +93,7 @@ fn main() -> anyhow::Result<()> {
         cache_dir,
         config_dir,
         settings,
+        settings_set_aside: settings_set_aside.is_some(),
         glass_window,
         crash,
         mode: cli.mode.map(|m| match m {

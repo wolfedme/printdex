@@ -71,6 +71,8 @@ pub struct Options {
     pub mode: Option<Mode>,
     /// Settings as loaded at startup.
     pub settings: Settings,
+    /// `settings.toml` didn't parse and was set aside at startup.
+    pub settings_set_aside: bool,
     /// Whether the window was created transparent with an OS blur. Fixed
     /// for the window's lifetime.
     pub glass_window: bool,
@@ -110,6 +112,7 @@ impl Options {
             config_dir: None,
             mode: None,
             settings: Settings::default(),
+            settings_set_aside: false,
             glass_window: false,
             crash: None,
         }
@@ -216,6 +219,8 @@ pub struct App {
     pub settings_section: SettingsSection,
     /// The unseen crash the notice above the library is about.
     pub crash: Option<CrashReport>,
+    /// A startup note (a config file was set aside), shown once at boot.
+    pub config_notice: Option<String>,
     /// The library whose "Remove" asks for confirmation.
     pub confirm_remove: Option<LibraryId>,
     /// Libraries whose folder can't be reached, with the time it was
@@ -329,11 +334,18 @@ pub enum Message {
 impl App {
     /// State before the engine is open.
     pub fn new(options: Options) -> App {
-        let apps = options
+        let (apps, apps_aside) = options
             .config_dir
             .as_deref()
-            .map(crate::apps::Apps::load)
+            .map(crate::apps::Apps::load_with_status)
             .unwrap_or_default();
+        let config_notice = if options.settings_set_aside {
+            Some(t("settings-broken"))
+        } else if apps_aside.is_some() {
+            Some(t("apps-broken"))
+        } else {
+            None
+        };
         let settings = options.settings;
         let crash = options.crash.clone();
         let mut search = SearchState::default();
@@ -370,6 +382,7 @@ impl App {
             filter_menu: false,
             settings_section: SettingsSection::default(),
             crash,
+            config_notice,
             confirm_remove: None,
             offline: HashMap::new(),
             renaming: None,
@@ -404,7 +417,11 @@ impl App {
         let mut app = App::new(options);
         app.updates = crate::updates::Updates::start();
         let check = Task::done(Message::Updates(crate::updates::Ux::Tick));
-        (app, Task::batch([open, mode, check]))
+        let notice = match app.config_notice.take() {
+            Some(text) => app.show_info(text),
+            None => Task::none(),
+        };
+        (app, Task::batch([open, mode, check, notice]))
     }
 
     /// Light or dark right now: the `--mode` override, else the setting,

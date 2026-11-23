@@ -81,10 +81,23 @@ impl Apps {
     }
 
     /// Loads `dir/apps.toml`; empty when missing or unreadable.
+    #[cfg(test)]
     pub fn load(dir: &Path) -> Apps {
-        std::fs::read_to_string(dir.join(FILE_NAME))
-            .map(|t| Apps::parse(&t))
-            .unwrap_or_default()
+        Apps::load_with_status(dir).0
+    }
+
+    /// Like [`Apps::load`], plus where a file that didn't parse was set
+    /// aside (`apps.toml.broken-<unix_ms>`). A file that can't be read is
+    /// left where it is.
+    pub fn load_with_status(dir: &Path) -> (Apps, Option<PathBuf>) {
+        let path = dir.join(FILE_NAME);
+        match std::fs::read_to_string(&path) {
+            Ok(text) if text.parse::<toml::Table>().is_err() => {
+                (Apps::default(), crate::settings::set_aside(&path))
+            }
+            Ok(text) => (Apps::parse(&text), None),
+            Err(_) => (Apps::default(), None),
+        }
     }
 
     /// Writes `dir/apps.toml` atomically.
@@ -145,6 +158,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         a.save(dir.path()).unwrap();
         assert_eq!(Apps::load(dir.path()), a);
+    }
+
+    #[test]
+    fn broken_apps_are_set_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(FILE_NAME), "open-with = [").unwrap();
+        let (a, aside) = Apps::load_with_status(dir.path());
+        assert_eq!(a, Apps::default());
+        let aside = aside.expect("set aside");
+        assert!(
+            aside
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("apps.toml.broken-")
+        );
+        assert_eq!(std::fs::read_to_string(&aside).unwrap(), "open-with = [");
+        assert!(!dir.path().join(FILE_NAME).exists());
     }
 
     #[test]
