@@ -141,21 +141,9 @@ fn list_dir(dir: &Path, want_dirs: bool) -> std::io::Result<Vec<String>> {
 
 /// Writes `bytes` next to `dest` under a temporary name, syncs and renames.
 fn write_atomic(dest: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
     let dir = dest.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir)?;
-    let name = dest.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-    let tmp = dir.join(format!(".{name}.tmp-{}", uuid::Uuid::now_v7().simple()));
-    let res = (|| {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-        std::fs::rename(&tmp, dest)
-    })();
-    if res.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    res
+    crate::fsx::durable_write(dest, bytes, crate::fsx::Durability::UserData)
 }
 
 impl SpaceStore for FolderStore {

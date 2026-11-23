@@ -297,7 +297,8 @@ impl Engine {
         let (install, target_id) = prepared?;
         self.set_secrets_for(install, target_id, secrets, remember);
 
-        std::fs::write(staging.join(READY), b"").map_err(|e| io_err(&staging, e))?;
+        crate::fsx::durable_write(&staging.join(READY), b"", crate::fsx::Durability::UserData)
+            .map_err(|e| io_err(&staging, e))?;
         let settings_files = ["settings.toml", "apps.toml"]
             .iter()
             .map(|n| staging.join(n))

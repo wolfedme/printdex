@@ -245,12 +245,7 @@ fn write_atomic(path: &Path, text: &str) -> std::io::Result<i64> {
             "model folder not found",
         ));
     }
-    let tmp = dir.join(format!(".printdex-{:016x}.tmp", fastrand::u64(..)));
-    let result = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, path));
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result?;
+    crate::fsx::durable_write(path, text.as_bytes(), crate::fsx::Durability::UserData)?;
     Ok(std::fs::metadata(path)?
         .modified()
         .map(system_time_to_ns)

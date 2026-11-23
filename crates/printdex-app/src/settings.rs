@@ -212,9 +212,11 @@ impl Settings {
     /// folder, then a rename over the old one.
     pub fn save(self, dir: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
-        let tmp = dir.join(format!("{FILE_NAME}.tmp"));
-        std::fs::write(&tmp, self.to_toml())?;
-        std::fs::rename(&tmp, dir.join(FILE_NAME))
+        printdex_core::fsx::durable_write(
+            &dir.join(FILE_NAME),
+            self.to_toml().as_bytes(),
+            printdex_core::fsx::Durability::UserData,
+        )
     }
 }
 
@@ -241,6 +243,28 @@ mod tests {
         assert_eq!(Settings::load(dir.path()), Settings::default());
         assert_eq!(Settings::default().color_theme, ColorTheme::GraphiteSignal);
         assert_eq!(Settings::default().mode, ThemeMode::System);
+    }
+
+    #[test]
+    fn settings_save_uses_unique_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        let barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|s| {
+            for _ in 0..2 {
+                s.spawn(|| {
+                    barrier.wait();
+                    for _ in 0..50 {
+                        changed().save(dir.path()).unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(Settings::load(dir.path()), changed());
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, [FILE_NAME]);
     }
 
     #[test]

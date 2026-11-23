@@ -636,3 +636,39 @@ async fn attribution_names_the_other_device() {
     let who = fx.a.engine.sync_attribution(da).await.unwrap();
     assert_eq!(who.notes, None);
 }
+
+fn files_under(dir: &Path) -> Vec<PathBuf> {
+    if !dir.exists() {
+        return Vec::new();
+    }
+    walk(dir)
+}
+
+#[tokio::test]
+async fn synced_photo_partial_write_leaves_no_file() {
+    use printdex_core::fsx::faults::{Action, Op, arm};
+    let fx = OwnCopies::new("").await;
+    let da = fx.a.model("dragon").await;
+    let att = fx.a.engine.log_attempt(da, &attempt("")).await.unwrap();
+    let img = fx.dir.path().join("photo.png");
+    image::RgbImage::from_pixel(4, 4, image::Rgb([200, 10, 10]))
+        .save(&img)
+        .unwrap();
+    fx.a.engine.add_photo(att, &img).await.unwrap();
+    fx.a.sync().await;
+
+    let photos = fx.dir.path().join("b/data/photos");
+    let g = arm(
+        &photos,
+        Op::Write,
+        0,
+        Action::Fail(std::io::ErrorKind::StorageFull),
+    );
+    let _ = fx.b.engine.sync_now().await;
+    assert_eq!(g.fired(), 1, "the photo write went through fsx");
+    assert!(
+        files_under(&photos).is_empty(),
+        "{:?}",
+        files_under(&photos)
+    );
+}

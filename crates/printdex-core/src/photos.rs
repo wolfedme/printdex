@@ -48,7 +48,8 @@ pub fn store_photo(
     })?;
     let name = format!("{photo}.{ext}");
     let dest = dir.join(&name);
-    std::fs::copy(src, &dest).map_err(|source| CoreError::Io { path: dest, source })?;
+    crate::fsx::copy_file_durable(src, &dest)
+        .map_err(|source| CoreError::Io { path: dest, source })?;
     Ok(name)
 }
 

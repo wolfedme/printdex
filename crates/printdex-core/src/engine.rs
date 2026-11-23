@@ -73,6 +73,24 @@ pub(crate) struct ScanGuard<'a> {
 }
 
 /// Takes the cross-process scan lock for library `id`.
+/// Removes stale temporary files a crash left in the data folder and in each
+/// photo attempt folder. Runs on the blocking pool.
+async fn sweep_data_dir(data_dir: &Path) {
+    let data_dir = data_dir.to_path_buf();
+    let _ = tokio::task::spawn_blocking(move || {
+        let hour = std::time::Duration::from_secs(3600);
+        crate::fsx::sweep_temp_files(&data_dir, hour);
+        if let Ok(rd) = std::fs::read_dir(data_dir.join("photos")) {
+            for e in rd.flatten() {
+                if e.file_type().is_ok_and(|t| t.is_dir()) {
+                    crate::fsx::sweep_temp_files(&e.path(), hour);
+                }
+            }
+        }
+    })
+    .await;
+}
+
 fn scan_lock(data_dir: &Path, id: LibraryId) -> Result<std::fs::File> {
     let dir = data_dir.join("locks");
     std::fs::create_dir_all(&dir).map_err(|source| CoreError::Io {
@@ -132,6 +150,7 @@ impl Engine {
             source,
         })?;
         crate::backup::restore::apply_staged(data_dir)?;
+        sweep_data_dir(data_dir).await;
         let db = Db::open(&data_dir.join("printdex.db")).await?;
         let (events, _) = broadcast::channel(EVENT_CAPACITY);
         let thumbs = ThumbnailService::start(db.clone(), events.clone(), cache_dir);

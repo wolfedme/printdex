@@ -1321,7 +1321,7 @@ impl Engine {
             let dest = dest.clone();
             tokio::task::spawn_blocking(move || {
                 std::fs::create_dir_all(&dir)?;
-                std::fs::write(&dest, &bytes)
+                crate::fsx::durable_write(&dest, &bytes, crate::fsx::Durability::UserData)
             })
         };
         match write.await {

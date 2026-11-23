@@ -84,6 +84,29 @@ fn write_then_rename(
     fs::rename(tmp, path)
 }
 
+/// Copies the file `from` to `to`, which must not exist (`AlreadyExists`,
+/// and then nothing is touched) and whose folder must (`NotFound`; no folder
+/// is created). The copy goes to a temporary sibling `.<name>.tmp-<uuid>`,
+/// is fsynced and then moved to `to` with [`rename_no_replace`], so `to` is
+/// either missing or complete. On any error the temporary is removed.
+///
+/// Fault injection: [`Op::Copy`] with `to`, then [`Op::Rename`] with `to`.
+pub fn copy_file_durable(from: &Path, to: &Path) -> io::Result<()> {
+    let tmp = temp_sibling(to, TEMP_INFIX)?;
+    let mut w = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+    let res = (|| {
+        faults::check(Op::Copy, to)?;
+        copy_file_hashed(from, &mut w)?;
+        drop(w);
+        rename_no_replace(&tmp, to)
+    })();
+    if let Err(e) = res {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+    sync_dir(parent_dir(to))
+}
+
 /// Infix of [`durable_write`]'s temporary files, which
 /// [`sweep_temp_files`] removes.
 const TEMP_INFIX: &str = ".tmp-";
@@ -644,6 +667,28 @@ mod tests {
         assert_eq!(g.fired(), 1);
         assert_eq!(fs::read(&p).unwrap(), b"original");
         assert_eq!(names(d.path()), ["a.toml"]);
+    }
+
+    #[test]
+    fn copy_file_durable_copies_and_never_replaces() {
+        let d = tempfile::tempdir().unwrap();
+        let (from, to) = (d.path().join("src.png"), d.path().join("dst.png"));
+        fs::write(&from, b"pixels").unwrap();
+        copy_file_durable(&from, &to).unwrap();
+        assert_eq!(fs::read(&to).unwrap(), b"pixels");
+        assert_eq!(names(d.path()), ["dst.png", "src.png"]);
+        fs::write(&from, b"other").unwrap();
+        let err = copy_file_durable(&from, &to).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&to).unwrap(), b"pixels");
+        assert_eq!(names(d.path()), ["dst.png", "src.png"]);
+        // A failure leaves no temporary behind.
+        let to2 = d.path().join("two.png");
+        let g = faults::arm(&to2, Op::Copy, 0, Action::Fail(ErrorKind::StorageFull));
+        let err = copy_file_durable(&from, &to2).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::StorageFull);
+        assert_eq!(g.fired(), 1);
+        assert_eq!(names(d.path()), ["dst.png", "src.png"]);
     }
 
     #[test]

@@ -448,3 +448,61 @@ async fn sidecar_brings_number_back_after_reinstall() {
     rest.sort_unstable();
     assert_eq!(rest, [4, 5, 6]);
 }
+
+#[tokio::test]
+async fn sidecar_write_failure_keeps_old_sidecar() {
+    use printdex_core::fsx::faults::{Action, Op, arm};
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    let bin = f.model("Bin").await;
+    f.engine.add_tag(bin, "first").await.unwrap();
+    f.engine.flush_sidecars().await;
+    let path = f.root().join("Bin/.printdex.toml");
+    let before = fs::read_to_string(&path).unwrap();
+
+    let g = arm(
+        &f.root(),
+        Op::Rename,
+        0,
+        Action::Fail(std::io::ErrorKind::StorageFull),
+    );
+    f.engine.add_tag(bin, "second").await.unwrap();
+    f.engine.flush_sidecars().await;
+    assert_eq!(g.fired(), 1, "the sidecar write went through fsx");
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
+    let names: Vec<_> = fs::read_dir(f.root().join("Bin"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(names.iter().all(|n| !n.contains("tmp")), "{names:?}");
+}
+
+#[tokio::test]
+async fn scan_sweeps_stale_temp_next_to_sidecar() {
+    const U: &str = "0190aaaabbbbccccddddeeeeffff0000";
+    let f = Fx::new(&["Bin/a.stl", "Other/b.stl"]).await;
+    let bin = f.model("Bin").await;
+    f.engine.add_tag(bin, "x").await.unwrap();
+    f.engine.flush_sidecars().await;
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 3600);
+    let make = |rel: &str, aged: bool| {
+        let p = f.root().join(rel);
+        fs::write(&p, b"partial").unwrap();
+        if aged {
+            fs::File::options()
+                .write(true)
+                .open(&p)
+                .unwrap()
+                .set_modified(old)
+                .unwrap();
+        }
+        p
+    };
+    let stale = make(&format!("Bin/.printdex.toml.tmp-{U}"), true);
+    let fresh = make(&format!("Bin/.fresh.toml.tmp-{U}"), false);
+    // A folder without a sidecar is not visited.
+    let elsewhere = make(&format!("Other/.x.tmp-{U}"), true);
+    f.rescan().await;
+    assert!(!stale.exists(), "stale temp next to a sidecar is swept");
+    assert!(fresh.exists(), "a recent temp may still be in use");
+    assert!(elsewhere.exists());
+}

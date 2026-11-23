@@ -699,15 +699,10 @@ impl Inner {
     /// Writes `bytes` under `key` with extension `ext`, atomically.
     async fn store(&self, key: &str, ext: &str, bytes: Vec<u8>) -> Option<PathBuf> {
         let path = self.path_for(key, ext);
-        let tmp = path.with_extension(format!("{ext}.tmp{:08x}", fastrand::u32(..)));
         self.dirty.store(true, Ordering::Relaxed);
         tokio::task::spawn_blocking(move || {
             std::fs::create_dir_all(path.parent()?).ok()?;
-            std::fs::write(&tmp, bytes).ok()?;
-            if std::fs::rename(&tmp, &path).is_err() {
-                let _ = std::fs::remove_file(&tmp);
-                return None;
-            }
+            crate::fsx::durable_write(&path, &bytes, crate::fsx::Durability::Cache).ok()?;
             Some(path)
         })
         .await

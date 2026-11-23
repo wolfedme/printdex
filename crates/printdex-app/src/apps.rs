@@ -90,9 +90,11 @@ impl Apps {
     /// Writes `dir/apps.toml` atomically.
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
-        let tmp = dir.join(format!("{FILE_NAME}.tmp"));
-        std::fs::write(&tmp, self.to_toml())?;
-        std::fs::rename(&tmp, dir.join(FILE_NAME))
+        printdex_core::fsx::durable_write(
+            &dir.join(FILE_NAME),
+            self.to_toml().as_bytes(),
+            printdex_core::fsx::Durability::UserData,
+        )
     }
 }
 

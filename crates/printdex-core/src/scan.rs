@@ -79,6 +79,29 @@ pub struct ScanSummary {
     pub partial: bool,
 }
 
+/// Removes stale temporary files (left by a crashed write) from each folder
+/// holding a sidecar the scan walked. Runs on the blocking pool.
+async fn sweep_sidecar_folders(root: &Path, sidecars: &[(String, i64)]) {
+    if sidecars.is_empty() {
+        return;
+    }
+    let root = root.to_path_buf();
+    let folders: std::collections::BTreeSet<String> = sidecars
+        .iter()
+        .map(|(rel, _)| rel.rsplit_once('/').map_or("", |(d, _)| d).to_owned())
+        .collect();
+    let _ = tokio::task::spawn_blocking(move || {
+        for rel in folders {
+            let dir = rel
+                .split('/')
+                .filter(|s| !s.is_empty())
+                .fold(root.clone(), |p, s| p.join(s));
+            crate::fsx::sweep_temp_files(&dir, std::time::Duration::from_secs(3600));
+        }
+    })
+    .await;
+}
+
 /// What a scan needs to read sidecars back: the writer (to rewrite merged
 /// files) and this install's id.
 #[derive(Clone, Copy, Debug)]
@@ -461,6 +484,7 @@ async fn run_scan_with(
         .collect();
     let groups = group_models_with(&files, &opaque);
     let sidecar_files = walked_sidecars;
+    sweep_sidecar_folders(&lib.path, &sidecar_files).await;
     progress(ScanPhase::Writing, 0, groups.len());
     let stats = db
         .apply_scan(
