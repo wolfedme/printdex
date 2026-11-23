@@ -645,3 +645,34 @@ async fn sidecar_not_written_next_to_a_file_that_is_gone() {
     f.engine.flush_sidecars().await;
     assert!(!f.root().join("Misc/.hook.stl.printdex.toml").exists());
 }
+
+/// A single file moved by hand, leaving its sidecar behind, after the
+/// sidecar was edited outside Printdex: the edit is imported and the
+/// sidecar follows the file instead of being deleted.
+#[tokio::test]
+async fn moved_file_keeps_its_unimported_sidecar_edit() {
+    let f = Fx::new(&["Misc/hook.stl", "Misc/Sub/x.stl"]).await;
+    let hook = f.model("hook").await;
+    f.engine.add_tag(hook, "first").await.unwrap();
+    f.engine.flush_sidecars().await;
+    let mut s = f.read("Misc/.hook.stl.printdex.toml");
+    s.tags.push("edited".into());
+    s.updated_at += 1000;
+    fs::write(
+        f.root().join("Misc/.hook.stl.printdex.toml"),
+        s.to_toml().unwrap(),
+    )
+    .unwrap();
+    // Files at the library root are single-file models.
+    fs::rename(f.root().join("Misc/hook.stl"), f.root().join("hook.stl")).unwrap();
+    let summary = f.rescan().await;
+    assert_eq!(summary.models_moved, 1, "{summary:?}");
+    f.engine.flush_sidecars().await;
+    let mut tags = f.engine.model_data(hook).await.unwrap().unwrap().tags;
+    tags.sort();
+    assert_eq!(tags, ["edited", "first"]);
+    let mut on_disk = f.read(".hook.stl.printdex.toml").tags;
+    on_disk.sort();
+    assert_eq!(on_disk, ["edited", "first"]);
+    assert!(!f.root().join("Misc/.hook.stl.printdex.toml").exists());
+}
