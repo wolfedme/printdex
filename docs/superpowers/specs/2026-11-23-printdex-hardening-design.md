@@ -168,8 +168,7 @@ To build:
     summary, for people without a GitHub account.
 
   Nothing is sent automatically. Home-folder and library paths in what gets shared are
-  replaced with placeholders. Pending Max's pick: GitHub issue, diagnostics file, or
-  both (both recommended).
+  replaced with placeholders. Max chose both actions (2026-11-23).
 - An audit of every non-test `unwrap`, `expect`, slice index and `as` cast in app and
   core code. Each one is either proven safe with a comment or replaced with handling.
   There are about 400 `unwrap` calls in total, most of them in tests.
