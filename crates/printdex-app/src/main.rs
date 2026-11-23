@@ -59,13 +59,6 @@ enum ModeArg {
 fn main() -> anyhow::Result<()> {
     // First thing: Velopack's install/update hooks may run and exit here.
     velopack::VelopackApp::build().run();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,wgpu=warn,naga=warn,iced_wgpu=warn".into()),
-        )
-        .init();
-
     let cli = Cli::parse();
     let cache_dir = match (&cli.cache_dir, &cli.data_dir) {
         (Some(c), _) => c.clone(),
@@ -78,6 +71,13 @@ fn main() -> anyhow::Result<()> {
         None => printdex_core::Engine::default_data_dir()
             .context("no data folder for this user; pass --data-dir")?,
     };
+    let log_dir = printdex_core::diagnostics::log_dir(&data_dir);
+    let filter = std::env::var("RUST_LOG")
+        .unwrap_or_else(|_| "info,wgpu=warn,naga=warn,iced_wgpu=warn".to_string());
+    let _log_guard = printdex_core::diagnostics::init(&log_dir, &filter);
+    // Read before the hook is installed, so this run's own crash isn't seen.
+    let crash = printdex_core::diagnostics::unseen_crash(&log_dir);
+    printdex_core::diagnostics::install_panic_hook(log_dir, env!("CARGO_PKG_VERSION"));
     let config_dir = cli.config_dir.or_else(settings::Settings::default_dir);
     let settings = config_dir
         .as_deref()
@@ -93,6 +93,7 @@ fn main() -> anyhow::Result<()> {
         config_dir,
         settings,
         glass_window,
+        crash,
         mode: cli.mode.map(|m| match m {
             ModeArg::Light => theme::Mode::Light,
             ModeArg::Dark => theme::Mode::Dark,

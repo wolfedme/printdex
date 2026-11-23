@@ -772,3 +772,8 @@ ago-days = { $n ->
     [one] 1 day ago
    *[other] { $n } days ago
 }
+
+crash-notice = Printdex closed unexpectedly last time.
+crash-show = Show file
+crash-report = Report a bug
+crash-dismiss = Dismiss
