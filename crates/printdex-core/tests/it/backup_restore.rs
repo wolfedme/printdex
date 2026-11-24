@@ -120,7 +120,7 @@ impl Fx {
             .restore_data(&self.target, &secrets(), &snaps[0].id, true)
             .await
             .unwrap();
-        drop(fresh);
+        fresh.close().await;
         let engine = open(&data, &self.store).await;
         (data, engine)
     }
@@ -179,7 +179,7 @@ async fn full_restore_round_trip() {
         .unwrap();
     assert_eq!(restored.settings_files.len(), 1);
     assert!(restored.settings_files[0].ends_with("settings.toml"));
-    drop(fresh);
+    fresh.close().await;
     let engine = open(&data, &fx.store).await;
 
     let bin2 = Fx::model(&engine, "Bin").await;
