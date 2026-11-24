@@ -265,8 +265,9 @@ impl Gpu {
         opts: &printdex_render::RenderOptions,
     ) -> printdex_render::Image {
         if let Some(gpu) = self.get() {
-            let result =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gpu.render(mesh, opts)));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::diagnostics::recovering(|| gpu.render(mesh, opts))
+            }));
             match result {
                 Ok(Ok(img)) => return img,
                 Ok(Err(e)) => {
