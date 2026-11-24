@@ -272,4 +272,14 @@ impl Engine {
     pub async fn flush_sidecars(&self) {
         self.sidecars.flush().await;
     }
+
+    /// Writes queued sidecars, then checkpoints and closes the database so
+    /// its file can be moved (Windows refuses to move an open file). Call
+    /// it before handing the data folder to another `Engine` or process,
+    /// such as the restart after a restore; every clone of this engine
+    /// stops working.
+    pub async fn close(&self) {
+        self.sidecars.flush().await;
+        self.db.close().await;
+    }
 }

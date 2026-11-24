@@ -143,6 +143,31 @@ fn put_restored(from: &Path, to: &Path, replace: bool) -> std::io::Result<()> {
 
 /// Moves a file or folder to `to`, which must not exist. On another drive
 /// it copies (verified) and removes the source only after that succeeded.
+/// [`move_any`], waiting up to [`BUSY_WAIT`] while another process still
+/// has the file open. After a restore the app starts its successor and
+/// quits, and on Windows the old process can hold the database for a
+/// moment after the new one starts.
+fn move_when_free(from: &Path, to: &Path) -> std::io::Result<()> {
+    let deadline = std::time::Instant::now() + BUSY_WAIT;
+    loop {
+        match move_any(from, to) {
+            Err(e) if is_busy(&e) && std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            other => return other,
+        }
+    }
+}
+
+/// How long [`move_when_free`] waits for a file in use.
+const BUSY_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// A Windows sharing or lock violation (the file is open elsewhere).
+fn is_busy(e: &std::io::Error) -> bool {
+    // ERROR_SHARING_VIOLATION (32), ERROR_LOCK_VIOLATION (33).
+    cfg!(windows) && matches!(e.raw_os_error(), Some(32 | 33))
+}
+
 fn move_any(from: &Path, to: &Path) -> std::io::Result<()> {
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent)?;
@@ -253,7 +278,7 @@ pub(crate) fn apply_staged(data_dir: &Path) -> Result<bool> {
         for item in live {
             let (from, aside) = (data_dir.join(&item), old.join(&item));
             if from.exists() && !aside.exists() {
-                move_any(&from, &aside).map_err(|e| io_err(&from, e))?;
+                move_when_free(&from, &aside).map_err(|e| io_err(&from, e))?;
             }
         }
         let to = data_dir.join(name);

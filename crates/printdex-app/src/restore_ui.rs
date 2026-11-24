@@ -142,6 +142,8 @@ pub enum Rx {
     /// The restored settings files are back in the config folder.
     SettingsBack,
     Restart,
+    /// The database is closed; start the successor and quit.
+    Restarting,
     Pending(Result<Vec<Pending>, Arc<CoreError>>),
     Here(LibraryId),
     HerePicked(LibraryId, Option<PathBuf>),
@@ -444,7 +446,15 @@ impl App {
                 }
                 Task::none()
             }
-            Rx::Restart => restart(),
+            Rx::Restart => match self.engine.clone() {
+                // Close the database first: on Windows the restarted app
+                // can't swap in the restored one while this one holds it.
+                Some(engine) => Task::perform(async move { engine.close().await }, |()| {
+                    Message::Restore(Rx::Restarting)
+                }),
+                None => restart(),
+            },
+            Rx::Restarting => restart(),
             Rx::Pending(Ok(p)) => {
                 self.restore.pending = p;
                 Task::none()
