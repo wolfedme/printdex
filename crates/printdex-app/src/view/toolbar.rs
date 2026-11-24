@@ -3,7 +3,8 @@
 
 use std::fmt;
 
-use iced::widget::{Space, button, container, pick_list, row, stack, text, text_input};
+use super::focus::button;
+use iced::widget::{Space, container, pick_list, row, stack, text, text_input};
 use iced::{Alignment, Element, Length, Padding};
 use printdex_core::{PrintableFormat, Scope, Smart, SortOrder};
 

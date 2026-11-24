@@ -1,9 +1,8 @@
 //! The model view's organizing parts: tags, collections and source in the
 //! side column, notes in the main column.
 
-use iced::widget::{
-    Space, button, column, container, markdown, row, text, text_editor, text_input,
-};
+use super::focus::button;
+use iced::widget::{Space, column, container, markdown, row, text, text_editor, text_input};
 use iced::{Alignment, Element, Length, Padding, keyboard};
 use printdex_core::{ModelData, ModelId};
 

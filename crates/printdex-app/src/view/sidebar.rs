@@ -1,7 +1,8 @@
 //! Sidebar: libraries, collections, smart filters and tags with counts;
 //! add library; scan progress.
 
-use iced::widget::{button, column, container, progress_bar, row, scrollable, text, text_input};
+use super::focus::button;
+use iced::widget::{column, container, progress_bar, row, scrollable, text, text_input};
 use iced::{Alignment, Element, Length};
 use printdex_core::{LibraryId, ScanPhase, Scope, Smart};
 

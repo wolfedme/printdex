@@ -12,8 +12,8 @@ use iced::widget::{Id, operation};
 use iced::{Event, Size, Subscription, Task, event, window};
 use printdex_core::diagnostics::{self, CrashReport};
 use printdex_core::{
-    CoreError, Engine, EngineEvent, Library, LibraryId, LibraryStatus, ModelDetail, ModelHit,
-    ModelId, PartInfo, ScanPhase, ScanSummary, Scope, SortOrder, ThumbTarget,
+    AttemptResult, CoreError, Engine, EngineEvent, Library, LibraryId, LibraryStatus, ModelDetail,
+    ModelHit, ModelId, PartInfo, ScanPhase, ScanSummary, Scope, SortOrder, ThumbTarget,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -279,6 +279,8 @@ pub enum Message {
     Hover(Option<ModelId>),
     Nav(Move),
     FocusSearch,
+    /// Tab (forward) or Shift+Tab (back): move keyboard focus.
+    FocusMove(bool),
     Escape,
     SystemMode(iced::theme::Mode),
     DismissError,
@@ -774,6 +776,13 @@ impl App {
             }
             Message::Nav(_) if self.screen == Screen::Settings => Task::none(),
             Message::Nav(mv) => self.navigate(mv),
+            Message::FocusMove(forward) => {
+                if forward {
+                    operation::focus_next()
+                } else {
+                    operation::focus_previous()
+                }
+            }
             Message::FocusSearch => Task::batch([
                 operation::focus(search_id()),
                 operation::select_all(search_id()),
@@ -1744,6 +1753,9 @@ fn on_event(event: Event, status: event::Status, _window: window::Id) -> Option<
             use crate::files::Fx;
             match key.as_ref() {
                 keyboard::Key::Named(key::Named::Escape) => Some(Message::Escape),
+                keyboard::Key::Named(key::Named::Tab) if !modifiers.command() => {
+                    Some(Message::FocusMove(!modifiers.shift()))
+                }
                 keyboard::Key::Named(key::Named::F2) if free => Some(Message::Files(Fx::AskRename)),
                 keyboard::Key::Named(key::Named::Delete) if free => {
                     Some(Message::Files(Fx::AskTrash))
@@ -1774,6 +1786,18 @@ fn on_event(event: Event, status: event::Status, _window: window::Id) -> Option<
                     Some(Message::Prints(Pr::OpenLog))
                 }
                 keyboard::Key::Character("/") if free => Some(Message::FocusSearch),
+                // Log a print: the outcome by its first letter (ignored
+                // when no form is open).
+                keyboard::Key::Character(c @ ("s" | "p" | "f"))
+                    if free && !modifiers.command() && !modifiers.alt() =>
+                {
+                    let o = match c {
+                        "s" => AttemptResult::Success,
+                        "p" => AttemptResult::Partial,
+                        _ => AttemptResult::Failed,
+                    };
+                    Some(Message::Prints(Pr::Outcome(o)))
+                }
                 keyboard::Key::Named(named) if free => match named {
                     key::Named::ArrowLeft => Some(Message::Nav(Move::Left)),
                     key::Named::ArrowRight => Some(Message::Nav(Move::Right)),
@@ -3060,6 +3084,13 @@ mod tests {
         let _ = a.update(Message::Booted(Ok(engine)));
         model_open(&mut a);
         let _ = a.update(Message::Prints(Pr::OpenLog));
+        // No outcome picked yet: Save names the missing choice.
+        let _ = a.update(Message::SaveShortcut);
+        assert!(!a.prints.saving);
+        let f = a.prints.form.as_ref().unwrap();
+        assert!(crate::prints::has_error(f, crate::log_form::Field::Outcome));
+        let _ = a.update(Message::Prints(Pr::Outcome(AttemptResult::Failed)));
+        assert!(a.prints.form.as_ref().unwrap().error.is_none());
         let _ = a.update(Message::SaveShortcut);
         assert!(a.prints.saving, "save dispatched");
         // A second Ctrl+Enter while saving does nothing.
@@ -3075,6 +3106,7 @@ mod tests {
         let _ = a.update(Message::Booted(Ok(engine)));
         model_open(&mut a);
         let _ = a.update(Message::Prints(Pr::OpenLog));
+        let _ = a.update(Message::Prints(Pr::Outcome(AttemptResult::Success)));
         let _ = a.update(Message::Prints(Pr::Input(
             crate::prints::Input::Bed,
             "180".into(),
@@ -3083,6 +3115,7 @@ mod tests {
         assert!(!a.prints.saving);
         let f = a.prints.form.as_ref().unwrap();
         assert!(crate::prints::has_error(f, crate::log_form::Field::Bed));
+        assert!(!f.settings_folded(), "a setting in error is shown");
     }
 
     #[tokio::test]

@@ -146,6 +146,8 @@ pub enum Pr {
     ClearPart,
     Close,
     Outcome(AttemptResult),
+    /// Unfold the settings of a prefilled log.
+    ShowSettings,
     Input(Input, String),
     Notes(text_editor::Action),
     Supports(Option<Supports>),
@@ -299,8 +301,22 @@ impl App {
                 Task::none()
             }
             Pr::Outcome(o) => {
+                if let Some(f) = &mut self.prints.form
+                    && f.mode != FormMode::Recipe
+                {
+                    f.outcome = Some(o);
+                    if f.error
+                        .as_ref()
+                        .is_some_and(|(field, _)| *field == Field::Outcome)
+                    {
+                        f.error = None;
+                    }
+                }
+                Task::none()
+            }
+            Pr::ShowSettings => {
                 if let Some(f) = &mut self.prints.form {
-                    f.outcome = o;
+                    f.settings_open = true;
                 }
                 Task::none()
             }

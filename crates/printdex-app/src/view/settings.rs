@@ -1,8 +1,9 @@
 //! Settings: libraries, appearance, about.
 
+use super::focus::button;
+use super::focus::toggler;
 use iced::widget::{
-    Space, button, column, container, pick_list, row, scrollable, text, text_input, toggler,
-    tooltip,
+    Space, column, container, pick_list, row, scrollable, text, text_input, tooltip,
 };
 use iced::{Alignment, Element, Length};
 use printdex_core::{ChangeMode, Library, LibraryKind, ScanPhase};

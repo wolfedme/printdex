@@ -1,7 +1,8 @@
 //! Model view: one model's parts, other files and details.
 
-use iced::widget::{Space, button, column, container, image, row, scrollable, stack, text};
-use iced::{Alignment, ContentFit, Element, Length};
+use super::focus::button;
+use iced::widget::{Space, column, container, image, row, scrollable, stack, text};
+use iced::{Alignment, ContentFit, Element, Length, Padding};
 use printdex_core::{
     Detail, ModelDetail, ModelKind, PartInfo, PrintableFormat, ThumbFailure, ThumbTarget,
     format_number,
@@ -24,6 +25,8 @@ use crate::viewer::Load;
 
 /// Width of the details column.
 const SIDE_WIDTH: f32 = 384.0;
+/// Space kept below the log form for its pinned Save row.
+const FOOT_ROOM: f32 = 56.0;
 /// Height of the large preview well.
 const PREVIEW_HEIGHT: f32 = 340.0;
 /// Width of the preview inside the well (4:3 of its inner height).
@@ -157,11 +160,19 @@ fn preview_well<'a>(
     (layers.into(), true)
 }
 
-/// The primary "Log a print" button in the header.
+/// The primary "Log a print" button in the header. While its panel is
+/// open it shows pressed (Signal Wash, accent border) rather than greyed
+/// out, so it reads as "this is open", not "you can't" (DESIGN.md
+/// "Buttons").
 fn log_button<'a>(p: Palette, enabled: bool) -> Element<'a, Message> {
+    let fg = if enabled {
+        p.t.on_primary
+    } else {
+        p.t.accent_ink
+    };
     button(
         row![
-            icons::icon(Icon::LogPrint, theme::ICON, p.t.on_primary),
+            icons::icon(Icon::LogPrint, theme::ICON, fg),
             text(t("log-a-print")).size(theme::SIZE_BODY),
         ]
         .spacing(7)
@@ -169,7 +180,13 @@ fn log_button<'a>(p: Palette, enabled: bool) -> Element<'a, Message> {
     )
     .height(theme::CONTROL_HEIGHT)
     .padding([8.0, theme::S5])
-    .style(move |_, status| p.button_primary(status))
+    .style(move |_, status| {
+        if enabled {
+            p.button_primary(status)
+        } else {
+            p.button_secondary(iced::widget::button::Status::Pressed)
+        }
+    })
     .on_press_maybe(enabled.then_some(Message::Prints(crate::prints::Pr::OpenLog)))
     .into()
 }
@@ -444,7 +461,10 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
         .map(|(_, data)| data);
     let mut side = column![].spacing(theme::S6).width(SIDE_WIDTH);
     side = match (&app.prints.form, data) {
-        (Some(f), _) => side.push(prints::form(app, p, f)),
+        // Room under the form for the pinned Save row.
+        (Some(f), _) => side
+            .push(prints::form(app, p, f))
+            .push(Space::new().height(FOOT_ROOM)),
         (None, Some(data)) => side
             // The core loop first: how to print it, how it went.
             .push(prints::recipe_card(p, data))
@@ -495,6 +515,20 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
             container(body)
                 .height(Length::Fill)
                 .style(move |_| p.ground()),
+            // The form's Save row stays pinned to the bottom of the side
+            // column while the form scrolls under it.
+            match &app.prints.form {
+                Some(f) => container(container(prints::form_foot(app, p, f)).width(SIDE_WIDTH))
+                    .padding(Padding {
+                        right: GUTTER,
+                        bottom: theme::S5,
+                        ..Padding::ZERO
+                    })
+                    .align_bottom(Length::Fill)
+                    .align_right(Length::Fill)
+                    .into(),
+                None => Element::from(Space::new()),
+            },
             // "Attempt 4 saved" floats over the bottom of the side column.
             match app.prints.toast.as_deref() {
                 Some(m) => container(container(prints::toast(p, m)).width(SIDE_WIDTH))
@@ -551,10 +585,11 @@ fn tile<'a>(
             .padding(theme::S3)
             .width(width)
             .clip(true)
-            .style(move |_| p.pane_fade(selected, false)),
+            .style(move |_| p.part_tile(selected, false)),
     )
     .padding(0)
     .style(move |_, _| p.bare())
+    .radius(theme::RADIUS_PANE)
     .on_press(Message::SelectPart(index))
     .into()
 }

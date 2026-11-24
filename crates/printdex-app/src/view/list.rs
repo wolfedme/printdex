@@ -9,6 +9,7 @@ use super::widgets::date;
 use crate::app::{App, GRID_PAD_X, GRID_PAD_Y, GridViewport, Message, grid_id};
 use crate::format::{group, parent_path};
 use crate::i18n::t;
+use crate::icons::{self, Icon};
 use crate::list::{HEADER_HEIGHT, ROW_HEIGHT, visible_rows};
 use crate::theme::{self, Palette};
 
@@ -75,26 +76,45 @@ fn heading<'a>(p: Palette, label: String) -> iced::widget::Text<'a> {
 }
 
 fn list_row<'a>(app: &App, p: Palette, hit: &ModelHit) -> Element<'a, Message> {
-    let selected = if !app.files.picked.is_empty() {
-        f32::from(u8::from(app.picked(hit.id)))
+    // Same split as the grid: wash and check for picked rows, the ring
+    // alone for the keyboard cursor while several are picked.
+    let picking = !app.files.picked.is_empty();
+    let picked = picking && app.picked(hit.id);
+    let (wash, ring) = if picking {
+        (
+            f32::from(u8::from(picked)),
+            f32::from(u8::from(app.selected == Some(hit.id))),
+        )
     } else {
-        app.motion.selection(hit.id, app.selected)
+        (app.motion.selection(hit.id, app.selected), 0.0)
     };
     let hovered = app.hovered == Some(hit.id);
     let id = hit.id;
-    let thumb = container(
-        container(preview(
-            app,
-            p,
-            ThumbTarget::Model(hit.id),
-            Look::still(40.0 - 2.0 * theme::S2, 32.0 - 2.0 * theme::S2),
-        ))
-        .padding(theme::S2)
-        .width(40)
-        .height(32)
-        .style(move |_| p.well()),
-    )
-    .width(THUMB_COLUMN - theme::S5);
+    let well = container(preview(
+        app,
+        p,
+        ThumbTarget::Model(hit.id),
+        Look::still(40.0 - 2.0 * theme::S2, 32.0 - 2.0 * theme::S2),
+    ))
+    .padding(theme::S2)
+    .width(40)
+    .height(32)
+    .style(move |_| p.well());
+    let mut thumb = iced::widget::stack![well];
+    if picked {
+        thumb = thumb.push(
+            container(
+                container(icons::icon(Icon::Check, theme::ICON_CHIP, p.t.on_primary))
+                    .padding(2)
+                    .style(move |_| p.check_badge()),
+            )
+            .width(40)
+            .height(32)
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center),
+        );
+    }
+    let thumb = container(thumb).width(THUMB_COLUMN - theme::S5);
     let content = row![
         thumb,
         text(hit.name.clone())
@@ -134,7 +154,7 @@ fn list_row<'a>(app: &App, p: Palette, hit: &ModelHit) -> Element<'a, Message> {
         .padding([0.0, theme::S5])
         .align_y(Alignment::Center)
         .clip(true)
-        .style(move |_| p.list_row_fade(selected, hovered));
+        .style(move |_| p.list_row_look(wash, ring, hovered));
 
     mouse_area(
         button(column![cell, super::widgets::hairline(p)])

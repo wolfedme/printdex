@@ -1,6 +1,7 @@
 //! Empty states: no library yet, no search results.
 
-use iced::widget::{button, column, container, row, text};
+use super::focus::button;
+use iced::widget::{column, container, row, text};
 use iced::{Alignment, Element, Length};
 use printdex_core::{Scope, Smart};
 

@@ -1,6 +1,7 @@
 //! Small pieces shared by several views.
 
-use iced::widget::{Space, button, container, row, text};
+use super::focus::button;
+use iced::widget::{Space, container, row, text};
 use iced::{Alignment, Element, Length};
 
 use crate::app::Message;
@@ -41,7 +42,7 @@ pub fn icon_button<'a>(
     p: Palette,
     icon: Icon,
     label: String,
-    style: fn(&Palette, button::Status) -> button::Style,
+    style: fn(&Palette, iced::widget::button::Status) -> iced::widget::button::Style,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
     let fg = if on_press.is_some() {
@@ -127,6 +128,7 @@ pub fn segmented<'a, T: Copy + PartialEq + 'a>(
                 .height(theme::CONTROL_HEIGHT - 6.0)
                 .padding([4.0, theme::S4])
                 .style(move |_, status| p.segment(is_active, status))
+                .radius(theme::RADIUS_CONTROL - 3.0)
                 .on_press(on_pick(value)),
         );
     }
