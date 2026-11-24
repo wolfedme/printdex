@@ -18,7 +18,7 @@ use printdex_core::{
 use tokio_util::sync::CancellationToken;
 
 use crate::filters::{self, Chip};
-use crate::grid::GridMetrics;
+use crate::grid::{self, GridMetrics};
 use crate::i18n::{Arg, t, t_args};
 use crate::motion::Motion;
 use crate::nav::{self, Move};
@@ -684,11 +684,12 @@ impl App {
                     ViewMode::Grid => {
                         let m = self.metrics();
                         let rows = m.visible_rows(vp.offset - GRID_PAD_Y, vp.height, hits.len());
-                        rows.start * m.columns..(rows.end * m.columns).min(hits.len())
+                        grid::item_range(rows, m.columns, hits.len())
                     }
                     ViewMode::List => crate::list::visible_rows(vp.offset, vp.height, hits.len()),
                 };
-                hits[range]
+                hits.get(range)
+                    .unwrap_or_default()
                     .iter()
                     .map(|h| ThumbTarget::Model(h.id))
                     .collect()
@@ -1599,7 +1600,10 @@ impl App {
         let Some(index) = nav::step(self.selected_index(), mv, columns, len) else {
             return Task::none();
         };
-        self.set_selected(Some(self.search.hits[index].id));
+        let Some(hit) = self.search.hits.get(index) else {
+            return Task::none();
+        };
+        self.set_selected(Some(hit.id));
         if self.settings.view == ViewMode::List {
             let vp = self.grid_viewport();
             return match crate::list::scroll_target(index, vp.offset, vp.height) {

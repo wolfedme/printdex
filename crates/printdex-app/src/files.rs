@@ -228,7 +228,9 @@ impl App {
             let pos = |x: ModelId| self.search.hits.iter().position(|h| h.id == x);
             if let (Some(a), Some(b)) = (pos(anchor), pos(id)) {
                 let (lo, hi) = (a.min(b), a.max(b));
-                self.files.picked = self.search.hits[lo..=hi].iter().map(|h| h.id).collect();
+                if let Some(span) = self.search.hits.get(lo..=hi) {
+                    self.files.picked = span.iter().map(|h| h.id).collect();
+                }
             }
             false
         } else {

@@ -104,6 +104,10 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Focus<'_> {
         self.content.as_widget().size_hint()
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "iced builds this widget's tree from `children()`, so child 0 is always the content"
+    )]
     fn layout(
         &mut self,
         tree: &mut Tree,
@@ -115,6 +119,10 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Focus<'_> {
             .layout(&mut tree.children[0], renderer, limits)
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "iced builds this widget's tree from `children()`, so child 0 is always the content"
+    )]
     fn operate(
         &mut self,
         tree: &mut Tree,
@@ -129,6 +137,10 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Focus<'_> {
             .operate(&mut tree.children[0], layout, renderer, operation);
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "iced builds this widget's tree from `children()`, so child 0 is always the content"
+    )]
     fn update(
         &mut self,
         tree: &mut Tree,
@@ -176,6 +188,10 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Focus<'_> {
         );
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "iced builds this widget's tree from `children()`, so child 0 is always the content"
+    )]
     fn mouse_interaction(
         &self,
         tree: &Tree,
@@ -193,6 +209,10 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Focus<'_> {
         )
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "iced builds this widget's tree from `children()`, so child 0 is always the content"
+    )]
     fn draw(
         &self,
         tree: &Tree,
@@ -237,6 +257,10 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Focus<'_> {
         }
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "iced builds this widget's tree from `children()`, so child 0 is always the content"
+    )]
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
@@ -257,6 +281,10 @@ impl Widget<Message, iced::Theme, iced::Renderer> for Focus<'_> {
 
 impl Focus<'_> {
     /// Presses the control as a click at its centre would.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "iced builds this widget's tree from `children()`, so child 0 is always the content"
+    )]
     fn press(
         &mut self,
         tree: &mut Tree,

@@ -868,14 +868,8 @@ fn link_dialog<'a>(app: &'a App, p: Palette, d: &'a LinkDialog) -> Element<'a, M
         .collect();
     let mut col =
         column![sub_heading(p, t("sync-link-title"), t("sync-link-body"))].spacing(theme::S5);
-    if locals.is_empty() {
-        col = col.push(
-            text(t("sync-link-none"))
-                .size(theme::SIZE_BODY)
-                .color(p.n.ink_2),
-        );
-    } else {
-        let sel = d.library.unwrap_or(locals[0].0);
+    if let Some(first) = locals.first().map(|l| l.0) {
+        let sel = d.library.unwrap_or(first);
         col = col.push(
             row![
                 text(t("sync-link-local"))
@@ -917,6 +911,12 @@ fn link_dialog<'a>(app: &'a App, p: Palette, d: &'a LinkDialog) -> Element<'a, M
             sx(Sx::LinkChoice(None)),
         ));
         col = col.push(remotes);
+    } else {
+        col = col.push(
+            text(t("sync-link-none"))
+                .size(theme::SIZE_BODY)
+                .color(p.n.ink_2),
+        );
     }
     let can = d.library.is_some() && !d.busy;
     col = col.push(

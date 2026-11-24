@@ -25,10 +25,11 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     let visible = visible_rows(vp.offset, vp.height, hits.len());
 
     let mut rows = column![Space::new().height(visible.start as f32 * ROW_HEIGHT)];
-    for hit in &hits[visible.clone()] {
+    for hit in hits.get(visible.clone()).unwrap_or_default() {
         rows = rows.push(list_row(app, p, hit));
     }
-    rows = rows.push(Space::new().height((hits.len() - visible.end) as f32 * ROW_HEIGHT));
+    rows =
+        rows.push(Space::new().height(hits.len().saturating_sub(visible.end) as f32 * ROW_HEIGHT));
 
     let header = container(
         row![

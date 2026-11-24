@@ -157,7 +157,7 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
     } else {
         tags.len().min(SIDEBAR_TAGS)
     };
-    for tag in &tags[..shown] {
+    for tag in tags.iter().take(shown) {
         let s = Scope::Tag(tag.name.clone());
         tag_items = tag_items.push(item(
             p,

@@ -1,4 +1,16 @@
 //! `printdex`: command line front end for the Printdex engine.
+#![cfg_attr(
+    not(test),
+    warn(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_wrap
+    )
+)]
 
 mod bench;
 

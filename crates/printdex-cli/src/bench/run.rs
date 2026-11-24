@@ -10,7 +10,7 @@ use printdex_core::fs::{ChaosFs, Fs, RealFs};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use super::r#gen::VOCABULARY;
+use super::r#gen::{VOCABULARY, pick};
 
 /// Benchmark results. Times in milliseconds, except search (microseconds).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -100,7 +100,7 @@ pub async fn run(library: &Path, opts: &BenchOptions) -> anyhow::Result<BenchRep
     let mut rng = fastrand::Rng::with_seed(opts.seed);
     let mut times = Vec::with_capacity(opts.queries as usize);
     for _ in 0..opts.queries {
-        let word = vocab[rng.usize(..vocab.len())];
+        let word = pick(&mut rng, &vocab);
         let len = rng.usize(2..=5);
         let prefix: String = word.chars().take(len).collect();
         let t = Instant::now();
@@ -108,13 +108,7 @@ pub async fn run(library: &Path, opts: &BenchOptions) -> anyhow::Result<BenchRep
         times.push(u64::try_from(t.elapsed().as_micros()).unwrap_or(u64::MAX));
     }
     times.sort_unstable();
-    let pct = |p: f64| -> u64 {
-        if times.is_empty() {
-            return 0;
-        }
-        let i = ((times.len() as f64 * p).ceil() as usize).clamp(1, times.len()) - 1;
-        times[i]
-    };
+    let pct = |p: f64| percentile(&times, p);
 
     let idle_cpu_pct = if opts.idle.is_zero() {
         0.0
@@ -179,4 +173,43 @@ fn process_stats() -> Option<(u64, u64)> {
 
 fn ms(t: Instant) -> u64 {
     u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+/// The `p` (0 to 1) percentile of `sorted` by the nearest-rank method, or 0
+/// for no samples.
+fn percentile(sorted: &[u64], p: f64) -> u64 {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the product is a rank in 0..=len (p is a fraction), so it fits a usize"
+    )]
+    let rank = (sorted.len() as f64 * p).ceil() as usize;
+    sorted
+        .get(rank.clamp(1, sorted.len().max(1)) - 1)
+        .copied()
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::percentile;
+
+    #[test]
+    fn percentile_of_no_samples_is_zero() {
+        assert_eq!(percentile(&[], 0.5), 0);
+        assert_eq!(percentile(&[], 0.0), 0);
+    }
+
+    #[test]
+    fn percentile_ranks_stay_in_range() {
+        let v = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        assert_eq!(percentile(&v, 0.0), 1);
+        assert_eq!(percentile(&v, 0.5), 5);
+        assert_eq!(percentile(&v, 0.99), 10);
+        assert_eq!(percentile(&v, 1.0), 10);
+        // Out-of-range and non-finite fractions saturate rather than panic.
+        assert_eq!(percentile(&v, 7.0), 10);
+        assert_eq!(percentile(&v, -1.0), 1);
+        assert_eq!(percentile(&v, f64::NAN), 1);
+    }
 }

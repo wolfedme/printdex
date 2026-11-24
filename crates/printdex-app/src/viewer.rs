@@ -251,8 +251,8 @@ impl Viewer {
         }
         let scale = (MAX_CPU_SIDE / self.size.width.max(self.size.height)).min(1.0);
         let opts = RenderOptions {
-            width: (self.size.width * scale) as u32,
-            height: (self.size.height * scale) as u32,
+            width: crate::format::to_u32(self.size.width * scale).max(1),
+            height: crate::format::to_u32(self.size.height * scale).max(1),
             material: self.material,
             camera: self.view.camera,
             framing: self.view.framing(),
