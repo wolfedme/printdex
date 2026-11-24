@@ -60,6 +60,19 @@ pub enum CoreError {
     TrashUnavailable,
     #[error("this action can no longer be undone")]
     UndoUnavailable,
+    /// The database was last used by a newer Printdex (it has migrations
+    /// this build doesn't know). Nothing was changed.
+    #[error("the database at {} is from a newer Printdex", .0.display())]
+    DataTooNew(PathBuf),
+    /// The database file is damaged or not a database.
+    #[error("the database at {} is damaged", .0.display())]
+    DataCorrupt(PathBuf),
+    /// The database file or its folder can't be written.
+    #[error("the database at {} can't be written", .0.display())]
+    DataReadOnly(PathBuf),
+    /// The disk holding the database is full.
+    #[error("the disk holding {} is full", .0.display())]
+    DiskFull(PathBuf),
     #[error("i/o error at {}: {source}", path.display())]
     Io {
         path: PathBuf,

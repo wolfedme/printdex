@@ -46,7 +46,7 @@ gethostname.workspace = true
 [target.'cfg(unix)'.dependencies]
 opendal = { workspace = true, features = ["services-sftp"] }
 # fsx::rename_no_replace: renameat2(RENAME_NOREPLACE) / renameatx_np(RENAME_EXCL).
-rustix = { version = "1", features = ["fs"] }
+rustix = { version = "1", features = ["fs", "process"] }
 
 [features]
 # Turns on fsx::faults::arm so integration tests can fail or interfere with

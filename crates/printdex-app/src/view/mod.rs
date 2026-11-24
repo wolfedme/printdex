@@ -26,7 +26,9 @@ use focus::button;
 use iced::widget::{Space, column, container, row, stack, text};
 use iced::{Alignment, Element, Length};
 
-use crate::app::{App, Boot, CrashUx, Message, Screen, task_stopped_text};
+use crate::app::{
+    App, Boot, BootFailure, BootUx, CrashUx, Message, Screen, boot_failure_text, task_stopped_text,
+};
 use crate::i18n::{Arg, t, t_args};
 use crate::icons::{self, Icon};
 use crate::settings::ViewMode;
@@ -42,15 +44,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 .size(theme::SIZE_BODY)
                 .color(p.n.ink_2),
         ),
-        Boot::Failed(path) => centered(
-            p,
-            text(t_args(
-                "app-open-failed",
-                &[("path", Arg::str(path.display().to_string()))],
-            ))
-            .size(theme::SIZE_BODY)
-            .color(p.status.fail),
-        ),
+        Boot::Failed { dir, reason } => centered(p, boot_failed(p, dir, *reason)),
         Boot::Ready => shell(app, p),
     }
 }
@@ -133,6 +127,61 @@ fn library(app: &App, p: Palette) -> Element<'_, Message> {
     }
     col.push(statusbar::view(app, p)).into()
 }
+
+/// The "could not open" screen: what happened and what to do about it.
+fn boot_failed<'a>(p: Palette, dir: &std::path::Path, reason: BootFailure) -> Element<'a, Message> {
+    let (title, body) = boot_failure_text(reason, dir);
+    let button_for = |label: &str, ux: BootUx, primary: bool| -> Element<'a, Message> {
+        button(text(t(label)).size(theme::SIZE_BODY))
+            .padding([5.0, theme::S4])
+            .style(move |_, status| {
+                if primary {
+                    p.button_primary(status)
+                } else {
+                    p.button_ghost(status)
+                }
+            })
+            .on_press(Message::BootAction(ux))
+            .into()
+    };
+    let actions: Vec<Element<'a, Message>> = match reason {
+        BootFailure::TooNew | BootFailure::ReadOnly => {
+            vec![button_for("boot-show-folder", BootUx::ShowFolder, true)]
+        }
+        BootFailure::Corrupt => vec![
+            button_for("boot-set-aside", BootUx::SetAside, true),
+            button_for("boot-show-folder", BootUx::ShowFolder, false),
+            button_for("crash-report", BootUx::Report, false),
+        ],
+        BootFailure::DiskFull => vec![
+            button_for("boot-try-again", BootUx::Retry, true),
+            button_for("boot-show-folder", BootUx::ShowFolder, false),
+        ],
+        BootFailure::Other => vec![button_for("crash-report", BootUx::Report, true)],
+    };
+    let mut buttons = row![].spacing(theme::S3).align_y(Alignment::Center);
+    for a in actions {
+        buttons = buttons.push(a);
+    }
+    column![
+        row![
+            icons::icon(Icon::Alert, theme::ICON, p.status.fail),
+            text(title)
+                .size(theme::SIZE_SECTION)
+                .font(theme::FONT_STRONG)
+                .color(p.n.ink),
+        ]
+        .spacing(theme::S3)
+        .align_y(Alignment::Center),
+        text(body).size(theme::SIZE_BODY).color(p.n.ink_2),
+        buttons,
+    ]
+    .spacing(theme::S5)
+    .max_width(BOOT_FAILED_WIDTH)
+    .into()
+}
+
+const BOOT_FAILED_WIDTH: f32 = 520.0;
 
 fn centered<'a>(p: Palette, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     container(content)

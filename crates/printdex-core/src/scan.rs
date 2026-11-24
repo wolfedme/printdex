@@ -303,6 +303,10 @@ pub(crate) fn clone_error(e: &CoreError) -> CoreError {
             max: *max,
         },
         CoreError::PhotoInvalid => CoreError::PhotoInvalid,
+        CoreError::DataTooNew(p) => CoreError::DataTooNew(p.clone()),
+        CoreError::DataCorrupt(p) => CoreError::DataCorrupt(p.clone()),
+        CoreError::DataReadOnly(p) => CoreError::DataReadOnly(p.clone()),
+        CoreError::DiskFull(p) => CoreError::DiskFull(p.clone()),
         CoreError::Io { path, source } => CoreError::Io {
             path: path.clone(),
             source: std::io::Error::new(source.kind(), source.to_string()),

@@ -167,7 +167,84 @@ pub enum Screen {
 pub enum Boot {
     Opening,
     Ready,
-    Failed(PathBuf),
+    /// The engine didn't open the data folder `dir`.
+    Failed {
+        dir: PathBuf,
+        reason: BootFailure,
+    },
+}
+
+/// Why the data folder didn't open, by what the user can do about it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BootFailure {
+    /// A newer Printdex used it last: update Printdex.
+    TooNew,
+    /// The database is damaged: set it aside and start fresh.
+    Corrupt,
+    /// The folder or database can't be written: fix permissions.
+    ReadOnly,
+    /// The disk is full: free space and try again.
+    DiskFull,
+    Other,
+}
+
+impl BootFailure {
+    pub fn of(e: &CoreError) -> BootFailure {
+        match e {
+            CoreError::DataTooNew(_) => BootFailure::TooNew,
+            CoreError::DataCorrupt(_) => BootFailure::Corrupt,
+            CoreError::DataReadOnly(_) => BootFailure::ReadOnly,
+            CoreError::DiskFull(_) => BootFailure::DiskFull,
+            _ => BootFailure::Other,
+        }
+    }
+}
+
+/// What the buttons on the "could not open" screen do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BootUx {
+    /// Move the damaged database aside, then open again.
+    SetAside,
+    /// Open again (after freeing disk space).
+    Retry,
+    /// Open the data folder in the file manager.
+    ShowFolder,
+    /// Open a prefilled bug report.
+    Report,
+}
+
+/// The "could not open" screen's title and explanation for `reason`.
+pub(crate) fn boot_failure_text(reason: BootFailure, dir: &std::path::Path) -> (String, String) {
+    let path = || [("path", Arg::str(dir.display().to_string()))];
+    match reason {
+        BootFailure::TooNew => (t("boot-too-new-title"), t("boot-too-new")),
+        BootFailure::Corrupt => (t("boot-corrupt-title"), t_args("boot-corrupt", &path())),
+        BootFailure::ReadOnly => (t("boot-read-only-title"), t_args("boot-read-only", &path())),
+        BootFailure::DiskFull => (t("boot-disk-full-title"), t_args("boot-disk-full", &path())),
+        BootFailure::Other => (t("boot-other-title"), t_args("app-open-failed", &path())),
+    }
+}
+
+/// Opens the engine on `dir`; the result is the boot message.
+pub(crate) async fn open_engine(dir: PathBuf, cache: PathBuf) -> Message {
+    Message::Booted(
+        Engine::open_with_cache(&dir, &cache)
+            .await
+            .map_err(Arc::new),
+    )
+}
+
+/// Sets the damaged database in `dir` aside (off the UI thread).
+pub(crate) async fn set_aside(dir: PathBuf) -> Message {
+    let r = tokio::task::spawn_blocking(move || Engine::set_aside_database(&dir))
+        .await
+        .unwrap_or_else(|e| {
+            Err(CoreError::Io {
+                path: PathBuf::new(),
+                source: std::io::Error::other(e),
+            })
+        });
+    Message::SetAside(r.map_err(Arc::new))
 }
 
 /// Progress of one library's running scan.
@@ -201,6 +278,8 @@ pub struct App {
     /// Watches libraries for changes and offline shares while the app runs.
     pub monitor: Option<Arc<printdex_core::Monitor>>,
     pub boot: Boot,
+    /// Shown once the engine opens: where a damaged database was set aside.
+    pub boot_note: Option<String>,
     pub libraries: Vec<Library>,
     pub counts: HashMap<LibraryId, u64>,
     pub scans: HashMap<LibraryId, ScanState>,
@@ -274,6 +353,10 @@ pub type LibrarySnapshot = (Vec<Library>, HashMap<LibraryId, u64>);
 #[derive(Clone, Debug)]
 pub enum Message {
     Booted(Result<Engine, Arc<CoreError>>),
+    /// A button on the "could not open" screen.
+    BootAction(BootUx),
+    /// The damaged database was moved to this path, or why it wasn't.
+    SetAside(Result<PathBuf, Arc<CoreError>>),
     MonitorStarted(Arc<printdex_core::Monitor>),
     Files(crate::files::Fx),
     CrashNotice(CrashUx),
@@ -394,6 +477,7 @@ impl App {
                 ..Default::default()
             },
             boot: Boot::Opening,
+            boot_note: None,
             libraries: Vec::new(),
             counts: HashMap::new(),
             scans: HashMap::new(),
@@ -437,16 +521,10 @@ impl App {
 
     /// Initial state and the tasks that open the engine and read the OS theme.
     pub fn boot(options: Options) -> (App, Task<Message>) {
-        let dir = options.data_dir.clone();
-        let cache = options.cache_dir.clone();
-        let open = Task::perform(
-            async move {
-                Engine::open_with_cache(&dir, &cache)
-                    .await
-                    .map_err(Arc::new)
-            },
-            Message::Booted,
-        );
+        let open = Task::future(open_engine(
+            options.data_dir.clone(),
+            options.cache_dir.clone(),
+        ));
         let mode = iced::system::theme().map(Message::SystemMode);
         let mut app = App::new(options);
         app.updates = crate::updates::Updates::start();
@@ -639,8 +717,13 @@ impl App {
                 };
                 self.engine = Some(engine);
                 self.boot = Boot::Ready;
+                let note = match self.boot_note.take() {
+                    Some(text) => self.show_info(text),
+                    None => Task::none(),
+                };
                 let ticket = self.search.refresh();
                 Task::batch([
+                    note,
                     monitor,
                     self.load_libraries(),
                     self.run_search(ticket),
@@ -662,7 +745,26 @@ impl App {
             }
             Message::Booted(Err(e)) => {
                 tracing::error!(error = %e, "could not open engine");
-                self.boot = Boot::Failed(self.options.data_dir.clone());
+                self.boot = Boot::Failed {
+                    dir: self.options.data_dir.clone(),
+                    reason: BootFailure::of(&e),
+                };
+                Task::none()
+            }
+            Message::BootAction(ux) => self.on_boot_action(ux),
+            Message::SetAside(Ok(old)) => {
+                self.boot_note = Some(t_args(
+                    "boot-set-aside-done",
+                    &[("path", Arg::str(old.display().to_string()))],
+                ));
+                self.reopen()
+            }
+            Message::SetAside(Err(e)) => {
+                tracing::error!(error = %e, "could not set the database aside");
+                self.boot = Boot::Failed {
+                    dir: self.options.data_dir.clone(),
+                    reason: BootFailure::of(&e),
+                };
                 Task::none()
             }
             Message::Libraries(Ok((libraries, counts))) => {
@@ -1585,6 +1687,30 @@ impl App {
         }
     }
 
+    fn on_boot_action(&mut self, ux: BootUx) -> Task<Message> {
+        match ux {
+            BootUx::SetAside => {
+                self.boot = Boot::Opening;
+                Task::future(set_aside(self.options.data_dir.clone()))
+            }
+            BootUx::Retry => self.reopen(),
+            BootUx::ShowFolder => {
+                let dir = self.options.data_dir.clone();
+                launch(move || opener::open(&dir))
+            }
+            BootUx::Report => self.on_report(ReportUx::OpenIssue),
+        }
+    }
+
+    /// Opens the engine again after a failed start.
+    fn reopen(&mut self) -> Task<Message> {
+        self.boot = Boot::Opening;
+        Task::future(open_engine(
+            self.options.data_dir.clone(),
+            self.options.cache_dir.clone(),
+        ))
+    }
+
     /// A short success note, bottom centre, in the undo toast's place.
     pub(crate) fn show_info(&mut self, text: String) -> Task<Message> {
         if self.files.toast.is_some() {
@@ -2238,7 +2364,112 @@ mod tests {
     fn boot_failure_is_reported() {
         let mut a = app();
         let _ = a.update(Message::Booted(Err(Arc::new(CoreError::Cancelled))));
-        assert_eq!(a.boot, Boot::Failed(PathBuf::from("/nonexistent")));
+        assert_eq!(
+            a.boot,
+            Boot::Failed {
+                dir: PathBuf::from("/nonexistent"),
+                reason: BootFailure::Other,
+            }
+        );
+    }
+
+    #[test]
+    fn boot_failure_reasons() {
+        let db = PathBuf::from("/nonexistent/printdex.db");
+        let cases = [
+            (CoreError::DataTooNew(db.clone()), BootFailure::TooNew),
+            (CoreError::DataCorrupt(db.clone()), BootFailure::Corrupt),
+            (CoreError::DataReadOnly(db.clone()), BootFailure::ReadOnly),
+            (CoreError::DiskFull(db.clone()), BootFailure::DiskFull),
+            (CoreError::Cancelled, BootFailure::Other),
+        ];
+        for (e, reason) in cases {
+            let mut a = app();
+            let _ = a.update(Message::Booted(Err(Arc::new(e))));
+            assert_eq!(
+                a.boot,
+                Boot::Failed {
+                    dir: PathBuf::from("/nonexistent"),
+                    reason,
+                }
+            );
+        }
+    }
+
+    /// Each reason's screen draws with its own explanation.
+    #[test]
+    fn boot_failure_texts_differ() {
+        let dir = PathBuf::from("/data");
+        let texts: Vec<String> = [
+            BootFailure::TooNew,
+            BootFailure::Corrupt,
+            BootFailure::ReadOnly,
+            BootFailure::DiskFull,
+            BootFailure::Other,
+        ]
+        .into_iter()
+        .map(|r| boot_failure_text(r, &dir).1)
+        .collect();
+        for (i, a) in texts.iter().enumerate() {
+            assert!(!a.is_empty());
+            for b in &texts[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        assert!(texts[1].contains("/data"), "{}", texts[1]);
+    }
+
+    #[tokio::test]
+    async fn set_aside_reboots() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("printdex.db"), [0xAB; 4096]).unwrap();
+        let mut a = App::new(Options::in_memory(data.clone()));
+
+        let msg = open_engine(data.clone(), data.join("cache")).await;
+        let _ = a.update(msg);
+        assert_eq!(
+            a.boot,
+            Boot::Failed {
+                dir: data.clone(),
+                reason: BootFailure::Corrupt,
+            }
+        );
+
+        let _ = a.update(Message::BootAction(BootUx::SetAside));
+        assert_eq!(a.boot, Boot::Opening);
+        let msg = set_aside(data.clone()).await;
+        let Message::SetAside(Ok(old)) = &msg else {
+            panic!("set aside failed: {msg:?}");
+        };
+        assert_eq!(std::fs::read(old).unwrap(), [0xAB; 4096]);
+        let old = old.clone();
+        let _ = a.update(msg);
+        assert_eq!(a.boot, Boot::Opening);
+
+        let msg = open_engine(data.clone(), data.join("cache")).await;
+        let _ = a.update(msg);
+        assert_eq!(a.boot, Boot::Ready);
+        let note = a
+            .files
+            .info
+            .clone()
+            .expect("a note says where the old file is");
+        assert!(note.contains(&old.display().to_string()), "{note}");
+    }
+
+    #[tokio::test]
+    async fn disk_full_try_again_reboots() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut a = App::new(Options::in_memory(dir.path().to_path_buf()));
+        let db = dir.path().join("printdex.db");
+        let _ = a.update(Message::Booted(Err(Arc::new(CoreError::DiskFull(db)))));
+        let _ = a.update(Message::BootAction(BootUx::Retry));
+        assert_eq!(a.boot, Boot::Opening);
+        let msg = open_engine(dir.path().to_path_buf(), dir.path().join("cache")).await;
+        let _ = a.update(msg);
+        assert_eq!(a.boot, Boot::Ready);
     }
 
     #[test]

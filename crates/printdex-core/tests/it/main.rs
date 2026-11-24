@@ -12,6 +12,7 @@ mod engine;
 mod file_ops;
 mod identity;
 mod monitor;
+mod open;
 mod prints;
 mod sidecars;
 mod supervise;

@@ -6,6 +6,21 @@ app-title = Printdex
 app-opening = Opening your library…
 app-open-failed = Printdex could not open its data folder at { $path }.
 
+## The screen when the data folder doesn't open
+boot-too-new-title = Made by a newer Printdex
+boot-too-new = This data folder was last used by a newer Printdex. Update Printdex to open it; nothing was changed.
+boot-corrupt-title = The database is damaged
+boot-corrupt = Printdex's database in { $path } is damaged.
+boot-read-only-title = The data folder is read-only
+boot-read-only = Printdex can't write to { $path }. Check the folder's permissions.
+boot-disk-full-title = The disk is full
+boot-disk-full = The disk holding { $path } is full. Free some space, then try again.
+boot-other-title = Printdex couldn't start
+boot-set-aside = Set it aside and start fresh
+boot-try-again = Try again
+boot-show-folder = Show folder
+boot-set-aside-done = Started fresh. The damaged database is kept at { $path }. If you have a data backup, restore it from Settings › Backup.
+
 sidebar-libraries = Libraries
 sidebar-all-models = All models
 sidebar-add-library = Add library
