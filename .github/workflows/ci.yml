@@ -3,20 +3,23 @@ name: CI
 # Branches (#109): feature PRs go into `dev` (the default branch); `main`
 # only takes `dev` through a release PR, or a hotfix PR.
 #
-# Time budget: a PR stays under 5 minutes (Max). The repo is public, so
-# standard runners cost no minutes, but each heavy job still runs once per
-# change:
-# - PR into dev, push to dev: one Linux job (fmt, clippy, tests). The dev push
-#   also saves the build cache; PRs can only restore the default branch's.
-# - PR into main: Windows, macOS, MSRV, bench smoke. The Linux job is skipped
-#   for the release PR (head `dev`), which dev's push already tested.
+# Time budget: a PR stays under 5 minutes wall time (Max). The repo is
+# public, so standard runners cost no minutes; what's slow or noisy is
+# offloaded instead (#161):
+# - PR into dev: Linux fmt + clippy + test, Windows test, macOS test and the
+#   MSRV check, all in parallel.
+# - Push to dev: the same jobs plus bench smoke. Its runs save the build
+#   cache of every OS; PRs can only restore the default branch's, so this
+#   is what keeps the Windows and macOS PR jobs fast.
+# - PR into main: the same plus bench smoke. The Linux job is skipped for
+#   the release PR (head `dev`), which dev's push already tested.
 # - Push to main: nothing here; the PR tested that exact merge, and
 #   release-tag.yml tags the release.
 # - The release PR is opened by release-prepare.yml, whose token can't
 #   trigger workflows, so it starts this workflow by hand on the release
 #   commit (manual run = everything).
-# - Weekly / manual: everything, on dev, which keeps every cache warm.
-# - `ci: full` label on a PR into dev: the heavy jobs too.
+# - Weekly / manual: everything, on dev.
+# - `ci: full` label on a PR into dev: bench smoke too.
 # - Docs, Markdown and design-tooling-only changes run nothing.
 # Dependency and licence checks live in deny.yml.
 
@@ -89,17 +92,14 @@ jobs:
           cache-on-failure: true
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      # No doctests exist; examples are already checked by clippy.
+      - run: cargo test --workspace --lib --bins --tests
 
   test-windows:
     name: test (windows)
-    if: &heavy >-
-      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && github.event.action != 'labeled' &&
-       github.base_ref == 'main') ||
-      (github.event_name == 'pull_request' &&
-       contains(github.event.pull_request.labels.*.name, 'ci: full') &&
-       (github.event.action != 'labeled' || github.event.label.name == 'ci: full'))
+    # Every run except label events (the run that opened/updated the PR
+    # already tested that commit).
+    if: &all-os github.event.action != 'labeled'
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -109,13 +109,14 @@ jobs:
         with:
           save-if: ${{ github.event_name != 'pull_request' }}
           cache-on-failure: true
-      - run: cargo test --workspace
+      - run: cargo test --workspace --lib --bins --tests
 
   test-macos:
     name: test (macos)
-    # macOS bills 10x: release PRs, weekly, manual or `ci: full` only.
-    if: *heavy
-    runs-on: macos-latest
+    if: *all-os
+    # macOS arm64 runners queue 10+ min (GitHub capacity notice, 2026-11);
+    # the Intel image starts right away and tests the same file system.
+    runs-on: macos-15-intel
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -124,11 +125,11 @@ jobs:
         with:
           save-if: ${{ github.event_name != 'pull_request' }}
           cache-on-failure: true
-      - run: cargo test --workspace
+      - run: cargo test --workspace --lib --bins --tests
 
   msrv:
     name: msrv
-    if: *heavy
+    if: *all-os
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -142,7 +143,16 @@ jobs:
 
   bench-smoke:
     name: bench smoke (20k parts)
-    if: *heavy
+    # Too slow and noisy for every PR: dev pushes, release PRs, weekly,
+    # manual, or the `ci: full` label.
+    if: >-
+      github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' && github.event.action != 'labeled' &&
+       github.base_ref == 'main') ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'ci: full') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'ci: full'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
