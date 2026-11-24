@@ -525,9 +525,11 @@ fn part_key(p: &PartSource) -> String {
     let content = p
         .fp_hash
         .unwrap_or_else(|| xxh3_64(&p.mtime_ns.to_le_bytes()));
-    // Unknown keeps the milestone 2 key, so neutral renders stay cached.
+    // Unknown changed from the grey ramp to natural filament, so it takes
+    // a new key; ASA/ABS took over the old grey ramp under its own key.
     let material = match p.material {
-        printdex_render::Material::Unknown => "",
+        printdex_render::Material::Unknown => "-nat",
+        printdex_render::Material::Asa => "-asa",
         printdex_render::Material::Petg => "-petg",
         printdex_render::Material::Pla => "-pla",
         printdex_render::Material::Tpu => "-tpu",
@@ -951,7 +953,15 @@ mod tests {
             material: printdex_render::Material::Petg,
             ..a.clone()
         };
-        assert_eq!(part_key(&a), "p000000000000000a0000000000000063");
-        assert_eq!(part_key(&petg), format!("{}-petg", part_key(&a)));
+        let asa = PartSource {
+            material: printdex_render::Material::Asa,
+            ..a.clone()
+        };
+        let base = "p000000000000000a0000000000000063";
+        // Unknown is drawn in natural filament now, under its own key, so
+        // the grey renders cached before the change are not reused.
+        assert_eq!(part_key(&a), format!("{base}-nat"));
+        assert_eq!(part_key(&petg), format!("{base}-petg"));
+        assert_eq!(part_key(&asa), format!("{base}-asa"));
     }
 }

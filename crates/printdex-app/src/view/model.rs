@@ -73,6 +73,25 @@ fn mm(v: f32) -> String {
     }
 }
 
+/// The material a part's preview is drawn in, so its well matches it:
+/// the model's recipe or latest print, else the part's own 3MF settings
+/// or path (the same rule the viewer and the thumbnails use).
+fn part_material(app: &App, pt: &PartInfo) -> printdex_render::Material {
+    match app
+        .org
+        .data
+        .as_ref()
+        .filter(|(id, _)| app.open_model() == Some(*id))
+    {
+        Some((_, data)) => data.preview_material_at(&pt.rel_path, pt.material.as_ref()),
+        None => printdex_core::preview_ramp(
+            pt.material
+                .clone()
+                .or_else(|| printdex_core::Material::infer_from_path(&pt.rel_path)),
+        ),
+    }
+}
+
 /// The large preview: the interactive 3D viewer once the part's mesh is
 /// loaded, the thumbnail until then. The flag says whether the viewer
 /// shows (it fills the well with less padding).
@@ -353,13 +372,14 @@ fn loaded<'a>(app: &'a App, p: Palette, d: &'a ModelDetail, part: usize) -> Elem
         Some(pt) => preview_well(app, p, pt, picture_w),
         None => (icons::placeholder().into(), false),
     };
+    let tray = current.map_or_else(Default::default, |pt| part_material(app, pt));
     let preview = container(
         column![
             container(well)
                 .padding(if three_d { theme::S2 } else { theme::S9 })
                 .center_x(Length::Fill)
                 .height(PREVIEW_HEIGHT)
-                .style(move |_| p.well()),
+                .style(move |_| p.material_well(tray)),
             text(caption)
                 .size(theme::SIZE_DATA)
                 .font(theme::FONT_DATA)
@@ -556,6 +576,7 @@ fn tile<'a>(
 ) -> Element<'a, Message> {
     let inner = width - 2.0 * theme::S3 - 2.0 * theme::S4;
     let well = (width * TILE_WELL_RATIO).round();
+    let tray = part_material(app, pt);
     let body = column![
         container(preview::preview(
             app,
@@ -566,7 +587,7 @@ fn tile<'a>(
         .padding(theme::S4)
         .width(Length::Fill)
         .height(well)
-        .style(move |_| p.well()),
+        .style(move |_| p.material_well(tray)),
         container(
             text(file_name(&pt.rel_path).to_owned())
                 .size(theme::SIZE_CAPTION)

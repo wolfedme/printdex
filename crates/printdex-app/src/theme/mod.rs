@@ -280,8 +280,8 @@ const STATUS_LIGHT: Status = Status {
     ok_soft: hex("#d9f3dd"),
     fail: hex("#c72e28"),
     fail_soft: hex("#ffe6e2"),
-    partial: hex("#8e5e00"),
-    partial_soft: hex("#feedc9"),
+    partial: hex("#a3560a"),
+    partial_soft: hex("#fcecdc"),
     offline: hex("#5c6b7a"),
 };
 
@@ -290,8 +290,8 @@ const STATUS_DARK: Status = Status {
     ok_soft: hex("#1a3520"),
     fail: hex("#fe6270"),
     fail_soft: hex("#572125"),
-    partial: hex("#ebbd57"),
-    partial_soft: hex("#46350d"),
+    partial: hex("#f5a55a"),
+    partial_soft: hex("#3d332b"),
     offline: hex("#8b9aab"),
 };
 
@@ -649,6 +649,45 @@ impl Palette {
         }
     }
 
+    /// The tray a preview stands in: a muted wash of its material, so
+    /// the grid reads by material at a glance (DESIGN.md "Material trays").
+    /// Light trays take 38% of the top tone onto the pane; dark trays mix
+    /// the side tone into the tray. Glass keeps the tray's own alpha.
+    pub fn tray_color(&self, material: printdex_render::Material) -> Color {
+        let ramp = material.ramp();
+        let rgb = |c: [u8; 3]| Color::from_rgb8(c[0], c[1], c[2]);
+        let opaque = |c: Color| Color { a: 1.0, ..c };
+        let c = match self.mode {
+            Mode::Light => mix(opaque(self.t.surface), rgb(ramp.top), 0.38),
+            Mode::Dark => mix(opaque(self.t.tray), rgb(ramp.side), 0.22),
+        };
+        Color {
+            a: self.t.tray.a,
+            ..c
+        }
+    }
+
+    /// Preview well tinted by `material` (see [`Palette::tray_color`]).
+    pub fn material_well(&self, material: printdex_render::Material) -> container::Style {
+        container::Style {
+            background: Some(self.tray_color(material).into()),
+            ..self.well()
+        }
+    }
+
+    /// The swatch dot of a material: its side tone.
+    pub fn material_dot(&self, material: printdex_render::Material) -> container::Style {
+        let c = material.ramp().side;
+        container::Style {
+            background: Some(Color::from_rgb8(c[0], c[1], c[2]).into()),
+            border: Border {
+                radius: RADIUS_CHIP.into(),
+                ..Border::default()
+            },
+            ..container::Style::default()
+        }
+    }
+
     /// Recipe/count chip.
     pub fn chip(&self) -> container::Style {
         container::Style {
@@ -763,6 +802,34 @@ impl Palette {
             border: Border {
                 radius: (RADIUS_CONTROL - 3.0).into(),
                 ..Border::default()
+            },
+            shadow: Shadow::default(),
+            snap: true,
+        }
+    }
+
+    /// A material quick filter: a round pill with a hairline; on, it
+    /// takes the pressed look of a segment (Signal Wash, Signal Ink).
+    pub fn quick_filter(&self, active: bool, status: button::Status) -> button::Style {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        let (bg, fg, edge) = if active {
+            (self.t.accent_soft, self.t.accent_ink, self.t.accent)
+        } else if hovered {
+            (
+                mix(self.t.surface, self.n.ink, 0.04),
+                self.n.ink,
+                self.n.rule,
+            )
+        } else {
+            (self.t.surface, self.n.ink_2, self.n.rule)
+        };
+        button::Style {
+            background: Some(bg.into()),
+            text_color: fg,
+            border: Border {
+                color: edge,
+                width: 1.0,
+                radius: RADIUS_CHIP.into(),
             },
             shadow: Shadow::default(),
             snap: true,

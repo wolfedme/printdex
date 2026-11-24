@@ -1205,24 +1205,24 @@
         "light": {
           "glass": {
             "ground": {
-              "oklch": "oklch(0.965 0.010 265 / 0.86)",
-              "srgb": "#f0f3fadb"
+              "oklch": "oklch(0.967 0.003 265 / 0.86)",
+              "srgb": "#f3f4f6db"
             },
             "surface": {
-              "oklch": "oklch(0.99 0.005 265 / 0.72)",
-              "srgb": "#fafcffb8"
+              "oklch": "oklch(1.000 0.000 90 / 0.75)",
+              "srgb": "#ffffffbf"
             },
             "tray": {
-              "oklch": "oklch(0.94 0.012 265 / 0.7)",
-              "srgb": "#e7ebf4b2"
+              "oklch": "oklch(0.948 0.005 258 / 0.70)",
+              "srgb": "#eceef1b2"
             },
             "rail": {
-              "oklch": "oklch(0.93 0.020 265 / 0.82)",
-              "srgb": "#e1e8f6d1"
+              "oklch": "oklch(0.937 0.006 265 / 0.82)",
+              "srgb": "#e8eaeed1"
             },
             "rail-hi": {
-              "oklch": "oklch(0.99 0.010 265 / 0.65)",
-              "srgb": "#f8fcffa6"
+              "oklch": "oklch(0.988 0.002 248 / 0.65)",
+              "srgb": "#fafbfca6"
             }
           },
           "accent": {
@@ -1231,8 +1231,8 @@
               "srgb": "#9f8600"
             },
             "accent-soft": {
-              "oklch": "oklch(0.94 0.076 100 / 0.8)",
-              "srgb": "#f7edb2cc"
+              "oklch": "oklch(0.960 0.056 98 / 0.80)",
+              "srgb": "#fcf3c8cc"
             },
             "accent-ink": {
               "oklch": "oklch(0.48 0.17 100)",
@@ -1253,48 +1253,48 @@
           },
           "solidFallback": {
             "ground": {
-              "oklch": "oklch(0.965 0.010 265)",
-              "srgb": "#f0f3fa"
+              "oklch": "oklch(0.967 0.003 265)",
+              "srgb": "#f3f4f6"
             },
             "surface": {
-              "oklch": "oklch(0.995 0.005 265)",
-              "srgb": "#fcfdff"
+              "oklch": "oklch(1.000 0.000 90)",
+              "srgb": "#ffffff"
             },
             "tray": {
-              "oklch": "oklch(0.945 0.012 265)",
-              "srgb": "#e9edf5"
+              "oklch": "oklch(0.948 0.005 258)",
+              "srgb": "#eceef1"
             },
             "rail": {
-              "oklch": "oklch(0.93 0.020 265)",
-              "srgb": "#e1e8f6"
+              "oklch": "oklch(0.937 0.006 265)",
+              "srgb": "#e8eaee"
             },
             "rail-hi": {
-              "oklch": "oklch(0.98 0.010 265)",
-              "srgb": "#f5f8ff"
+              "oklch": "oklch(0.982 0.002 248)",
+              "srgb": "#f8f9fa"
             },
             "accent-soft": {
-              "oklch": "oklch(0.94 0.076 100)",
-              "srgb": "#f7edb2"
+              "oklch": "oklch(0.960 0.056 98)",
+              "srgb": "#fcf3c8"
             }
           }
         },
         "dark": {
           "glass": {
             "ground": {
-              "oklch": "oklch(0.2 0.009 265 / 0.84)",
-              "srgb": "#14161ad6"
+              "oklch": "oklch(0.196 0.006 271 / 0.84)",
+              "srgb": "#141518d6"
             },
             "surface": {
-              "oklch": "oklch(0.29 0.010 265 / 0.62)",
-              "srgb": "#292b309e"
+              "oklch": "oklch(0.293 0.010 268 / 0.62)",
+              "srgb": "#2a2c319e"
             },
             "tray": {
-              "oklch": "oklch(0.25 0.010 265 / 0.6)",
-              "srgb": "#1f222799"
+              "oklch": "oklch(0.332 0.011 264 / 0.60)",
+              "srgb": "#33363c99"
             },
             "rail": {
-              "oklch": "oklch(0.17 0.017 265 / 0.82)",
-              "srgb": "#0c0f17d1"
+              "oklch": "oklch(0.173 0.006 271 / 0.82)",
+              "srgb": "#0f1013d1"
             },
             "rail-hi": {
               "oklch": "oklch(1 0 0 / 0.09)",
@@ -1307,8 +1307,8 @@
               "srgb": "#fadf27"
             },
             "accent-soft": {
-              "oklch": "oklch(0.38 0.07 100 / 0.6)",
-              "srgb": "#4b430f99"
+              "oklch": "oklch(0.337 0.054 101 / 0.62)",
+              "srgb": "#3d38149e"
             },
             "accent-ink": {
               "oklch": "oklch(0.9 0.14 100)",
@@ -1329,28 +1329,28 @@
           },
           "solidFallback": {
             "ground": {
-              "oklch": "oklch(0.2 0.009 265)",
-              "srgb": "#14161a"
+              "oklch": "oklch(0.196 0.006 271)",
+              "srgb": "#141518"
             },
             "surface": {
-              "oklch": "oklch(0.26 0.010 265)",
-              "srgb": "#222429"
+              "oklch": "oklch(0.239 0.008 264)",
+              "srgb": "#1d1f23"
             },
             "tray": {
-              "oklch": "oklch(0.235 0.010 265)",
-              "srgb": "#1c1e23"
+              "oklch": "oklch(0.273 0.010 268)",
+              "srgb": "#25272c"
             },
             "rail": {
-              "oklch": "oklch(0.17 0.017 265)",
-              "srgb": "#0c0f17"
+              "oklch": "oklch(0.173 0.006 271)",
+              "srgb": "#0f1013"
             },
             "rail-hi": {
-              "oklch": "oklch(0.26 0.020 265)",
-              "srgb": "#1f242e"
+              "oklch": "oklch(0.239 0.010 268)",
+              "srgb": "#1d1f24"
             },
             "accent-soft": {
-              "oklch": "oklch(0.34 0.07 100)",
-              "srgb": "#413801"
+              "oklch": "oklch(0.286 0.040 102)",
+              "srgb": "#2e2b12"
             }
           }
         }
