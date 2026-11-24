@@ -98,6 +98,10 @@ where
                 let _ = events.send(EngineEvent::TaskStopped(name));
                 return;
             }
+            #[expect(
+                clippy::indexing_slicing,
+                reason = "the index is capped at RESTART_BACKOFF.len() - 1 and the array has 3 entries"
+            )]
             let wait = RESTART_BACKOFF[(panics - 1).min(RESTART_BACKOFF.len() - 1)];
             tracing::error!(task = ?name, %message, restart_in = ?wait, "background task panicked; restarting it");
             tokio::time::sleep(wait).await;

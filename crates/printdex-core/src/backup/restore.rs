@@ -202,6 +202,10 @@ fn walk_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     Ok(out)
 }
 
+#[expect(
+    clippy::indexing_slicing,
+    reason = "n is the byte count read into ba (n <= ba.len()), and bb has the same length as ba"
+)]
 fn same_content(a: &Path, b: &Path) -> std::io::Result<bool> {
     use std::io::Read;
     let (ma, mb) = (std::fs::metadata(a)?, std::fs::metadata(b)?);
@@ -538,6 +542,10 @@ impl Engine {
         let place = self.model_place(model).await?;
         let mut repo = self.current_repo().await?;
         let tag = models_tag(place.library);
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "model_place always builds subpaths with at least one entry"
+        )]
         let sub = place.subpaths[0].clone();
         let found = tokio::task::spawn_blocking(move || {
             repo.find(
@@ -657,6 +665,10 @@ impl Engine {
         let into = match &dest {
             ModelRestoreDest::Original => place.root.join(&place.base),
             ModelRestoreDest::Folder(dir) => {
+                #[expect(
+                    clippy::indexing_slicing,
+                    reason = "model_place always builds subpaths with at least one entry"
+                )]
                 let name = Path::new(&place.subpaths[0])
                     .file_name()
                     .map(PathBuf::from)

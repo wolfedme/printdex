@@ -195,7 +195,7 @@ impl Engine {
                 let key = tokio::task::spawn_blocking(move || crypto::derive(&p, &k))
                     .await
                     .map_err(|e| SyncError::Storage(e.to_string()))??;
-                (Some(kdf), Some(crypto::check_value(&key)))
+                (Some(kdf), Some(crypto::check_value(&key)?))
             };
             let file = SpaceFile {
                 format: FORMAT,

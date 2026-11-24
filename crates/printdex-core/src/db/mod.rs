@@ -25,6 +25,22 @@ use sqlx::sqlite::{
 
 use crate::error::{CoreError, Result};
 
+/// A stored file size as `u64`. Rows we wrote never hold a negative size; a
+/// damaged one reads as 0 instead of wrapping to a huge value.
+pub(crate) fn size_from_db(v: i64) -> u64 {
+    u64::try_from(v).unwrap_or(0)
+}
+
+/// A file size as the `i64` SQLite stores, saturating at `i64::MAX`.
+pub(crate) fn size_to_db(v: u64) -> i64 {
+    i64::try_from(v).unwrap_or(i64::MAX)
+}
+
+/// A row position as the `i64` SQLite stores, saturating at `i64::MAX`.
+pub(crate) fn index_to_db(v: usize) -> i64 {
+    i64::try_from(v).unwrap_or(i64::MAX)
+}
+
 pub use files::KnownFile;
 pub use libraries::{ChangeMode, Library, LibraryKind};
 pub use missing::{MISSING_GRACE_MS, Purged};
@@ -427,5 +443,24 @@ mod migration_tests {
                 panic!("migrations {other} and {name} share version {version}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+
+    #[test]
+    fn negative_stored_size_reads_as_zero() {
+        assert_eq!(size_from_db(-1), 0);
+        assert_eq!(size_from_db(i64::MIN), 0);
+        assert_eq!(size_from_db(42), 42);
+    }
+
+    #[test]
+    fn oversized_values_saturate() {
+        assert_eq!(size_to_db(u64::MAX), i64::MAX);
+        assert_eq!(size_to_db(7), 7);
+        assert_eq!(index_to_db(3), 3);
     }
 }

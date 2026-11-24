@@ -50,6 +50,15 @@ pub struct ModelDetail {
     pub assets: Vec<AssetInfo>,
 }
 
+/// A stored dimension in millimetres at display precision.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "f64 to f32 rounds to the nearest f32 (or infinity); it never panics and the extra precision is not displayed"
+)]
+fn to_f32(v: f64) -> f32 {
+    v as f32
+}
+
 impl ModelDetail {
     pub fn total_size(&self) -> u64 {
         self.parts.iter().map(|p| p.size).sum::<u64>()
@@ -107,7 +116,7 @@ impl Db {
             format: format_from_db(&r.format),
             size: size(r.size),
             dims: match (r.dim_x, r.dim_y, r.dim_z) {
-                (Some(x), Some(y), Some(z)) => Some([x as f32, y as f32, z as f32]),
+                (Some(x), Some(y), Some(z)) => Some([to_f32(x), to_f32(y), to_f32(z)]),
                 _ => None,
             },
             triangles: r.triangles.and_then(|t| u64::try_from(t).ok()),

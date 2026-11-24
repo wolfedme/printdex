@@ -204,8 +204,16 @@ pub(crate) fn weight(format: PrintableFormat, size: u64) -> u32 {
         PrintableFormat::Obj => 1.0,
         PrintableFormat::ThreeMf => 6.0,
     };
-    let mib = (size as f64 * factor / f64::from(1u32 << 20)).ceil();
-    (mib as u32).clamp(1, BUDGET_MIB)
+    let mib = (size as f64 * factor / f64::from(1u32 << 20))
+        .ceil()
+        .clamp(1.0, f64::from(BUDGET_MIB));
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "mib is clamped to [1, BUDGET_MIB], which fits u32; the cast also saturates and never panics"
+    )]
+    let weight = mib as u32;
+    weight
 }
 
 /// Handle to the thumbnail workers. Cheap to clone.
@@ -640,14 +648,16 @@ fn load_mesh(path: &Path, format: PrintableFormat) -> Result<printdex_mesh::Mesh
 
 /// The first row of `img` with a visible pixel; the height when empty.
 fn top_row(img: &printdex_render::Image) -> u32 {
-    let row = img.width as usize * 4;
+    let row = usize::try_from(img.width)
+        .unwrap_or(usize::MAX)
+        .saturating_mul(4);
     if row == 0 {
         return img.height;
     }
     img.rgba
         .chunks(row)
-        .position(|r| r.chunks(4).any(|px| px[3] > 0))
-        .map_or(img.height, |y| y as u32)
+        .position(|r| r.chunks(4).any(|px| px.get(3).is_some_and(|&a| a > 0)))
+        .map_or(img.height, |y| u32::try_from(y).unwrap_or(img.height))
 }
 
 fn render_part(
@@ -893,6 +903,23 @@ mod tests {
 
     fn m(n: u8) -> ThumbTarget {
         ThumbTarget::Model(ModelId(uuid::Uuid::from_bytes([n; 16])))
+    }
+
+    #[test]
+    fn top_row_survives_a_short_pixel_buffer() {
+        // Three bytes cannot hold one RGBA pixel; there is no alpha to read.
+        let img = printdex_render::Image {
+            width: 1,
+            height: 1,
+            rgba: vec![0, 0, 0],
+        };
+        assert_eq!(top_row(&img), 1);
+        let img = printdex_render::Image {
+            width: 1,
+            height: 2,
+            rgba: vec![0, 0, 0, 0, 1, 1, 1, 9],
+        };
+        assert_eq!(top_row(&img), 1);
     }
 
     #[test]

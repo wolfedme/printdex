@@ -157,6 +157,10 @@ pub enum Key {
 
 impl Key {
     /// The canonical text stored in `sync_fields.key`.
+    #[expect(
+        clippy::expect_used,
+        reason = "plain structs with String keys always serialize"
+    )]
     pub fn text(&self) -> String {
         serde_json::to_string(self).expect("keys serialize")
     }
@@ -245,7 +249,7 @@ struct Trailer {
 }
 
 /// Writes a batch (or snapshot) file.
-pub fn encode(batch: &Batch, key: Option<&SpaceKey>) -> Vec<u8> {
+pub fn encode(batch: &Batch, key: Option<&SpaceKey>) -> Result<Vec<u8>, SyncError> {
     let mut lines = Vec::new();
     let mut push = |v: &dyn erased::Line| {
         lines.extend_from_slice(&v.json());
@@ -258,21 +262,22 @@ pub fn encode(batch: &Batch, key: Option<&SpaceKey>) -> Vec<u8> {
     push(&Trailer {
         end: batch.records.len(),
     });
-    let packed = zstd::bulk::compress(&lines, 3).expect("zstd compression of a buffer");
+    let packed = zstd::bulk::compress(&lines, 3)
+        .map_err(|e| SyncError::Storage(format!("compressing a sync file failed: {e}")))?;
     let mut out = Vec::with_capacity(packed.len() + 48);
     out.extend_from_slice(MAGIC);
     out.push(u8::try_from(FORMAT).unwrap_or(u8::MAX));
     match key {
         Some(k) => {
             out.push(FLAG_SEALED);
-            out.extend_from_slice(&crypto::seal(k, &packed));
+            out.extend_from_slice(&crypto::seal(k, &packed)?);
         }
         None => {
             out.push(0);
             out.extend_from_slice(&packed);
         }
     }
-    out
+    Ok(out)
 }
 
 mod erased {
@@ -280,6 +285,10 @@ mod erased {
         fn json(&self) -> Vec<u8>;
     }
     impl<T: serde::Serialize> Line for T {
+        #[expect(
+            clippy::expect_used,
+            reason = "plain structs with String keys always serialize"
+        )]
         fn json(&self) -> Vec<u8> {
             serde_json::to_vec(self).expect("sync lines serialize")
         }
@@ -292,18 +301,20 @@ const MAX_PLAIN: usize = 512 * 1024 * 1024;
 
 /// Reads a batch (or snapshot) file.
 pub fn decode(bytes: &[u8], key: Option<&SpaceKey>) -> Result<Batch, SyncError> {
-    if bytes.len() < 6 {
+    let Some((head, body)) = bytes.split_at_checked(6) else {
         return Err(SyncError::Truncated);
-    }
-    if &bytes[..4] != MAGIC {
+    };
+    let [m0, m1, m2, m3, version, flags] = *head else {
+        return Err(SyncError::Truncated);
+    };
+    if [m0, m1, m2, m3] != *MAGIC {
         return Err(SyncError::Corrupt);
     }
-    let version = u32::from(bytes[4]);
+    let version = u32::from(version);
     if version > FORMAT {
         return Err(SyncError::NewerFormat(version));
     }
-    let body = &bytes[6..];
-    let packed = if bytes[5] & FLAG_SEALED != 0 {
+    let packed = if flags & FLAG_SEALED != 0 {
         let k = key.ok_or(SyncError::PassphraseNeeded)?;
         crypto::open(k, body)?
     } else {
@@ -467,7 +478,7 @@ mod tests {
     #[test]
     fn batch_roundtrip_plain() {
         let b = sample();
-        assert_eq!(decode(&encode(&b, None), None).unwrap(), b);
+        assert_eq!(decode(&encode(&b, None).unwrap(), None).unwrap(), b);
     }
 
     #[test]
@@ -481,7 +492,7 @@ mod tests {
         )
         .unwrap();
         let b = sample();
-        let bytes = encode(&b, Some(&k));
+        let bytes = encode(&b, Some(&k)).unwrap();
         assert_eq!(decode(&bytes, Some(&k)).unwrap(), b);
         assert_eq!(decode(&bytes, None), Err(SyncError::PassphraseNeeded));
     }
@@ -494,7 +505,7 @@ mod tests {
         };
         let k = derive("pw", &p).unwrap();
         let other = derive("nope", &p).unwrap();
-        let bytes = encode(&sample(), Some(&k));
+        let bytes = encode(&sample(), Some(&k)).unwrap();
         assert_eq!(
             decode(&bytes, Some(&other)),
             Err(SyncError::WrongPassphrase)
@@ -503,7 +514,7 @@ mod tests {
 
     #[test]
     fn truncated_batch_rejected() {
-        let bytes = encode(&sample(), None);
+        let bytes = encode(&sample(), None).unwrap();
         assert_eq!(
             decode(&bytes[..bytes.len() - 10], None),
             Err(SyncError::Truncated)
@@ -526,10 +537,10 @@ mod tests {
         let mut b = sample();
         b.format = 2;
         assert_eq!(
-            decode(&encode(&b, None), None),
+            decode(&encode(&b, None).unwrap(), None),
             Err(SyncError::NewerFormat(2))
         );
-        let mut bytes = encode(&sample(), None);
+        let mut bytes = encode(&sample(), None).unwrap();
         bytes[4] = 9;
         assert_eq!(decode(&bytes, None), Err(SyncError::NewerFormat(9)));
     }

@@ -306,6 +306,10 @@ impl Engine {
     /// Finishes or rolls back file actions a crash interrupted: whatever
     /// the disk shows happened is written to the database. Returns the
     /// names of the models whose action was finished. Called on open.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "roots holds an entry for every library named by the steps, since Engine::roots builds it from those same steps"
+    )]
     pub async fn reconcile_ops(&self) -> Result<Vec<String>> {
         let _writes = self.sidecars.hold().await;
         let mut finished = Vec::new();
@@ -396,6 +400,10 @@ impl Engine {
 
     /// Checks, journals and performs `steps`, then moves the rows. With
     /// `reverse`, the new journal entry is an undo (not undoable itself).
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "roots holds an entry for every library named by the steps, since Engine::roots builds it from those same steps; step indexes come from enumerating steps or work (built from steps), and libs is non-empty because steps is"
+    )]
     async fn execute(&self, kind: OpKind, steps: Vec<Step>, reverse: bool) -> Result<OpSummary> {
         if steps.is_empty() {
             return Ok(OpSummary::nothing(kind));
@@ -585,6 +593,10 @@ impl Engine {
     }
 
     /// Puts the files of a trash action back and rescans them.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "roots holds an entry for every library named by the steps, since Engine::roots builds it from those same steps"
+    )]
     async fn restore_trashed(&self, row: &OpRow) -> Result<()> {
         let roots = self.roots(&row.steps).await?;
         let paths: Vec<PathBuf> = row

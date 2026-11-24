@@ -122,20 +122,37 @@ fn parse_proc_mounts(text: &str) -> Vec<Mount> {
         .collect()
 }
 
+/// The byte an octal escape `\ooo` stands for; `None` when `digits` are not
+/// three octal digits or the value does not fit a byte (`\777`).
+fn octal_byte(digits: &[u8]) -> Option<u8> {
+    if digits.len() != 3 {
+        return None;
+    }
+    let mut v = 0u32;
+    for &d in digits {
+        if !(b'0'..=b'7').contains(&d) {
+            return None;
+        }
+        v = v * 8 + u32::from(d - b'0');
+    }
+    u8::try_from(v).ok()
+}
+
 fn unescape_octal(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'\\'
-            && i + 3 < b.len()
-            && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c))
-        {
-            let v = (b[i + 1] - b'0') * 64 + (b[i + 2] - b'0') * 8 + (b[i + 3] - b'0');
+    while let Some(&c) = b.get(i) {
+        let escaped = if c == b'\\' {
+            b.get(i + 1..i + 4).and_then(octal_byte)
+        } else {
+            None
+        };
+        if let Some(v) = escaped {
             out.push(v);
             i += 4;
         } else {
-            out.push(b[i]);
+            out.push(c);
             i += 1;
         }
     }
@@ -216,6 +233,15 @@ mod tests {
             kind_for(Path::new(r"\\?\C:\prints"), &[]),
             LibraryKind::Local
         );
+    }
+
+    #[test]
+    fn octal_escapes_that_overflow_a_byte_stay_literal() {
+        assert_eq!(unescape_octal(r"/mnt/a\040b"), "/mnt/a b");
+        // \777 is 511: not a byte, so it must not panic or wrap.
+        assert_eq!(unescape_octal(r"/mnt/\777x"), r"/mnt/\777x");
+        assert_eq!(unescape_octal(r"/mnt/\04"), r"/mnt/\04");
+        assert_eq!(unescape_octal(r"/mnt/\"), r"/mnt/\");
     }
 
     #[test]

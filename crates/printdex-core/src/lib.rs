@@ -2,6 +2,18 @@
 //!
 //! This crate has no UI dependencies. The desktop app and the `printdex` CLI
 //! both drive it through the [`Engine`] handle.
+#![cfg_attr(
+    not(test),
+    warn(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_wrap
+    )
+)]
 
 pub mod backup;
 pub mod cpu;

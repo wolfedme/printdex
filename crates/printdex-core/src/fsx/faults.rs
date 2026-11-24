@@ -168,6 +168,10 @@ mod armed {
 
     /// Called once per loop iteration of each supervised task. Panics while
     /// an [`arm_panic`] for `task` is armed on this runtime.
+    #[expect(
+        clippy::panic,
+        reason = "fault injection: the panic is the injected fault, and this module compiles only with the fault-injection feature"
+    )]
     pub fn checkpoint(task: TaskName) {
         let runtime = current_runtime();
         let hit = panics()

@@ -388,6 +388,10 @@ impl Redactor {
 
     /// Returns `text` with the known folders replaced. Only whole path
     /// components match, so `/home/max` leaves `/home/maxwell` alone.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "map has norm.len() + 1 entries and a hit needs i + needle.len() <= norm.len(); a needle is valid UTF-8 matched whole, so its offsets in text are char boundaries"
+    )]
     pub fn apply(&self, text: &str) -> String {
         let (norm, map) = normalise(text);
         let mut out = String::with_capacity(text.len());
