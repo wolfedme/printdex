@@ -684,7 +684,7 @@ impl GpuViewer {
     /// Supersampling used for an output of `width` × `height`: 2× unless
     /// the device's texture size limit forbids it.
     fn supersampling(&self, width: u32, height: u32) -> u32 {
-        if width.max(height) * SS <= self.max_texture {
+        if width.max(height).saturating_mul(SS) <= self.max_texture {
             SS
         } else {
             1

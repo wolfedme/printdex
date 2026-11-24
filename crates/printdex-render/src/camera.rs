@@ -91,7 +91,7 @@ pub struct Fit {
 /// `v`, or the nearest finite value: NaN becomes 0 and ±infinity the
 /// largest finite value of that sign. Framing math on huge (but finite)
 /// coordinates can overflow; the result still has to be drawable.
-pub fn finite(v: f32) -> f32 {
+pub(crate) fn finite(v: f32) -> f32 {
     if v.is_nan() {
         0.0
     } else {
@@ -100,7 +100,7 @@ pub fn finite(v: f32) -> f32 {
 }
 
 /// [`finite`] for each component.
-pub fn finite2(v: Vec2) -> Vec2 {
+pub(crate) fn finite2(v: Vec2) -> Vec2 {
     Vec2::new(finite(v.x), finite(v.y))
 }
 

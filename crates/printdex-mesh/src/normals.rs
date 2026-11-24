@@ -37,12 +37,17 @@ pub fn pack(n: [f32; 3]) -> PackedNormal {
     if len == 0.0 || !len.is_finite() {
         return [0; 4];
     }
-    // Rounds by truncating a positive value (no libm call).
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "|v / len| <= 1, so the sum is in 0.5..=254.5 and the result in -127..=127"
-    )]
-    let c = |v: f32| ((v / len * 127.0 + 127.5) as i32 - 127) as i8;
+    // Rounds by truncating a positive value (no libm call). `v / len` can
+    // exceed 1 when `dot(n, n)` is subnormal and rounds down, so clamp
+    // before narrowing: a tiny vector saturates rather than flipping sign.
+    let c = |v: f32| {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "float-to-int `as` saturates (NaN is 0); the result is clamped next"
+        )]
+        let r = (v / len * 127.0 + 127.5) as i32;
+        i8::try_from(r.saturating_sub(127).clamp(-127, 127)).unwrap_or(0)
+    };
     [c(n[0]), c(n[1]), c(n[2]), 0]
 }
 
@@ -273,6 +278,15 @@ mod tests {
             positions: vec![[0.0; 3], [0.0; 3], [1.0, 0.0, 0.0]],
         };
         assert_eq!(corner_normals(&m), vec![[0; 4]; 3]);
+    }
+
+    #[test]
+    fn tiny_vectors_keep_their_sign() {
+        // dot(n, n) is subnormal and rounds down, so v / len exceeds 1.
+        assert_eq!(pack([4e-23, 0.0, 0.0]), [127, 0, 0, 0]);
+        assert_eq!(pack([-4e-23, 0.0, 0.0]), [-127, 0, 0, 0]);
+        let [x, y, z, _] = pack([0.0, 4e-23, -4e-23]);
+        assert!(x == 0 && y > 0 && z < 0, "{x} {y} {z}");
     }
 
     #[test]

@@ -509,7 +509,7 @@ pub(crate) fn prepare(
     opts: &RenderOptions,
     mut each: impl FnMut(Tri),
 ) -> Option<Frame> {
-    let (w, h) = (opts.width * SS, opts.height * SS);
+    let (w, h) = target_size(opts);
     let basis = opts.camera.basis();
     let projected: Vec<(Vec2, f32)> = mesh
         .positions
@@ -621,7 +621,12 @@ pub(crate) fn finish(target: Target, frame: &Frame, opts: &RenderOptions) -> Ima
 
 /// Supersampled size of a render.
 pub(crate) fn target_size(opts: &RenderOptions) -> (u32, u32) {
-    (opts.width * SS, opts.height * SS)
+    // Saturating, so debug and release agree; such a size cannot be
+    // allocated anyway.
+    (
+        opts.width.saturating_mul(SS),
+        opts.height.saturating_mul(SS),
+    )
 }
 
 /// Whether smooth normals are worth computing for `mesh` in a picture of
@@ -1030,6 +1035,16 @@ pub(crate) mod tests {
             [Vec3::Z; 3],
         );
         assert!((0..64).all(|i| t.covered(i)), "covers the target");
+    }
+
+    #[test]
+    fn huge_sizes_saturate() {
+        let opts = RenderOptions {
+            width: u32::MAX,
+            height: 3,
+            ..RenderOptions::default()
+        };
+        assert_eq!(target_size(&opts), (u32::MAX, 6));
     }
 
     #[test]

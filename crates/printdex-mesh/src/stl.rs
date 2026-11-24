@@ -21,7 +21,7 @@ pub(crate) fn read<R: BufRead>(mut r: R, size: u64, limits: Limits) -> Result<Me
     let mut head = [0u8; 84];
     let got = read_up_to(&mut r, &mut head)?;
     // `read_up_to` never reports more than it was given room for.
-    let start = head.get(..got).unwrap_or(&head);
+    let start = head.get(..got).unwrap_or_default();
     let starts_solid = start
         .iter()
         .skip_while(|b| b.is_ascii_whitespace())
@@ -55,7 +55,8 @@ fn read_up_to<R: Read>(r: &mut R, buf: &mut [u8]) -> std::io::Result<usize> {
             Err(e) => return Err(e),
         }
     }
-    Ok(n)
+    // A reader may claim more than it was given room for.
+    Ok(n.min(buf.len()))
 }
 
 fn read_binary<R: Read>(mut r: R, count: u64, limits: Limits) -> Result<Mesh> {
@@ -244,9 +245,10 @@ pub(crate) mod tests {
     #[test]
     fn a_reader_reporting_too_much_is_not_trusted() {
         let mut buf = [0u8; 4];
-        assert_eq!(read_up_to(&mut Liar, &mut buf).unwrap(), 14);
-        // The header read reports 94 of 84 bytes.
-        assert!(read(Liar, 84, Limits::default()).is_err());
+        assert_eq!(read_up_to(&mut Liar, &mut buf).unwrap(), 4);
+        // The header read claims 94 of 84 bytes: taken as 84 (all zero,
+        // so a binary STL of no triangles).
+        assert_eq!(read(Liar, 84, Limits::default()).unwrap().triangles(), 0);
     }
 
     #[test]
