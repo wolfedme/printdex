@@ -67,6 +67,9 @@ pub struct ModelHit {
     /// The material previews are drawn in: the recipe's, else the latest
     /// attempt's.
     pub material: Option<Material>,
+    /// The ramp the cover preview is drawn in: `material`, else what the
+    /// cover part's 3MF settings or path name.
+    pub preview_material: printdex_render::Material,
     pub recipe: Option<RecipeFacts>,
     pub last_print: Option<LastPrint>,
 }
@@ -297,6 +300,19 @@ fn hit_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<ModelHit> {
         .as_ref()
         .and_then(|r| r.material.clone())
         .or_else(|| material.as_deref().and_then(Material::parse));
+    // The cover part's preview material, as `Db::part_source` works it out,
+    // so the well under a preview matches the preview's own colour.
+    let cover_path: Option<String> = row.try_get("cover_path")?;
+    let cover_material: Option<String> = row.try_get("cover_material")?;
+    let preview_material = match super::thumbs::ramp(material.clone()) {
+        printdex_render::Material::Unknown => super::thumbs::ramp(
+            cover_material
+                .as_deref()
+                .and_then(Material::parse)
+                .or_else(|| cover_path.as_deref().and_then(Material::infer_from_path)),
+        ),
+        m => m,
+    };
     Ok(ModelHit {
         id: row.try_get("id")?,
         library_id: row.try_get("library_id")?,
@@ -308,6 +324,7 @@ fn hit_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<ModelHit> {
         missing: row.try_get::<Option<i64>, _>("missing_since")?.is_some(),
         created_at: row.try_get("created_at")?,
         material,
+        preview_material,
         recipe,
         last_print,
     })
@@ -349,7 +366,11 @@ impl Db {
                     (SELECT r.settings FROM recipes r WHERE r.model_id = m.id) as recipe,
                     {} as last_result, {} as last_at,
                     (SELECT count(*) FROM attempts a WHERE a.model_id = m.id AND a.result = 'success') as successes,
-                    {} as material",
+                    {} as material,
+                    (SELECT p.rel_path FROM parts p WHERE p.model_id = m.id AND p.missing_since IS NULL
+                       ORDER BY p.rel_path LIMIT 1) as cover_path,
+                    (SELECT p.file_material FROM parts p WHERE p.model_id = m.id AND p.missing_since IS NULL
+                       ORDER BY p.rel_path LIMIT 1) as cover_material",
             latest("result"),
             latest("printed_at"),
             material_sql()

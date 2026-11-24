@@ -32,7 +32,7 @@ pub mod walk;
 
 pub use db::{
     AssetInfo, ChangeMode, Library, LibraryKind, ModelDetail, ModelHit, PartInfo, RecipeFacts,
-    Scope, SearchFilter, Smart, SmartCounts, SortOrder, Stats, format_number,
+    Scope, SearchFilter, Smart, SmartCounts, SortOrder, Stats, format_number, preview_ramp,
 };
 pub use engine::{Engine, LibraryStatus};
 pub use error::{BackupError, CoreError, Result, SyncError};

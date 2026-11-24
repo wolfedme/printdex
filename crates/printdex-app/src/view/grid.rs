@@ -71,6 +71,7 @@ fn pane<'a>(app: &App, p: Palette, m: &GridMetrics, hit: &ModelHit) -> Element<'
         let s = motion.selection(hit.id, app.selected);
         (s, s)
     };
+    let material = hit.preview_material;
     let inner_w = (m.pane_width - 2.0 * PANE_PADDING - 2.0 * theme::S5).max(0.0);
     let inner_h = (m.well_height - 2.0 * theme::S5).max(0.0);
 
@@ -88,7 +89,7 @@ fn pane<'a>(app: &App, p: Palette, m: &GridMetrics, hit: &ModelHit) -> Element<'
         .padding(theme::S5)
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(move |_| p.well()),
+        .style(move |_| p.material_well(material)),
     ]
     .width(Length::Fill)
     .height(m.well_height);
@@ -152,12 +153,21 @@ fn pane<'a>(app: &App, p: Palette, m: &GridMetrics, hit: &ModelHit) -> Element<'
     .clip(true);
     let meta = column![
         container(super::prints::card_chips(p, hit).unwrap_or_else(|| {
-            text(folder.to_owned())
-                .size(theme::SIZE_DATA)
-                .font(theme::FONT_DATA)
-                .color(p.n.ink_3)
-                .wrapping(text::Wrapping::None)
-                .into()
+            // A folder is a word, not measured data: Figtree, not mono.
+            // Models at the library root have no folder to show.
+            if folder.is_empty() {
+                return Space::new().into();
+            }
+            row![
+                icons::icon(Icon::Folder, theme::ICON_CHIP, p.n.ink_3),
+                text(folder.to_owned())
+                    .size(theme::SIZE_CAPTION)
+                    .color(p.n.ink_3)
+                    .wrapping(text::Wrapping::None),
+            ]
+            .spacing(theme::S2)
+            .align_y(Alignment::Center)
+            .into()
         }))
         .height(CHIP_LINE)
         .align_y(Alignment::Center)

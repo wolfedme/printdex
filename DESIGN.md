@@ -2,22 +2,22 @@
 name: Printdex
 description: Your STL library, organized. Local-first, blazing fast, built in Rust.
 colors:
-  ground: "oklch(0.965 0.010 265 / 0.86)"
-  surface: "oklch(0.99 0.005 265 / 0.72)"
-  tray: "oklch(0.94 0.012 265 / 0.7)"
+  ground: "oklch(0.967 0.003 265 / 0.86)"
+  surface: "oklch(1.000 0.000 0 / 0.75)"
+  tray: "oklch(0.948 0.005 258 / 0.70)"
   edge: "oklch(1 0 0 / 0.9)"
   ink: "oklch(0.23 0.02 265)"
   ink-2: "oklch(0.43 0.02 265)"
   ink-3: "oklch(0.52 0.02 265)"
   rule: "oklch(0.25 0.03 265 / 0.12)"
   rule-soft: "oklch(0.25 0.03 265 / 0.06)"
-  rail: "oklch(0.93 0.020 265 / 0.82)"
-  rail-hi: "oklch(0.99 0.010 265 / 0.65)"
+  rail: "oklch(0.937 0.006 265 / 0.82)"
+  rail-hi: "oklch(0.988 0.002 0 / 0.65)"
   rail-rule: "oklch(1 0 0 / 0.5)"
   on-rail: "oklch(0.2 0.02 265)"
   on-rail-2: "oklch(0.38 0.02 265)"
   accent: "oklch(0.62 0.17 100)"
-  accent-soft: "oklch(0.94 0.076 100 / 0.8)"
+  accent-soft: "oklch(0.960 0.056 98 / 0.80)"
   accent-ink: "oklch(0.48 0.17 100)"
   primary: "oklch(0.84 0.17 95)"
   primary-hi: "oklch(0.80 0.17 95)"
@@ -26,32 +26,32 @@ colors:
   ok-soft: "oklch(0.94 0.04 150)"
   fail: "oklch(0.545 0.19 28)"
   fail-soft: "oklch(0.95 0.035 28)"
-  partial: "oklch(0.52 0.12 78)"
-  partial-soft: "oklch(0.95 0.05 85)"
+  partial: "oklch(0.535 0.127 56)"
+  partial-soft: "oklch(0.952 0.027 67)"
   offline: "oklch(0.52 0.03 250)"
-  ground-solid: "oklch(0.965 0.010 265)"
-  surface-solid: "oklch(0.995 0.005 265)"
-  tray-solid: "oklch(0.945 0.012 265)"
+  ground-solid: "oklch(0.967 0.003 265)"
+  surface-solid: "oklch(1.000 0.000 0)"
+  tray-solid: "oklch(0.948 0.005 258)"
   edge-solid: "oklch(0.9 0.01 250)"
-  rail-solid: "oklch(0.93 0.020 265)"
-  rail-hi-solid: "oklch(0.98 0.010 265)"
-  accent-soft-solid: "oklch(0.94 0.076 100)"
-  ground-dark: "oklch(0.2 0.009 265 / 0.84)"
-  surface-dark: "oklch(0.29 0.010 265 / 0.62)"
-  tray-dark: "oklch(0.25 0.010 265 / 0.6)"
+  rail-solid: "oklch(0.937 0.006 265)"
+  rail-hi-solid: "oklch(0.982 0.002 0)"
+  accent-soft-solid: "oklch(0.960 0.056 98)"
+  ground-dark: "oklch(0.196 0.006 271 / 0.84)"
+  surface-dark: "oklch(0.293 0.010 268 / 0.62)"
+  tray-dark: "oklch(0.332 0.011 264 / 0.60)"
   edge-dark: "oklch(1 0 0 / 0.1)"
   ink-dark: "oklch(0.95 0.008 265)"
   ink-2-dark: "oklch(0.8 0.012 265)"
   ink-3-dark: "oklch(0.7 0.012 265)"
   rule-dark: "oklch(1 0 0 / 0.1)"
   rule-soft-dark: "oklch(1 0 0 / 0.06)"
-  rail-dark: "oklch(0.17 0.017 265 / 0.82)"
+  rail-dark: "oklch(0.173 0.006 271 / 0.82)"
   rail-hi-dark: "oklch(1 0 0 / 0.09)"
   rail-rule-dark: "oklch(1 0 0 / 0.08)"
   on-rail-dark: "oklch(0.95 0.008 265)"
   on-rail-2-dark: "oklch(0.78 0.012 265)"
   accent-dark: "oklch(0.9 0.18 100)"
-  accent-soft-dark: "oklch(0.38 0.07 100 / 0.6)"
+  accent-soft-dark: "oklch(0.337 0.054 101 / 0.62)"
   accent-ink-dark: "oklch(0.9 0.14 100)"
   primary-dark: "oklch(0.9 0.18 100)"
   primary-hi-dark: "oklch(0.95 0.18 100)"
@@ -60,20 +60,21 @@ colors:
   ok-soft-dark: "oklch(0.3 0.05 150)"
   fail-dark: "oklch(0.70 0.19 18)"
   fail-soft-dark: "oklch(0.33 0.08 18)"
-  partial-dark: "oklch(0.82 0.13 85)"
-  partial-soft-dark: "oklch(0.34 0.06 85)"
+  partial-dark: "oklch(0.786 0.131 62)"
+  partial-soft-dark: "oklch(0.329 0.020 61)"
   offline-dark: "oklch(0.68 0.03 250)"
-  ground-dark-solid: "oklch(0.2 0.009 265)"
-  surface-dark-solid: "oklch(0.26 0.010 265)"
-  tray-dark-solid: "oklch(0.235 0.010 265)"
+  ground-dark-solid: "oklch(0.196 0.006 271)"
+  surface-dark-solid: "oklch(0.239 0.008 264)"
+  tray-dark-solid: "oklch(0.273 0.010 268)"
   edge-dark-solid: "oklch(0.31 0.015 265)"
-  rail-dark-solid: "oklch(0.17 0.017 265)"
-  rail-hi-dark-solid: "oklch(0.26 0.020 265)"
-  accent-soft-dark-solid: "oklch(0.34 0.07 100)"
+  rail-dark-solid: "oklch(0.173 0.006 271)"
+  rail-hi-dark-solid: "oklch(0.239 0.010 268)"
+  accent-soft-dark-solid: "oklch(0.286 0.040 102)"
   mat-petg: "oklch(0.7 0.11 200)"
   mat-pla: "oklch(0.76 0.14 55)"
   mat-tpu: "oklch(0.7 0.15 345)"
   mat-asa: "oklch(0.62 0.015 260)"
+  mat-natural: "oklch(0.806 0.045 90)"
   contact-shadow: "oklch(0.25 0.02 165 / 0.14)"
   contact-shadow-dark: "oklch(0.05 0.01 165 / 0.5)"
 typography:
@@ -264,7 +265,7 @@ Screens recorded: library grid, list view, no results, model, log a print, setti
 
 **Key Characteristics:**
 - Frosted glass panes over one OS-compositor blur; solid tints wherever blur is unavailable.
-- Model previews are opaque and drawn in their material colour (PETG teal, PLA orange, TPU magenta, ASA/unknown neutral).
+- Model previews are opaque and drawn in their material colour (PETG teal, PLA orange, TPU magenta, ASA/ABS neutral, unknown in natural filament), standing in a tray of that colour.
 - One accent per colour theme, for selection, focus, the main action, pressed segments and the active sidebar item.
 - Figtree for the interface, JetBrains Mono only for measured and numbered data.
 - 14px panes, 10px controls, full-round recipe chips; solid 1px borders only.
@@ -283,24 +284,27 @@ Near-neutral graphite glass, one signal-yellow accent, four fixed material colou
 | Token | Light, blur | Light, solid | Dark, blur | Dark, solid |
 |---|---|---|---|---|
 | `accent` | oklch(0.62 0.17 100) · `#9f8600†` | same | oklch(0.9 0.18 100) · `#fadf27` | same |
-| `accent-soft` | oklch(0.94 0.076 100 / 0.8) · `#f7edb2cc` | oklch(0.94 0.076 100) · `#f7edb2` | oklch(0.38 0.07 100 / 0.6) · `#4b430f99` | oklch(0.34 0.07 100) · `#413801` |
+| `accent-soft` | oklch(0.960 0.056 98 / 0.80) · `#fcf3c8cc` | oklch(0.960 0.056 98) · `#fcf3c8` | oklch(0.337 0.054 101 / 0.62) · `#3d38149e` | oklch(0.286 0.040 102) · `#2e2b12` |
 | `accent-ink` | oklch(0.48 0.17 100) · `#755c00†` | same | oklch(0.9 0.14 100) · `#f4e06a` | same |
 | `primary` | oklch(0.84 0.17 95) · `#edc812` | same | oklch(0.9 0.18 100) · `#fadf27` | same |
 | `primary-hi` | oklch(0.80 0.17 95) · `#e0bb00` | same | oklch(0.95 0.18 100) · `#fff043†` | same |
 | `on-primary` | oklch(0.18 0.068 100) · `#191100†` | same | oklch(0.18 0.068 100) · `#191100†` | same |
 
 ### Secondary (material colours)
-Fixed in every colour theme; they drive the preview tint on model panes, list thumbnails, parts tiles and the 3D viewer. Previews are opaque. Unknown material uses the ASA neutral ramp. The swatch token (`mat-*`) is the side-face colour.
+Fixed in every colour theme; they drive the preview tint on model panes, list thumbnails, parts tiles and the 3D viewer. Previews are opaque. ABS shares the ASA neutral ramp; a model with no known material (or one without a ramp, such as PA or a wood fill) is drawn in undyed Natural, so "unknown" never reads as grey ASA. The swatch token (`mat-*`) is the side-face colour.
+
+**Material trays** (Max chose direction B, 2026-11-24): the well behind a preview takes a muted wash of the same material, so the grid reads by material at a glance. Light: 38% of the top tone onto `surface`. Dark: the side tone 22% into `tray`. Glass keeps the `tray` alpha. Applies to model panes, list thumbnails, the model view's preview and its part tiles (`Palette::tray_color`). Material chips carry a 7px swatch dot, and the library heading has material quick filters (PETG, PLA, TPU, ASA) that toggle the same filter chips as the Filter menu.
 
 | Material | Top face (clay-1) | Side (clay-2, swatch) | Shade (clay-3) | Edge |
 |---|---|---|---|---|
 | PETG | oklch(0.86 0.08 195) · `#90e2e1` | oklch(0.7 0.11 200) · `#2bb3b9` | oklch(0.56 0.11 205) · `#008693†` | oklch(0.48 0.1 205) · `#006d78†` |
 | PLA | oklch(0.88 0.1 65) · `#ffca91†` | oklch(0.76 0.14 55) · `#f49752` | oklch(0.63 0.15 45) · `#d16631` | oklch(0.55 0.13 45) · `#ae5528` |
 | TPU | oklch(0.85 0.09 340) · `#f6b7e0` | oklch(0.7 0.15 345) · `#de75b4` | oklch(0.56 0.16 350) · `#b54481` | oklch(0.48 0.14 350) · `#943569` |
-| ASA / unknown | oklch(0.82 0.01 260) · `#c0c4cb` | oklch(0.62 0.015 260) · `#81868f` | oklch(0.45 0.02 260) · `#4f5661` | oklch(0.38 0.02 260) · `#3c434d` |
+| ASA / ABS | oklch(0.82 0.01 260) · `#c0c4cb` | oklch(0.62 0.015 260) · `#81868f` | oklch(0.45 0.02 260) · `#4f5661` | oklch(0.38 0.02 260) · `#3c434d` |
+| Natural (unknown) | oklch(0.926 0.025 89) · `#ede6d4` | oklch(0.806 0.045 90) · `#cbbf9f` | oklch(0.664 0.048 87) · `#a09272` | oklch(0.559 0.043 88) · `#7f7357` |
 
 ### Tertiary (status colours)
-Fixed in every colour theme. Red marks failure only (a failed print, an invalid value); amber marks partial; green marks printed; slate marks offline. Each always comes with its icon and word.
+Fixed in every colour theme. Red marks failure only (a failed print, an invalid value); orange marks partial (moved off amber 2026-11-24 so it never reads as the yellow accent); green marks printed; slate marks offline. Each always comes with its icon and word.
 
 | Token | Light, blur | Light, solid | Dark, blur | Dark, solid |
 |---|---|---|---|---|
@@ -308,8 +312,8 @@ Fixed in every colour theme. Red marks failure only (a failed print, an invalid 
 | `ok-soft` | oklch(0.94 0.04 150) · `#d9f3dd` | same | oklch(0.3 0.05 150) · `#1a3520` | same |
 | `fail` | oklch(0.545 0.19 28) · `#c72e28` | same | oklch(0.70 0.19 18) · `#fe6270` | same |
 | `fail-soft` | oklch(0.95 0.035 28) · `#ffe6e2†` | same | oklch(0.33 0.08 18) · `#572125` | same |
-| `partial` | oklch(0.52 0.12 78) · `#8e5e00†` | same | oklch(0.82 0.13 85) · `#ebbd57` | same |
-| `partial-soft` | oklch(0.95 0.05 85) · `#feedc9` | same | oklch(0.34 0.06 85) · `#46350d` | same |
+| `partial` | oklch(0.535 0.127 56) · `#a3560a` | same | oklch(0.786 0.131 62) · `#f5a55a` | same |
+| `partial-soft` | oklch(0.952 0.027 67) · `#fcecdc` | same | oklch(0.329 0.020 61) · `#3d332b` | same |
 | `offline` | oklch(0.52 0.03 250) · `#5c6b7a` | same | oklch(0.68 0.03 250) · `#8b9aab` | same |
 
 ### Neutral
@@ -317,12 +321,12 @@ Graphite glass. In the blur set, the window is transparent and panes stack trans
 
 | Token | Light, blur | Light, solid | Dark, blur | Dark, solid |
 |---|---|---|---|---|
-| `ground` | oklch(0.965 0.010 265 / 0.86) · `#f0f3fadb` | oklch(0.965 0.010 265) · `#f0f3fa` | oklch(0.2 0.009 265 / 0.84) · `#14161ad6` | oklch(0.2 0.009 265) · `#14161a` |
-| `surface` | oklch(0.99 0.005 265 / 0.72) · `#fafcffb8†` | oklch(0.995 0.005 265) · `#fcfdff†` | oklch(0.29 0.010 265 / 0.62) · `#292b309e` | oklch(0.26 0.010 265) · `#222429` |
-| `tray` | oklch(0.94 0.012 265 / 0.7) · `#e7ebf4b2` | oklch(0.945 0.012 265) · `#e9edf5` | oklch(0.25 0.010 265 / 0.6) · `#1f222799` | oklch(0.235 0.010 265) · `#1c1e23` |
+| `ground` | oklch(0.967 0.003 265 / 0.86) · `#f3f4f6db` | oklch(0.967 0.003 265) · `#f3f4f6` | oklch(0.196 0.006 271 / 0.84) · `#141518d6` | oklch(0.196 0.006 271) · `#141518` |
+| `surface` | oklch(1.000 0.000 0 / 0.75) · `#ffffffbf` | oklch(1.000 0.000 0) · `#ffffff` | oklch(0.293 0.010 268 / 0.62) · `#2a2c319e` | oklch(0.239 0.008 264) · `#1d1f23` |
+| `tray` | oklch(0.948 0.005 258 / 0.70) · `#eceef1b2` | oklch(0.948 0.005 258) · `#eceef1` | oklch(0.332 0.011 264 / 0.60) · `#33363c99` | oklch(0.273 0.010 268) · `#25272c` |
 | `edge` | oklch(1 0 0 / 0.9) · `#ffffffe6` | oklch(0.9 0.01 250) · `#d9dfe5` | oklch(1 0 0 / 0.1) · `#ffffff1a` | oklch(0.31 0.015 265) · `#2d3038` |
-| `rail` | oklch(0.93 0.020 265 / 0.82) · `#e1e8f6d1` | oklch(0.93 0.020 265) · `#e1e8f6` | oklch(0.17 0.017 265 / 0.82) · `#0c0f17d1` | oklch(0.17 0.017 265) · `#0c0f17` |
-| `rail-hi` | oklch(0.99 0.010 265 / 0.65) · `#f8fcffa6†` | oklch(0.98 0.010 265) · `#f5f8ff†` | oklch(1 0 0 / 0.09) · `#ffffff17` | oklch(0.26 0.020 265) · `#1f242e` |
+| `rail` | oklch(0.937 0.006 265 / 0.82) · `#e8eaeed1` | oklch(0.937 0.006 265) · `#e8eaee` | oklch(0.173 0.006 271 / 0.82) · `#0f1013d1` | oklch(0.173 0.006 271) · `#0f1013` |
+| `rail-hi` | oklch(0.988 0.002 0 / 0.65) · `#fafbfca6` | oklch(0.982 0.002 0) · `#f8f9fa` | oklch(1.000 0.000 0 / 0.09) · `#ffffff17` | oklch(0.239 0.010 268) · `#1d1f24` |
 | `rail-rule` | oklch(1 0 0 / 0.5) · `#ffffff80` | same | oklch(1 0 0 / 0.08) · `#ffffff14` | same |
 | `ink` | oklch(0.23 0.02 265) · `#181d27` | same | oklch(0.95 0.008 265) · `#eceef4` | same |
 | `ink-2` | oklch(0.43 0.02 265) · `#4a505b` | same | oklch(0.8 0.012 265) · `#babec6` | same |
@@ -337,8 +341,8 @@ A user setting under Settings > Appearance > "Colour theme", default Graphite si
 
 | Colour theme | Theme | Sidebar glass (`rail`) | Content glass (`ground`) | Accent (`accent`) | Accent text (`accent-ink`) | On accent |
 |---|---|---|---|---|---|---|
-| Graphite signal (default) | light | oklch(0.93 0.020 265 / 0.82) · `#e1e8f6d1` | oklch(0.965 0.010 265 / 0.86) · `#f0f3fadb` | oklch(0.62 0.17 100) · `#9f8600†` | oklch(0.48 0.17 100) · `#755c00†` | oklch(0.18 0.068 100) · `#191100†` |
-| Graphite signal (default) | dark | oklch(0.17 0.017 265 / 0.82) · `#0c0f17d1` | oklch(0.2 0.009 265 / 0.84) · `#14161ad6` | oklch(0.9 0.18 100) · `#fadf27` | oklch(0.9 0.14 100) · `#f4e06a` | oklch(0.18 0.068 100) · `#191100†` |
+| Graphite signal (default) | light | oklch(0.937 0.006 265 / 0.82) · `#e8eaeed1` | oklch(0.967 0.003 265 / 0.86) · `#f3f4f6db` | oklch(0.62 0.17 100) · `#9f8600†` | oklch(0.48 0.17 100) · `#755c00†` | oklch(0.18 0.068 100) · `#191100†` |
+| Graphite signal (default) | dark | oklch(0.173 0.006 271 / 0.82) · `#0f1013d1` | oklch(0.196 0.006 271 / 0.84) · `#141518d6` | oklch(0.9 0.18 100) · `#fadf27` | oklch(0.9 0.14 100) · `#f4e06a` | oklch(0.18 0.068 100) · `#191100†` |
 | Violet frost | light | oklch(0.96 0.01 250 / 0.82) · `#edf2f8d1` | oklch(0.975 0.006 250 / 0.86) · `#f4f7fbdb` | oklch(0.6 0.2 300) · `#955be3` | oklch(0.47 0.18 300) · `#6d37ae` | oklch(0.99 0 0) · `#fcfcfc` |
 | Violet frost | dark | oklch(0.18 0.015 265 / 0.82) · `#0e1218d1` | oklch(0.21 0.015 265 / 0.84) · `#15181fd6` | oklch(0.74 0.15 300) · `#ba93fb` | oklch(0.84 0.1 300) · `#d4bcff†` | oklch(0.18 0.03 298) · `#130f1d` |
 | Smoked quartz | light | oklch(0.93 0.043 50 / 0.82) · `#ffe0cfd1†` | oklch(0.965 0.020 60 / 0.86) · `#fef1e6db` | oklch(0.52 0.16 278) · `#575ac2` | oklch(0.48 0.16 278) · `#4c4db5` | oklch(0.99 0 0) · `#fcfcfc` |
@@ -352,10 +356,10 @@ A user setting under Settings > Appearance > "Colour theme", default Graphite si
 | Glacier | light | oklch(0.93 0.085 240 / 0.82) · `#b4f0ffd1†` | oklch(0.965 0.037 235 / 0.86) · `#ddf8ffdb†` | oklch(0.62 0.2 128) · `#629a00†` | oklch(0.48 0.2 128) · `#3b6f00†` | oklch(0.18 0.068 128) · `#081600†` |
 | Glacier | dark | oklch(0.17 0.068 240 / 0.82) · `#001129d1†` | oklch(0.2 0.034 235 / 0.84) · `#051823d6` | oklch(0.86 0.19 126) · `#b2e648` | oklch(0.86 0.15 126) · `#b9e270` | oklch(0.18 0.068 126) · `#0a1600†` |
 
-Accent clashes to check per preset: Graphite's dark accent (`oklch(0.9 0.18 100)`) sits near partial amber (`oklch(0.82 0.13 85)`); Glacier's chartreuse (hue 128) sits near the printed green (hue 150). Any new preset's accent must be checked against every status and material hue.
+Accent clashes to check per preset: Graphite's yellow accent used to sit near the old partial amber, which is why partial is now orange (hue ~60); Glacier's chartreuse (hue 128) sits near the printed green (hue 150). Any new preset's accent must be checked against every status and material hue.
 
 ### Named Rules
-**The Material Owns the Hue Rule.** Teal, orange, magenta and the ASA neutral belong to materials. They tint previews only and never colour chrome, tags or collections; collections use the neutral layers icon.
+**The Material Owns the Hue Rule.** Teal, orange, magenta, the ASA neutral and Natural belong to materials. They tint previews, the trays behind previews, and the swatch dots of material chips and material quick filters, and nothing else: never chrome, tags or collections; collections use the neutral layers icon.
 
 **The One Signal Rule.** The accent marks selection, focus, the main action, pressed segments and the active sidebar item. Nothing else.
 
@@ -442,7 +446,7 @@ App-drawn: a 2px accent ring outside a 1px gap in the `ground` colour, on exactl
 - **Filter chips:** 10px corners, 24px, pane fill with `rule` border, grey key then value and a remove icon.
 
 ### Model pane (signature)
-Pane glass, bright 1px edge, 14px corners, 8px padding. Inside: an opaque preview in the material ramp on a `tray` well, a parts count when there is more than one file, the name (600, two lines max) with the catalogue number "№ 0412" in `ink-3` mono, recipe chips, and the last print as icon, word and date. Selected (one model): Signal Wash fill plus a 2px accent ring. While several models are picked, the two split: picked panes take the Signal Wash and a check mark in a `primary` circle at the top left of the well, and the 2px ring alone marks the keyboard cursor, so "these are picked" never reads as "the cursor is here". List rows split the same way. Part tiles in the model view mark the part on show with a 2px `ink-2` edge, not the accent. A preview still rendering shows a small "Rendering preview" label and never blocks the grid. The catalogue number is per library and never reused (Max confirmed 2026-11-17); search finds it as `412`, `0412` or `№ 412`.
+Pane glass, bright 1px edge, 14px corners, 8px padding. Inside: an opaque preview in the material ramp on a well tinted by the same material (Material trays), a parts count when there is more than one file, the name (600, two lines max) with the catalogue number "№ 0412" in `ink-3` mono, recipe chips, and the last print as icon, word and date. Selected (one model): Signal Wash fill plus a 2px accent ring. While several models are picked, the two split: picked panes take the Signal Wash and a check mark in a `primary` circle at the top left of the well, and the 2px ring alone marks the keyboard cursor, so "these are picked" never reads as "the cursor is here". List rows split the same way. Part tiles in the model view mark the part on show with a 2px `ink-2` edge, not the accent. A preview still rendering shows a small "Rendering preview" label and never blocks the grid. The catalogue number is per library and never reused (Max confirmed 2026-11-17); search finds it as `412`, `0412` or `№ 412`.
 
 ### Inputs / Fields
 - **Style:** 30px, 10px corners, `ground` fill, `rule` border; units in small mono `ink-3`.
