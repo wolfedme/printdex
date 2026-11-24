@@ -289,7 +289,11 @@ impl App {
                             self.load_model_sync(id),
                         ]);
                     }
-                    Ok(None) => self.org.data = None,
+                    Ok(None) => {
+                        // The model is gone.
+                        self.org.data = None;
+                        self.forget_selection(id);
+                    }
                     Err(e) => self.show_error(&e),
                 }
                 Task::none()

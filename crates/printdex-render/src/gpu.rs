@@ -152,11 +152,11 @@ impl GpuRenderer {
         // Clip-space z needs the depth range, known only after the pass:
         // store raw depth now and convert below.
         let frame = prepare(mesh, normals.as_deref(), opts, |t: Tri| {
-            for k in 0..3 {
-                for v in [t.px[k].x, t.px[k].y, 0.0, t.depth[k]] {
+            for ((px, depth), normal) in t.px.iter().zip(t.depth).zip(t.normal) {
+                for v in [px.x, px.y, 0.0, depth] {
                     bytes.extend_from_slice(&v.to_le_bytes());
                 }
-                bytes.extend(pack(t.normal[k].to_array()).map(|c| c as u8));
+                bytes.extend(pack(normal.to_array()).map(i8::cast_unsigned));
             }
         });
         drop(normals);
@@ -273,7 +273,8 @@ impl GpuRenderer {
             });
             pass.set_pipeline(&self.pipeline);
             for buf in &buffers {
-                let count = (buf.size() as usize / VERTEX_BYTES) as u32;
+                // Buffers hold at most CHUNK_VERTICES vertices.
+                let count = u32::try_from(buf.size() / VERTEX_BYTES as u64).unwrap_or(u32::MAX);
                 pass.set_vertex_buffer(0, buf.slice(..));
                 pass.draw(0..count, 0..1);
             }
@@ -311,26 +312,23 @@ impl GpuRenderer {
         {
             let colors = color_out.slice(..).get_mapped_range();
             let depths = depth_out.slice(..).get_mapped_range();
-            let w = frame.w as usize;
-            for y in 0..frame.h as usize {
-                let base = y * row as usize;
-                for x in 0..w {
-                    let o = base + x * 4;
-                    let z = f32::from_le_bytes([
-                        depths[o],
-                        depths[o + 1],
-                        depths[o + 2],
-                        depths[o + 3],
-                    ]);
+            // (`max(1)`: chunk sizes must not be 0; an empty target reads nothing.)
+            let (w, row) = ((frame.w as usize).max(1), (row as usize).max(1));
+            let unit = |c: u8| f32::from(c) / 255.0 * 2.0 - 1.0;
+            // Readback rows are `row` bytes, padded past the w pixels.
+            let rows = depths.chunks(row).zip(colors.chunks(row));
+            let targets = target.depth.chunks_mut(w).zip(target.normal.chunks_mut(w));
+            for ((depth_row, color_row), (z_row, n_row)) in rows.zip(targets) {
+                let read = depth_row
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(color_row.as_chunks::<4>().0);
+                for ((z, c), (z_out, n_out)) in read.zip(z_row.iter_mut().zip(n_row)) {
+                    let z = f32::from_le_bytes(*z);
                     if z > EMPTY_DEPTH / 2.0 {
-                        let i = y * w + x;
-                        let unit = |c: u8| f32::from(c) / 255.0 * 2.0 - 1.0;
-                        target.depth[i] = z;
-                        target.normal[i] = pack_px(Vec3::new(
-                            unit(colors[o]),
-                            unit(colors[o + 1]),
-                            unit(colors[o + 2]),
-                        ));
+                        *z_out = z;
+                        *n_out = pack_px(Vec3::new(unit(c[0]), unit(c[1]), unit(c[2])));
                     }
                 }
             }
@@ -346,17 +344,16 @@ impl GpuRenderer {
 fn to_clip(bytes: &mut [u8], frame: &Frame) {
     let (w, h) = (frame.w as f32, frame.h as f32);
     let range = (frame.dmax - frame.dmin).max(1e-6);
-    let read = |b: &[u8], i: usize| f32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]);
-    for v in bytes.chunks_mut(VERTEX_BYTES) {
-        let (x, y, d) = (read(v, 0), read(v, 4), read(v, 12));
-        let clip = [
-            x / w * 2.0 - 1.0,
-            1.0 - y / h * 2.0,
-            ((frame.dmax - d) / range).clamp(0.0, 1.0) * 0.999,
-        ];
-        for (k, c) in clip.iter().enumerate() {
-            v[k * 4..k * 4 + 4].copy_from_slice(&c.to_le_bytes());
-        }
+    for v in bytes.as_chunks_mut::<VERTEX_BYTES>().0 {
+        // x, y, z (unused until now), raw depth, then the normal.
+        let [x, y, z, d, ..] = v.as_chunks_mut::<4>().0 else {
+            continue;
+        };
+        let f = |b: &[u8; 4]| f32::from_le_bytes(*b);
+        let (px, py, depth) = (f(x), f(y), f(d));
+        *x = (px / w * 2.0 - 1.0).to_le_bytes();
+        *y = (1.0 - py / h * 2.0).to_le_bytes();
+        *z = (((frame.dmax - depth) / range).clamp(0.0, 1.0) * 0.999).to_le_bytes();
     }
 }
 

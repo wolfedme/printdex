@@ -29,10 +29,12 @@ pub fn decimate(mesh: Mesh, target: usize) -> Mesh {
     if tris <= target {
         return mesh;
     }
+    // Nothing finite to draw.
     let Some(bounds) = mesh.bounds() else {
-        return mesh;
+        return Mesh::default();
     };
-    if target == 0 {
+    // Vertex and cluster ids are `u32`.
+    if target == 0 || u32::try_from(mesh.positions.len()).is_err() {
         return Mesh::default();
     }
     let size = bounds.size();
@@ -48,7 +50,7 @@ pub fn decimate(mesh: Mesh, target: usize) -> Mesh {
     // start from a guess and correct by the square root of the miss.
     // Counting a pass skips duplicate removal, so its count is an upper
     // bound of the final one.
-    let mut cells = ((target as f64 / 2.0).sqrt() as u32).clamp(1, MAX_CELLS);
+    let mut cells = to_u32((target as f64 / 2.0).sqrt()).clamp(1, MAX_CELLS);
     let mut best: Option<(Vec<u32>, usize)> = None;
     for pass in 0..MAX_PASSES {
         let (clusters, n) = welded.cluster(bounds.min, longest, cells);
@@ -62,7 +64,7 @@ pub fn decimate(mesh: Mesh, target: usize) -> Mesh {
                 break;
             }
             let grow = (1.0 / ratio.max(1e-6)).sqrt() * 0.95;
-            cells = ((f64::from(cells) * grow) as u32).clamp(cells + 1, MAX_CELLS);
+            cells = to_u32(f64::from(cells) * grow).clamp(cells + 1, MAX_CELLS);
         } else {
             if best.is_some() {
                 // A coarser grid fitted; refining overshot.
@@ -72,7 +74,7 @@ pub fn decimate(mesh: Mesh, target: usize) -> Mesh {
                 return Mesh::default();
             }
             let shrink = (target as f64 / n as f64).sqrt() * 0.95;
-            let next = ((f64::from(cells) * shrink) as u32).clamp(1, cells - 1);
+            let next = to_u32(f64::from(cells) * shrink).clamp(1, cells - 1);
             // The last pass must fit: fall back to halving.
             cells = if pass + 2 == MAX_PASSES { 1 } else { next };
         }
@@ -83,6 +85,18 @@ pub fn decimate(mesh: Mesh, target: usize) -> Mesh {
     }
 }
 
+/// A float as a `u32`, saturating: negative and NaN give 0, too large
+/// gives `u32::MAX`. Fractions are truncated.
+fn to_u32(v: f64) -> u32 {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "float-to-int `as` saturates (NaN is 0); that is the wanted result"
+    )]
+    let n = v as u32;
+    n
+}
+
 /// The mesh with identical corners merged: unique positions and
 /// triangles as index triples.
 struct Welded {
@@ -91,6 +105,7 @@ struct Welded {
 }
 
 impl Welded {
+    /// `mesh` must have at most `u32::MAX` positions ([`decimate`] checks).
     fn new(mesh: &Mesh) -> Welded {
         let mut index: HashMap<[u32; 3], u32, Fx> =
             HashMap::with_capacity_and_hasher(mesh.positions.len() / 4, Fx::default());
@@ -98,7 +113,12 @@ impl Welded {
         let mut id = |p: &[f32; 3]| {
             *index.entry(p.map(f32::to_bits)).or_insert_with(|| {
                 verts.push(*p);
-                (verts.len() - 1) as u32
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "at most one vertex per position, and decimate() refuses more than u32::MAX positions"
+                )]
+                let id = (verts.len() - 1) as u32;
+                id
             })
         };
         let tris = mesh
@@ -121,8 +141,12 @@ impl Welded {
             .verts
             .iter()
             .map(|p| {
-                let c = |i: usize| u64::from((((p[i] - min[i]) * inv) as u32).min(max));
-                let key = c(0) | (c(1) << 21) | (c(2) << 42);
+                let c = |v: f32, lo: f32| u64::from(to_u32(f64::from((v - lo) * inv)).min(max));
+                let key = c(p[0], min[0]) | (c(p[1], min[1]) << 21) | (c(p[2], min[2]) << 42);
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "at most one cluster per vertex, and there are at most u32::MAX vertices"
+                )]
                 let next = index.len() as u32;
                 *index.entry(key).or_insert(next)
             })
@@ -130,10 +154,7 @@ impl Welded {
         let n = self
             .tris
             .iter()
-            .filter(|t| {
-                let [a, b, c] = t.map(|v| clusters[v as usize]);
-                a != b && b != c && a != c
-            })
+            .filter(|t| corners(t, &clusters).is_some())
             .count();
         (clusters, n)
     }
@@ -144,7 +165,9 @@ impl Welded {
         let count = clusters.iter().max().map_or(0, |m| *m as usize + 1);
         let mut sums = vec![([0.0f64; 3], 0u32); count];
         for (p, c) in self.verts.iter().zip(clusters) {
-            let s = &mut sums[*c as usize];
+            let Some(s) = sums.get_mut(*c as usize) else {
+                continue;
+            };
             for (a, v) in s.0.iter_mut().zip(p) {
                 *a += f64::from(*v);
             }
@@ -154,28 +177,39 @@ impl Welded {
             .iter()
             .map(|(s, n)| {
                 let n = f64::from((*n).max(1));
-                [(s[0] / n) as f32, (s[1] / n) as f32, (s[2] / n) as f32]
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "the mean of f32 values fits in f32; narrowing back is the intent"
+                )]
+                let c = s.map(|v| (v / n) as f32);
+                c
             })
             .collect();
         let mut seen: HashSet<[u32; 3], Fx> = HashSet::default();
         let mut out = Mesh::default();
         for t in &self.tris {
-            let [a, b, c] = t.map(|v| clusters[v as usize]);
-            if a == b || b == c || a == c {
+            let Some(mut key) = corners(t, clusters) else {
                 continue;
-            }
-            let mut key = [a, b, c];
+            };
+            let at = |k: u32| centers.get(k as usize).copied();
+            let (Some(a), Some(b), Some(c)) = (at(key[0]), at(key[1]), at(key[2])) else {
+                continue;
+            };
             key.sort_unstable();
             if seen.insert(key) {
-                out.positions.extend_from_slice(&[
-                    centers[a as usize],
-                    centers[b as usize],
-                    centers[c as usize],
-                ]);
+                out.positions.extend_from_slice(&[a, b, c]);
             }
         }
         out
     }
+}
+
+/// The clusters of triangle `t`'s corners, in its winding; `None` when the
+/// triangle collapses (two corners in one cluster).
+fn corners(t: &[u32; 3], clusters: &[u32]) -> Option<[u32; 3]> {
+    let at = |v: u32| clusters.get(v as usize).copied();
+    let (a, b, c) = (at(t[0])?, at(t[1])?, at(t[2])?);
+    (a != b && b != c && a != c).then_some([a, b, c])
 }
 
 /// A small multiplicative hasher: the keys are already well mixed grid
@@ -283,5 +317,21 @@ mod tests {
         let mut m = sphere(1.0, 40);
         m.push_triangle([-1e30, 0.0, 0.0], [1e30, 0.0, 0.0], [0.0, 1e30, 0.0]);
         assert!(decimate(m, 100).triangles() <= 100);
+    }
+
+    #[test]
+    fn hand_built_meshes_do_not_panic() {
+        // `positions` is public: non-finite values and a partial triangle.
+        let mut m = sphere(1.0, 20);
+        m.positions
+            .extend([[f32::NAN; 3], [f32::INFINITY; 3], [0.0; 3]]);
+        m.positions.extend([[1.0; 3], [2.0; 3]]);
+        let d = decimate(m, 50);
+        assert!(d.triangles() <= 50);
+        assert_eq!(d.positions.len() % 3, 0);
+        let m = Mesh {
+            positions: vec![[f32::NAN; 3]; 30],
+        };
+        assert_eq!(decimate(m, 2).triangles(), 0);
     }
 }

@@ -590,6 +590,13 @@ impl App {
         self.selected = id;
     }
 
+    /// Clears the selection if it is `id`, a model that no longer exists.
+    pub(crate) fn forget_selection(&mut self, id: ModelId) {
+        if self.selected == Some(id) {
+            self.set_selected(None);
+        }
+    }
+
     pub fn title(&self) -> String {
         t("app-title")
     }
@@ -1178,7 +1185,11 @@ impl App {
                         let part = part.min(detail.parts.len().saturating_sub(1));
                         ModelView::Loaded { detail, part }
                     }
-                    Ok(None) => ModelView::Missing(id),
+                    Ok(None) => {
+                        // Gone: keep the notice, drop the selection.
+                        self.forget_selection(id);
+                        ModelView::Missing(id)
+                    }
                     Err(e) => {
                         self.show_error(&e);
                         ModelView::Missing(id)
@@ -1411,6 +1422,10 @@ impl App {
             EngineEvent::LibraryRemoved(id) => {
                 self.libraries.retain(|l| l.id != id);
                 self.counts.remove(&id);
+                let selected_there = self.selected_index().and_then(|i| self.search.hits.get(i));
+                if selected_there.is_some_and(|h| h.library_id == id) {
+                    self.set_selected(None);
+                }
                 let ticket = self.search.refresh();
                 Task::batch([self.load_libraries(), self.run_search(ticket)])
             }
@@ -3188,6 +3203,103 @@ mod tests {
         let _ = a.update(Message::Org(Org::AskForget));
         let _ = a.update(Message::Org(Org::ConfirmForget(id)));
         assert!(!a.org.confirm_forget, "asked once, done");
+    }
+
+    /// Builds the whole window, as iced does every frame.
+    fn build_view(a: &App) {
+        let _ = crate::view::view(a);
+    }
+
+    #[test]
+    fn deleted_selected_model_clears_selection() {
+        // The model's detail comes back empty.
+        let mut a = app();
+        a.boot = Boot::Ready;
+        let h = hit("orc");
+        deliver(&mut a, vec![h.clone()]);
+        let _ = a.update(Message::Select(h.id));
+        let _ = a.update(Message::OpenModel(h.id));
+        let _ = a.update(Message::ModelLoaded(h.id, Ok(None)));
+        assert_eq!(a.selected, None);
+        assert_eq!(a.model, Some(ModelView::Missing(h.id)), "notice stays");
+        build_view(&a);
+        let _ = a.update(Message::Escape);
+        assert_eq!(a.selected, None);
+        build_view(&a);
+
+        // Its data comes back empty.
+        let mut a = app();
+        a.boot = Boot::Ready;
+        deliver(&mut a, vec![h.clone()]);
+        let _ = a.update(Message::Select(h.id));
+        let _ = a.update(Message::OpenModel(h.id));
+        let _ = a.update(Message::Org(Org::DataLoaded(h.id, Ok(None))));
+        assert_eq!(a.selected, None);
+        build_view(&a);
+
+        // Its library is removed.
+        let mut a = app();
+        a.boot = Boot::Ready;
+        let lib = Library {
+            id: h.library_id,
+            ..library("NAS")
+        };
+        a.libraries.push(lib.clone());
+        deliver(&mut a, vec![h.clone()]);
+        let _ = a.update(Message::Select(h.id));
+        let _ = a.update(Message::Engine(EngineEvent::LibraryRemoved(lib.id)));
+        assert_eq!(a.selected, None);
+        build_view(&a);
+
+        // Removing another library keeps it.
+        let mut a = app();
+        a.boot = Boot::Ready;
+        a.libraries.push(lib.clone());
+        deliver(&mut a, vec![h.clone()]);
+        let _ = a.update(Message::Select(h.id));
+        let _ = a.update(Message::Engine(EngineEvent::LibraryRemoved(
+            LibraryId::new(),
+        )));
+        assert_eq!(a.selected, Some(h.id));
+
+        // An empty result for a model that is not selected changes nothing.
+        let other = hit("goblin");
+        let _ = a.update(Message::OpenModel(other.id));
+        let _ = a.update(Message::Select(h.id));
+        let _ = a.update(Message::ModelLoaded(other.id, Ok(None)));
+        assert_eq!(a.selected, Some(h.id));
+    }
+
+    #[test]
+    fn view_builds_for_odd_states() {
+        // No libraries at all.
+        let mut a = app();
+        a.boot = Boot::Ready;
+        assert!(a.libraries.is_empty());
+        build_view(&a);
+        deliver(&mut a, vec![]);
+        build_view(&a);
+        // A model with no parts.
+        let id = ModelId::new();
+        let _ = a.update(Message::OpenModel(id));
+        let _ = a.update(Message::ModelLoaded(id, Ok(Some(detail(id, &[])))));
+        assert!(matches!(a.model, Some(ModelView::Loaded { part: 0, .. })));
+        build_view(&a);
+        let _ = a.update(Message::SelectPart(0));
+        let _ = a.update(Message::Nav(Move::Right));
+        let _ = a.update(Message::OpenPart);
+        build_view(&a);
+        // A window shrunk to one pixel, on each screen.
+        let _ = a.update(Message::WindowResized(Size::new(1.0, 1.0)));
+        build_view(&a);
+        let _ = a.update(Message::Back);
+        deliver(&mut a, vec![hit("a"), hit("b")]);
+        let _ = a.update(Message::Nav(Move::Down));
+        build_view(&a);
+        let _ = a.update(Message::OpenSettings);
+        build_view(&a);
+        let _ = a.update(Message::WindowResized(Size::new(0.0, 0.0)));
+        build_view(&a);
     }
 
     #[test]

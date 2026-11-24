@@ -5,6 +5,8 @@
 
 use glam::Vec3;
 
+use crate::cast::{to_u8, to_usize};
+
 /// An sRGB colour, 8 bits per channel.
 pub type Rgb = [u8; 3];
 
@@ -31,7 +33,8 @@ pub struct Ramp {
 }
 
 const fn hex(v: u32) -> Rgb {
-    [(v >> 16) as u8, (v >> 8) as u8, v as u8]
+    let [_, r, g, b] = v.to_be_bytes();
+    [r, g, b]
 }
 
 impl Material {
@@ -88,8 +91,8 @@ const TOP_FROM: f32 = 0.78;
 
 fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
     let t = t.clamp(0.0, 1.0);
-    let ch = |i: usize| (f32::from(a[i]) + (f32::from(b[i]) - f32::from(a[i])) * t).round() as u8;
-    [ch(0), ch(1), ch(2)]
+    let ch = |a: u8, b: u8| to_u8((f32::from(a) + (f32::from(b) - f32::from(a)) * t).round());
+    [ch(a[0], b[0]), ch(a[1], b[1]), ch(a[2], b[2])]
 }
 
 /// Colour of a surface with unit `normal` (world space) in `ramp`.
@@ -162,14 +165,15 @@ impl SrgbTable {
     pub fn new() -> SrgbTable {
         SrgbTable(
             (0..Self::STEPS)
-                .map(|i| to_srgb(i as f32 / (Self::STEPS - 1) as f32).round() as u8)
+                .map(|i| to_u8(to_srgb(i as f32 / (Self::STEPS - 1) as f32).round()))
                 .collect(),
         )
     }
 
     pub fn get(&self, c: f32) -> u8 {
-        let i = (c.clamp(0.0, 1.0) * (Self::STEPS - 1) as f32 + 0.5) as usize;
-        self.0[i.min(Self::STEPS - 1)]
+        let i = to_usize(c.clamp(0.0, 1.0) * (Self::STEPS - 1) as f32 + 0.5);
+        // Past the end only for c above 1, which the clamp rules out.
+        self.0.get(i).or(self.0.last()).copied().unwrap_or(0)
     }
 }
 
@@ -227,7 +231,11 @@ impl Lighting {
             top
         };
         let s = specular(normal.dot(self.half));
-        [0, 1, 2].map(|i| base[i] + s * self.sheen[i])
+        let mut out = base;
+        for (o, sheen) in out.iter_mut().zip(self.sheen) {
+            *o += s * sheen;
+        }
+        out
     }
 
     /// `color` darkened for ambient occlusion `occ` (0 open, 1 buried).
@@ -248,7 +256,11 @@ pub fn specular(n_dot_h: f32) -> f32 {
 
 fn mix3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     let t = t.clamp(0.0, 1.0);
-    [0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * t)
+    let mut out = a;
+    for (o, b) in out.iter_mut().zip(b) {
+        *o += (b - *o) * t;
+    }
+    out
 }
 
 /// Offsets of the occlusion samples on a unit disc: a golden-angle
@@ -266,12 +278,34 @@ pub fn ao_kernel(turn: f32) -> [[f32; 2]; AO_SAMPLES] {
 
 /// Kernel turn of output pixel (`x`, `y`): four turns in a 2×2 pattern.
 pub fn ao_turn(x: u32, y: u32) -> f32 {
-    [0.0, 0.5, 0.75, 0.25][((x & 1) | ((y & 1) << 1)) as usize] / AO_SAMPLES as f32
+    let turn = match (x & 1, y & 1) {
+        (0, 0) => 0.0,
+        (1, 0) => 0.5,
+        (0, _) => 0.75,
+        _ => 0.25,
+    };
+    turn / AO_SAMPLES as f32
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn colour_lookups_stay_in_range() {
+        let t = SrgbTable::new();
+        assert_eq!(t.get(-1.0), 0);
+        assert_eq!(t.get(f32::NAN), 0);
+        assert_eq!(t.get(2.0), 255);
+        assert_eq!(t.get(f32::INFINITY), 255);
+        assert_eq!(mix([0; 3], [255; 3], f32::NAN), [0; 3]);
+        assert_eq!(mix([0; 3], [200; 3], 2.0), [200; 3]);
+        assert_eq!(hex(0x12_34_56), [0x12, 0x34, 0x56]);
+        assert_eq!(ao_turn(0, 0), 0.0);
+        assert_eq!(ao_turn(3, 0), 0.5 / AO_SAMPLES as f32);
+        assert_eq!(ao_turn(2, 1), 0.75 / AO_SAMPLES as f32);
+        assert_eq!(ao_turn(1, 1), 0.25 / AO_SAMPLES as f32);
+    }
 
     #[test]
     fn ramps_match_design_md() {

@@ -13,12 +13,16 @@ use printdex_mesh::Mesh;
 use printdex_mesh::{PackedNormal, unpack};
 
 use crate::camera::{Basis, Camera, Fit, Framing, Margins};
+use crate::cast::{to_i8, to_i32, to_u32};
 use crate::material::{AO_RADIUS, AO_SAMPLES, Lighting, Material, SrgbTable, ao_kernel, ao_turn};
 
 /// Supersampling factor per axis.
 const SS: u32 = 2;
+/// Offsets of the subsamples of an output pixel, row by row.
+const SUBSAMPLES: [(usize, usize); (SS * SS) as usize] = [(0, 0), (1, 0), (0, 1), (1, 1)];
+const _: () = assert!(SS == 2, "SUBSAMPLES lists a 2x2 block");
 /// Edge line width in supersampled pixels (one output pixel).
-const EDGE_PX: i64 = 2;
+const EDGE_PX: usize = 2;
 
 /// An RGBA image, 8 bits per channel, straight (not premultiplied) alpha,
 /// rows top to bottom.
@@ -34,18 +38,20 @@ impl Image {
         Image {
             width,
             height,
-            rgba: vec![0; (width * height * 4) as usize],
+            rgba: vec![0; width as usize * height as usize * 4],
         }
     }
 
+    /// The pixel at (`x`, `y`); transparent outside the image.
     pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
-        let i = ((y * self.width + x) * 4) as usize;
-        [
-            self.rgba[i],
-            self.rgba[i + 1],
-            self.rgba[i + 2],
-            self.rgba[i + 3],
-        ]
+        if x >= self.width || y >= self.height {
+            return [0; 4];
+        }
+        let i = (y as usize * self.width as usize + x as usize) * 4;
+        match self.rgba.get(i..i + 4) {
+            Some(&[r, g, b, a]) => [r, g, b, a],
+            _ => [0; 4],
+        }
     }
 }
 
@@ -83,11 +89,11 @@ pub(crate) struct Target {
 
 /// Packs a normal of length up to 1 into a [`Target`] pixel.
 pub(crate) fn pack_px(n: Vec3) -> [i8; 4] {
-    // `as` saturates, so a slightly long vector stays in range.
+    // Saturating, so a slightly long vector stays in range.
     [
-        (n.x * 127.0) as i8,
-        (n.y * 127.0) as i8,
-        (n.z * 127.0) as i8,
+        to_i8(n.x * 127.0),
+        to_i8(n.y * 127.0),
+        to_i8(n.z * 127.0),
         0,
     ]
 }
@@ -99,7 +105,7 @@ fn unpack_px(n: [i8; 4]) -> Vec3 {
 
 impl Target {
     pub fn new(w: u32, h: u32) -> Target {
-        let n = (w * h) as usize;
+        let n = w as usize * h as usize;
         Target {
             w,
             h,
@@ -109,11 +115,15 @@ impl Target {
     }
 
     fn covered(&self, i: usize) -> bool {
-        self.depth[i] > f32::NEG_INFINITY
+        self.depth.get(i).is_some_and(|&d| d > f32::NEG_INFINITY)
     }
 
     /// Fills the triangle with pixel corners `p`, depths `d` (larger is
     /// nearer) and corner normals `n` where it is nearer than what is there.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "x < x1 <= w and y < y1 <= h, so row + x < w * h, the length of depth and normal"
+    )]
     pub fn triangle(&mut self, p: [Vec2; 3], d: [f32; 3], n: [Vec3; 3]) {
         let edge = |a: Vec2, b: Vec2, c: Vec2| (b - a).perp_dot(c - a);
         let area = edge(p[0], p[1], p[2]);
@@ -122,10 +132,11 @@ impl Target {
         }
         let min = p[0].min(p[1]).min(p[2]);
         let max = p[0].max(p[1]).max(p[2]);
-        let x0 = (min.x.floor().max(0.0)) as u32;
-        let y0 = (min.y.floor().max(0.0)) as u32;
-        let x1 = (max.x.ceil().min(self.w as f32)) as u32;
-        let y1 = (max.y.ceil().min(self.h as f32)) as u32;
+        let x0 = to_u32(min.x.floor().max(0.0));
+        let y0 = to_u32(min.y.floor().max(0.0));
+        // `min` again: `w as f32` can round up past a huge width.
+        let x1 = to_u32(max.x.ceil().min(self.w as f32)).min(self.w);
+        let y1 = to_u32(max.y.ceil().min(self.h as f32)).min(self.h);
         let inv = 1.0 / area;
         // Flat triangles (all corners alike) pack their normal once.
         let flat = (n[0] == n[1] && n[1] == n[2]).then(|| pack_px(n[0]));
@@ -143,7 +154,7 @@ impl Target {
         for y in y0..y1 {
             let cy = y as f32 + 0.5;
             let (mut w0, mut w1, mut w2) = (e0(cx, cy), e1(cx, cy), e2(cx, cy));
-            let row = (y * self.w) as usize;
+            let row = y as usize * self.w as usize;
             for x in x0..x1 {
                 if w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0 {
                     let z = w0 * d[0] + w1 * d[1] + w2 * d[2];
@@ -164,30 +175,38 @@ impl Target {
     /// Covered pixels next to the background or next to a surface more
     /// than `step` farther away.
     fn edges(&self, step: f32) -> Vec<bool> {
-        let (w, h) = (i64::from(self.w), i64::from(self.h));
+        let (w, h) = (self.w as usize, self.h as usize);
         let mut marks = vec![false; self.depth.len()];
-        for y in 0..h {
-            for x in 0..w {
-                let i = (y * w + x) as usize;
-                if !self.covered(i) {
-                    continue;
-                }
-                let here = self.depth[i];
-                let mut is_edge = false;
-                'n: for r in 1..=EDGE_PX {
-                    for (dx, dy) in [(r, 0), (-r, 0), (0, r), (0, -r)] {
-                        let (nx, ny) = (x + dx, y + dy);
-                        if nx < 0 || ny < 0 || nx >= w || ny >= h {
-                            continue;
-                        }
-                        let n = self.depth[(ny * w + nx) as usize];
-                        if here - n > step * r as f32 {
-                            is_edge = true;
-                            break 'n;
-                        }
+        if w == 0 {
+            return marks;
+        }
+        for (i, (&here, mark)) in self.depth.iter().zip(&mut marks).enumerate() {
+            if !self.covered(i) {
+                continue;
+            }
+            let (x, y) = (i % w, i / w);
+            'n: for r in 1..=EDGE_PX {
+                let neighbours = [
+                    (x.checked_add(r), Some(y)),
+                    (x.checked_sub(r), Some(y)),
+                    (Some(x), y.checked_add(r)),
+                    (Some(x), y.checked_sub(r)),
+                ];
+                for (nx, ny) in neighbours {
+                    let (Some(nx), Some(ny)) = (nx, ny) else {
+                        continue;
+                    };
+                    if nx >= w || ny >= h {
+                        continue;
+                    }
+                    let Some(&n) = self.depth.get(ny * w + nx) else {
+                        continue;
+                    };
+                    if here - n > step * r as f32 {
+                        *mark = true;
+                        break 'n;
                     }
                 }
-                marks[i] = is_edge;
             }
         }
         marks
@@ -197,28 +216,38 @@ impl Target {
     /// geometry rises above the tangent plane of the surface there, from
     /// 0 (open) to 1 (buried). Uses the first covered subsample.
     fn occlusion(&self, i: usize, frame: &Frame, kernel: &[[i32; 2]]) -> f32 {
-        let (px, py) = ((i as u32 % self.w) as i32, (i as u32 / self.w) as i32);
-        let n = unpack_px(self.normal[i]);
+        let (w, h) = (self.w as usize, self.h as usize);
+        let (Some(&normal), Some(&here)) = (self.normal.get(i), self.depth.get(i)) else {
+            return 0.0;
+        };
+        let (px, py) = (i % w, i / w);
+        let n = unpack_px(normal);
         let b = &frame.basis;
         // Depth change per supersampled pixel along x and y on the plane.
         let ne = n.dot(b.toward_eye).max(0.25);
         let per_px = 1.0 / frame.fit.scale.max(1e-9);
         let gx = -n.dot(b.right) / ne * per_px;
         let gy = n.dot(b.up) / ne * per_px;
-        let here = self.depth[i];
         let radius = frame.ao_radius * per_px;
         let bias = 0.06 * radius;
         let mut occ = 0.0;
         for &[ox, oy] in kernel {
-            let (sx, sy) = (px + ox, py + oy);
-            if sx < 0 || sy < 0 || sx >= self.w as i32 || sy >= self.h as i32 {
+            let at = |p: usize, o: i32| {
+                isize::try_from(o)
+                    .ok()
+                    .and_then(|o| p.checked_add_signed(o))
+            };
+            let (Some(sx), Some(sy)) = (at(px, ox), at(py, oy)) else {
+                continue;
+            };
+            if sx >= w || sy >= h {
                 continue;
             }
-            let j = (sy as u32 * self.w + sx as u32) as usize;
-            if !self.covered(j) {
-                continue;
-            }
-            let rise = self.depth[j] - (here + gx * ox as f32 + gy * oy as f32);
+            let there = match self.depth.get(sy * w + sx) {
+                Some(&d) if d > f32::NEG_INFINITY => d,
+                _ => continue,
+            };
+            let rise = there - (here + gx * ox as f32 + gy * oy as f32);
             if rise > bias {
                 // Full weight up to one radius above, none past two, so a
                 // part far in front casts no halo.
@@ -235,16 +264,36 @@ impl Target {
     /// normal; without smooth corner normals those are first blurred a
     /// little across facets (see [`smooth_interior`]). Pixels on an edge
     /// line, a silhouette or a crease shade each subsample.
+    ///
+    /// The target must be `width`×`height` supersampled; any other size
+    /// gives a transparent image.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "checked on entry: the target is (width * SS) x (height * SS) with depth and \
+                  normal of that length; o = y * width + x < width * height, the length of the \
+                  per-pixel buffers and a quarter of img.rgba's; the subsamples of output pixel \
+                  (x, y) are below the target's length; kernels has 4 entries, indexed by 2 bits"
+    )]
     fn resolve(&self, frame: &Frame, width: u32, height: u32) -> Image {
+        let size = self.w as usize * self.h as usize;
+        if Some(self.w) != width.checked_mul(SS)
+            || Some(self.h) != height.checked_mul(SS)
+            || self.depth.len() != size
+            || self.normal.len() != size
+        {
+            return Image::transparent(width, height);
+        }
         let edges = self.edges(frame.edge_step);
-        // Sample offsets in whole supersampled pixels, per 2×2 position.
-        let kernels: [[[i32; 2]; AO_SAMPLES]; 4] = std::array::from_fn(|k| {
-            ao_kernel(ao_turn(k as u32 & 1, k as u32 >> 1))
-                .map(|o| o.map(|v| (v * frame.ao_radius).round() as i32))
-        });
-        let crease = (printdex_mesh::CREASE_DEGREES.to_radians().cos() * 127.0 * 127.0) as i32;
+        // Sample offsets in whole supersampled pixels, per 2×2 position
+        // (indexed by x & 1 | (y & 1) << 1).
+        let kernels: [[[i32; 2]; AO_SAMPLES]; 4] =
+            [(0, 0), (1, 0), (0, 1), (1, 1)].map(|(x, y)| {
+                ao_kernel(ao_turn(x, y)).map(|o| o.map(|v| to_i32((v * frame.ao_radius).round())))
+            });
+        let crease = to_i32(printdex_mesh::CREASE_DEGREES.to_radians().cos() * 127.0 * 127.0);
         let light = &frame.lighting;
-        let px = (width * height) as usize;
+        let (width_px, w_ss) = (width as usize, self.w as usize);
+        let px = width_px * height as usize;
         // Per output pixel: linear colour (or the normal of an interior
         // pixel), covered subsamples, occlusion and the depth it was
         // measured at.
@@ -257,11 +306,10 @@ impl Target {
         let mut last = ([0i8; 4], light.shade(Vec3::ZERO));
         for y in 0..height {
             for x in 0..width {
-                let o = (y * width + x) as usize;
-                let block: [usize; (SS * SS) as usize] = std::array::from_fn(|k| {
-                    let (sx, sy) = (k as u32 % SS, k as u32 / SS);
-                    ((y * SS + sy) * self.w + x * SS + sx) as usize
-                });
+                let o = y as usize * width_px + x as usize;
+                let (x_ss, y_ss) = (x as usize * SS as usize, y as usize * SS as usize);
+                let block: [usize; (SS * SS) as usize] =
+                    SUBSAMPLES.map(|(sx, sy)| (y_ss + sy) * w_ss + x_ss + sx);
                 let n0 = self.normal[block[0]];
                 let inside = block.iter().all(|&i| {
                     let n = self.normal[i];
@@ -338,14 +386,14 @@ impl Target {
         let mut img = Image::transparent(width, height);
         for y in 0..height {
             for x in 0..width {
-                let o = (y * width + x) as usize;
+                let o = y as usize * width_px + x as usize;
                 if cover[o] == 0 {
                     continue;
                 }
                 let (mut total, mut n) = (0.0, 0.0);
                 for ny in y.saturating_sub(1)..(y + 2).min(height) {
                     for nx in x.saturating_sub(1)..(x + 2).min(width) {
-                        let j = (ny * width + nx) as usize;
+                        let j = ny as usize * width_px + nx as usize;
                         if cover[j] > 0 && (depth[j] - depth[o]).abs() < near {
                             total += occ[j];
                             n += 1.0;
@@ -357,7 +405,9 @@ impl Target {
                 for (dst, c) in img.rgba[p..p + 3].iter_mut().zip(c) {
                     *dst = srgb.get(c);
                 }
-                img.rgba[p + 3] = ((cover[o] * 255 + SS * SS / 2) / (SS * SS)) as u8;
+                // At most SS * SS covered subsamples: at most 255.
+                img.rgba[p + 3] =
+                    u8::try_from((cover[o] * 255 + SS * SS / 2) / (SS * SS)).unwrap_or(u8::MAX);
             }
         }
         img
@@ -370,6 +420,12 @@ impl Target {
 /// more than `step` per pixel) and within the crease angle of its own.
 /// Facets of dense meshes are only a few pixels wide, so this hides them
 /// for a fraction of the cost of welding the mesh; hard edges stay crisp.
+/// Buffers that are not all `width`×`height` are left alone.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "the buffers hold w * h entries (checked on entry); i and j are \
+              l * stride + k * next with l < across and k, t < along, below w * h on both passes"
+)]
 fn smooth_interior(
     normals: &mut [[f32; 3]],
     interior: &[bool],
@@ -381,6 +437,10 @@ fn smooth_interior(
     const R: usize = 2;
     let crease = printdex_mesh::CREASE_DEGREES.to_radians().cos();
     let (w, h) = (width as usize, height as usize);
+    let n = w * h;
+    if normals.len() != n || interior.len() != n || depth.len() != n {
+        return;
+    }
     let mut src = normals.to_vec();
     for (along, across, stride, next) in [(w, h, w, 1), (h, w, 1, w)] {
         src.copy_from_slice(normals);
@@ -531,12 +591,17 @@ pub struct Sphere {
 }
 
 impl Sphere {
+    /// The sphere around the finite positions of `mesh` (`None` when it
+    /// has none). Its centre and radius are finite, and the radius is at
+    /// least 1e-3 so it can be divided by.
     pub fn of(mesh: &Mesh) -> Option<Sphere> {
         let b = mesh.bounds()?;
-        let (min, max) = (Vec3::from_array(b.min), Vec3::from_array(b.max));
+        // Halved first so huge coordinates cannot overflow; halving is
+        // exact, so ordinary meshes get the same sphere as `(a + b) / 2`.
+        let (min, max) = (Vec3::from_array(b.min) / 2.0, Vec3::from_array(b.max) / 2.0);
         Some(Sphere {
-            center: (min + max) / 2.0,
-            radius: ((max - min).length() / 2.0).max(1e-3),
+            center: min + max,
+            radius: (max - min).length().clamp(1e-3, f32::MAX),
         })
     }
 }
@@ -805,6 +870,166 @@ pub(crate) mod tests {
         // Interior pixels are not edge-coloured: the centre is a face tone.
         let c = img.pixel(192, 144);
         assert!(c[3] == 255 && !near(c));
+    }
+
+    /// Meshes a malformed file can produce (the loaders drop non-finite
+    /// triangles, but a `Mesh` can be built by hand).
+    fn degenerate_meshes() -> Vec<(&'static str, Mesh)> {
+        let mesh = |positions: Vec<[f32; 3]>| Mesh { positions };
+        vec![
+            ("empty", Mesh::default()),
+            ("three equal points", mesh(vec![[1.0, 2.0, 3.0]; 3])),
+            (
+                "one triangle",
+                mesh(vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]),
+            ),
+            (
+                "NaN coordinate",
+                mesh(vec![[f32::NAN, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]),
+            ),
+            (
+                "points at ±1e30",
+                mesh(vec![
+                    [1e30, 1e30, 1e30],
+                    [-1e30, -1e30, -1e30],
+                    [1e30, -1e30, 0.0],
+                ]),
+            ),
+            (
+                "infinite coordinate",
+                mesh(vec![
+                    [f32::INFINITY, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                ]),
+            ),
+            ("all NaN", mesh(vec![[f32::NAN; 3]; 3])),
+            ("near f32::MAX", mesh(vec![[f32::MAX; 3]; 3])),
+            (
+                "short (two positions)",
+                mesh(vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
+            ),
+        ]
+    }
+
+    #[test]
+    fn degenerate_meshes_render() {
+        let framings = [
+            RenderOptions::default(),
+            RenderOptions {
+                framing: Framing::Orbit {
+                    zoom: 1.0,
+                    pan: Vec2::ZERO,
+                },
+                ..RenderOptions::default()
+            },
+        ];
+        for (name, mesh) in degenerate_meshes() {
+            for opts in &framings {
+                let img = render(&mesh, opts);
+                assert_eq!((img.width, img.height), (384, 288), "{name}");
+                assert_eq!(img.rgba.len(), 384 * 288 * 4, "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn sphere_ignores_non_finite_vertices() {
+        let m = Mesh {
+            positions: vec![
+                [f32::NAN, 0.0, 0.0],
+                [f32::INFINITY, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+                [2.0, 0.0, 0.0],
+            ],
+        };
+        let s = Sphere::of(&m).unwrap();
+        assert_eq!(s.center, Vec3::new(1.0, 0.0, 0.0));
+        assert_eq!(s.radius, 1.0);
+        // Nothing finite: no sphere.
+        let m = Mesh {
+            positions: vec![[f32::NAN; 3], [f32::NEG_INFINITY; 3]],
+        };
+        assert_eq!(Sphere::of(&m), None);
+        // Huge but finite: centre and radius stay finite.
+        let m = Mesh {
+            positions: vec![[f32::MAX; 3], [-f32::MAX; 3]],
+        };
+        let s = Sphere::of(&m).unwrap();
+        assert!(s.center.is_finite() && s.radius.is_finite(), "{s:?}");
+        // A point: the smallest radius.
+        let m = Mesh {
+            positions: vec![[5.0; 3]; 3],
+        };
+        assert_eq!(Sphere::of(&m).unwrap().radius, 1e-3);
+    }
+
+    #[test]
+    fn pixel_outside_the_image_is_transparent() {
+        let mut img = Image::transparent(3, 2);
+        img.rgba.fill(9);
+        assert_eq!(img.pixel(2, 1), [9; 4]);
+        assert_eq!(img.pixel(3, 0), [0; 4]);
+        assert_eq!(img.pixel(0, 2), [0; 4]);
+        assert_eq!(img.pixel(u32::MAX, u32::MAX), [0; 4]);
+        // A hand-built image shorter than its size says.
+        img.rgba.truncate(5);
+        assert_eq!(img.pixel(1, 0), [0; 4]);
+    }
+
+    #[test]
+    fn buffers_of_the_wrong_size_are_not_indexed() {
+        // A target that is not the supersampled output size resolves to
+        // a transparent image.
+        let mut t = Target::new(10, 10);
+        t.triangle(
+            [Vec2::ZERO, Vec2::new(10.0, 0.0), Vec2::new(0.0, 10.0)],
+            [1.0; 3],
+            [Vec3::Z; 3],
+        );
+        let frame = Frame::for_test(10, 10, 0.0, 1.0);
+        let img = t.resolve(&frame, 4, 4);
+        assert_eq!((img.width, img.height), (4, 4));
+        assert!(img.rgba.iter().all(|&b| b == 0));
+        let img = t.resolve(&frame, 5, 5);
+        assert!(img.rgba.iter().any(|&b| b != 0), "the right size draws");
+        // Short depth or normal buffers, too.
+        t.normal.pop();
+        assert!(t.resolve(&frame, 5, 5).rgba.iter().all(|&b| b == 0));
+        // Occlusion outside the target is none.
+        assert_eq!(t.occlusion(1000, &frame, &[[1, 1]]), 0.0);
+        // A target with no width has no edges.
+        assert!(Target::new(0, 4).edges(1.0).is_empty());
+        // Smoothing leaves mismatched buffers alone.
+        let mut normals = vec![[1.0, 0.0, 0.0]; 3];
+        smooth_interior(&mut normals, &[true; 4], &[0.0; 4], 2, 2, 1.0);
+        assert_eq!(normals, vec![[1.0, 0.0, 0.0]; 3]);
+    }
+
+    #[test]
+    fn huge_corners_stay_inside_the_target() {
+        let mut t = Target::new(8, 8);
+        t.triangle(
+            [
+                Vec2::new(-f32::MAX, -f32::MAX),
+                Vec2::new(f32::MAX, -f32::MAX),
+                Vec2::new(0.0, f32::MAX),
+            ],
+            [1.0; 3],
+            [Vec3::Z; 3],
+        );
+        // Its area overflows: skipped.
+        assert!(!(0..t.depth.len()).any(|i| t.covered(i)));
+        t.triangle(
+            [
+                Vec2::new(-1e9, -1e9),
+                Vec2::new(1e9, -1e9),
+                Vec2::new(0.0, 1e9),
+            ],
+            [1.0; 3],
+            [Vec3::Z; 3],
+        );
+        assert!((0..64).all(|i| t.covered(i)), "covers the target");
     }
 
     #[test]

@@ -39,10 +39,11 @@ pub struct Basis {
 
 impl Basis {
     /// Screen position (x right, y up) and depth (larger is nearer).
+    /// Finite for any finite `p` (NaN stays NaN).
     pub fn project(&self, p: Vec3) -> (Vec2, f32) {
         (
-            Vec2::new(p.dot(self.right), p.dot(self.up)),
-            p.dot(self.toward_eye),
+            clamp2(Vec2::new(p.dot(self.right), p.dot(self.up))),
+            p.dot(self.toward_eye).clamp(-f32::MAX, f32::MAX),
         )
     }
 }
@@ -87,7 +88,47 @@ pub struct Fit {
     pub height: f32,
 }
 
+/// `v`, or the nearest finite value: NaN becomes 0 and ±infinity the
+/// largest finite value of that sign. Framing math on huge (but finite)
+/// coordinates can overflow; the result still has to be drawable.
+pub fn finite(v: f32) -> f32 {
+    if v.is_nan() {
+        0.0
+    } else {
+        v.clamp(-f32::MAX, f32::MAX)
+    }
+}
+
+/// [`finite`] for each component.
+pub fn finite2(v: Vec2) -> Vec2 {
+    Vec2::new(finite(v.x), finite(v.y))
+}
+
+/// `v` with infinities clamped to the largest finite values; NaN stays.
+fn clamp2(v: Vec2) -> Vec2 {
+    // Not `Vec2::clamp`: its `max` turns NaN into the lower bound.
+    Vec2::new(
+        v.x.clamp(-f32::MAX, f32::MAX),
+        v.y.clamp(-f32::MAX, f32::MAX),
+    )
+}
+
+/// Middle of `min..max`, without overflowing for huge values (halving is
+/// exact, so it equals `(min + max) / 2` whenever that is finite).
+fn middle(min: Vec2, max: Vec2) -> Vec2 {
+    min / 2.0 + max / 2.0
+}
+
 impl Fit {
+    /// A fit whose every field is finite.
+    fn finite(scale: f32, offset: Vec2, height: f32) -> Fit {
+        Fit {
+            scale: finite(scale),
+            offset: finite2(offset),
+            height: finite(height),
+        }
+    }
+
     pub fn new(min: Vec2, max: Vec2, width: u32, height: u32, margin: f32) -> Fit {
         let (w, h) = (width as f32, height as f32);
         let pad = margin * w.min(h);
@@ -95,12 +136,12 @@ impl Fit {
         let scale = ((w - 2.0 * pad) / size.x)
             .min((h - 2.0 * pad) / size.y)
             .max(0.0);
-        let center = (min + max) / 2.0;
-        Fit {
+        let center = middle(min, max);
+        Fit::finite(
             scale,
-            offset: Vec2::new(w / 2.0, h / 2.0) - center * scale * Vec2::new(1.0, -1.0),
-            height: h,
-        }
+            Vec2::new(w / 2.0, h / 2.0) - center * scale * Vec2::new(1.0, -1.0),
+            h,
+        )
     }
 
     /// Fits `min..max` so the model stands on an imaginary bed: centred
@@ -113,20 +154,21 @@ impl Fit {
         let scale = ((w * (1.0 - 2.0 * margins.side)) / size.x)
             .min((h * (1.0 - margins.top - margins.bottom)) / size.y)
             .max(0.0);
-        let cx = (min.x + max.x) / 2.0;
-        Fit {
+        let cx = middle(min, max).x;
+        Fit::finite(
             scale,
-            offset: Vec2::new(
+            Vec2::new(
                 w / 2.0 - cx * scale,
                 h * (1.0 - margins.bottom) + min.y * scale,
             ),
-            height: h,
-        }
+            h,
+        )
     }
 
-    /// Pixel position of screen point `s`.
+    /// Pixel position of screen point `s`: finite for any finite `s` (NaN
+    /// stays NaN, so a broken triangle is still skipped).
     pub fn to_pixel(&self, s: Vec2) -> Vec2 {
-        Vec2::new(s.x * self.scale, -s.y * self.scale) + self.offset
+        clamp2(Vec2::new(s.x * self.scale, -s.y * self.scale) + self.offset)
     }
 }
 
@@ -201,7 +243,7 @@ impl View {
     /// side is `min_side` pixels; the model follows the pointer.
     pub fn pan_px(&mut self, dx: f32, dy: f32, min_side: f32) {
         if min_side > 0.0 {
-            self.pan += Vec2::new(dx, dy) / min_side;
+            self.pan = finite2(self.pan + Vec2::new(dx, dy) / min_side);
         }
     }
 
@@ -210,7 +252,7 @@ impl View {
     pub fn zoom_lines(&mut self, lines: f32) {
         let next = (self.zoom * ZOOM_PER_LINE.powf(lines)).clamp(MIN_ZOOM, MAX_ZOOM);
         // Keep what is under the image centre there.
-        self.pan *= next / self.zoom;
+        self.pan = finite2(self.pan * (next / self.zoom));
         self.zoom = next;
     }
 
@@ -229,13 +271,13 @@ impl Fit {
     pub fn orbit(center: Vec2, radius: f32, width: u32, height: u32, zoom: f32, pan: Vec2) -> Fit {
         let (w, h) = (width as f32, height as f32);
         let side = w.min(h);
-        let scale = (side * (1.0 - 2.0 * ORBIT_MARGIN) / (2.0 * radius.max(1e-6)) * zoom).max(0.0);
+        let scale = (side * (1.0 - 2.0 * ORBIT_MARGIN) / (2.0 * radius.max(1e-3)) * zoom).max(0.0);
         let at = Vec2::new(w / 2.0, h / 2.0) + pan * side;
-        Fit {
+        Fit::finite(
             scale,
-            offset: at - Vec2::new(center.x * scale, -center.y * scale),
-            height: h,
-        }
+            at - Vec2::new(center.x * scale, -center.y * scale),
+            h,
+        )
     }
 }
 
@@ -321,6 +363,58 @@ mod tests {
         let a = Fit::orbit(Vec2::new(3.0, 4.0), 10.0, 400, 300, 1.0, Vec2::ZERO);
         assert!((a.to_pixel(Vec2::new(3.0, 4.0)) - Vec2::new(200.0, 150.0)).length() < 1e-3);
         assert!((a.scale - 300.0 * (1.0 - 2.0 * ORBIT_MARGIN) / 20.0).abs() < 1e-4);
+    }
+
+    fn finite(f: Fit) -> bool {
+        f.scale.is_finite() && f.offset.is_finite() && f.height.is_finite()
+    }
+
+    #[test]
+    fn fits_are_finite() {
+        let p = Vec2::new(3.0, -4.0);
+        assert!(finite(Fit::new(p, p, 0, 0, 0.5)));
+        assert!(finite(Fit::on_bed(p, p, 0, 0, Margins::THUMBNAIL)));
+        assert!(finite(Fit::orbit(p, 0.0, 0, 0, 0.0, Vec2::ZERO)));
+        // The same with a real image, and with far-off or huge points.
+        for (min, max) in [
+            (p, p),
+            (Vec2::splat(1e30), Vec2::splat(1e30)),
+            (Vec2::splat(-1e30), Vec2::splat(1e30)),
+            (Vec2::splat(f32::MAX), Vec2::splat(f32::MAX)),
+            (Vec2::splat(-f32::MAX), Vec2::splat(f32::MAX)),
+        ] {
+            for (w, h) in [(0, 0), (1, 1), (384, 288), (u32::MAX, u32::MAX)] {
+                for margin in [0.0, 0.5, 1.0] {
+                    let f = Fit::new(min, max, w, h, margin);
+                    assert!(finite(f), "new {min} {max} {w}x{h} {margin}: {f:?}");
+                }
+                let f = Fit::on_bed(min, max, w, h, Margins::THUMBNAIL);
+                assert!(finite(f), "on_bed {min} {max} {w}x{h}: {f:?}");
+                for (radius, zoom) in [(0.0, 0.0), (0.0, 1.0), (1e30, MAX_ZOOM), (f32::MAX, 1.0)] {
+                    let f = Fit::orbit(min, radius, w, h, zoom, Vec2::splat(1e30));
+                    assert!(finite(f), "orbit {min} {radius} {zoom} {w}x{h}: {f:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pan_stays_finite() {
+        let mut v = View::default();
+        for _ in 0..3 {
+            v.pan_px(f32::MAX, -f32::MAX, 1e-30);
+        }
+        assert!(v.pan.is_finite(), "{}", v.pan);
+        v.zoom_lines(3.0);
+        assert!(v.pan.is_finite() && v.zoom.is_finite());
+        let s = Camera::default().basis().project(Vec3::splat(f32::MAX));
+        assert!(s.0.is_finite() && s.1.is_finite(), "{s:?}");
+        let f = Fit::new(Vec2::ZERO, Vec2::ONE, 100, 100, 0.0);
+        assert!(f.to_pixel(Vec2::splat(f32::MAX)).is_finite());
+        assert!(
+            f.to_pixel(Vec2::NAN).is_nan(),
+            "a broken point stays broken"
+        );
     }
 
     #[test]

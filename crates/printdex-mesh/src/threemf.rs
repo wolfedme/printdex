@@ -35,6 +35,10 @@ fn apply(m: &Mat, p: [f32; 3]) -> [f32; 3] {
 }
 
 /// `a` then `b`.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "row < 4, col < 3 and k < 3 index 12-element matrices at most at 11"
+)]
 fn then(a: &Mat, b: &Mat) -> Mat {
     let mut out = [0f32; 12];
     for row in 0..4 {
@@ -329,13 +333,16 @@ fn flatten(
     match obj {
         Object::Mesh { verts, tris } => {
             let s = model.scale;
+            // Indices were checked when the object was read.
             let p = |i: u32| {
-                let v = verts[i as usize];
-                apply(mat, [v[0] * s, v[1] * s, v[2] * s])
+                let v = verts.get(i as usize)?;
+                Some(apply(mat, [v[0] * s, v[1] * s, v[2] * s]))
             };
             out.positions.reserve(tris.len() * 3);
             for t in tris {
-                out.push_triangle(p(t[0]), p(t[1]), p(t[2]));
+                if let (Some(a), Some(b), Some(c)) = (p(t[0]), p(t[1]), p(t[2])) {
+                    out.push_triangle(a, b, c);
+                }
             }
         }
         Object::Components(comps) => {
