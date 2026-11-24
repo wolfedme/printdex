@@ -463,6 +463,13 @@ files-error-other = The files could not be changed. Nothing was lost; see the lo
 updates-ask = Check for updates automatically? Printdex looks at its GitHub releases once a day and sends nothing about you or your library.
 updates-yes = Check automatically
 updates-not-now = Not now
+report-title = Report a bug
+report-body = Opens a new issue on GitHub, or saves a file with logs you can send another way. Nothing is sent without you.
+report-open-issue = Open a GitHub issue
+report-save = Save diagnostics…
+report-saved = Diagnostics saved
+report-save-failed = Could not save diagnostics: { $error }
+
 updates-title = Updates
 updates-auto = Check automatically
 updates-auto-hint = Once a day, from Printdex's GitHub releases. Updates install only when you restart.
@@ -772,3 +779,8 @@ ago-days = { $n ->
     [one] 1 day ago
    *[other] { $n } days ago
 }
+
+crash-notice = Printdex closed unexpectedly last time.
+crash-show = Show file
+crash-report = Report a bug
+crash-dismiss = Dismiss

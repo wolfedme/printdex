@@ -6,6 +6,7 @@
 pub mod backup;
 pub mod cpu;
 pub mod db;
+pub mod diagnostics;
 pub mod engine;
 pub mod error;
 pub mod events;

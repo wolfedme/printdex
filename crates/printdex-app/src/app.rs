@@ -10,6 +10,7 @@ use iced::keyboard::{self, key};
 use iced::widget::scrollable::{AbsoluteOffset, RelativeOffset};
 use iced::widget::{Id, operation};
 use iced::{Event, Size, Subscription, Task, event, window};
+use printdex_core::diagnostics::{self, CrashReport};
 use printdex_core::{
     CoreError, Engine, EngineEvent, Library, LibraryId, LibraryStatus, ModelDetail, ModelHit,
     ModelId, PartInfo, ScanPhase, ScanSummary, Scope, SortOrder, ThumbTarget,
@@ -73,6 +74,30 @@ pub struct Options {
     /// Whether the window was created transparent with an OS blur. Fixed
     /// for the window's lifetime.
     pub glass_window: bool,
+    /// A crash record from an earlier run that the person hasn't seen yet.
+    pub crash: Option<CrashReport>,
+}
+
+/// What Settings > About > Report a bug does.
+#[derive(Clone, Debug)]
+pub enum ReportUx {
+    /// Open a prefilled GitHub issue in the browser.
+    OpenIssue,
+    /// Ask where to save the diagnostics zip, then write it.
+    SaveDiagnostics,
+    /// The zip was written to this path, or why it wasn't.
+    Saved(Result<PathBuf, String>),
+}
+
+/// What the crash notice's buttons do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CrashUx {
+    /// Reveal the crash file in the file manager.
+    Show,
+    /// Open Settings > About, where a bug report is made.
+    Report,
+    /// Hide the notice and remember it was seen.
+    Dismiss,
 }
 
 impl Options {
@@ -86,6 +111,7 @@ impl Options {
             mode: None,
             settings: Settings::default(),
             glass_window: false,
+            crash: None,
         }
     }
 }
@@ -188,6 +214,8 @@ pub struct App {
     pub chips: Vec<Chip>,
     pub filter_menu: bool,
     pub settings_section: SettingsSection,
+    /// The unseen crash the notice above the library is about.
+    pub crash: Option<CrashReport>,
     /// The library whose "Remove" asks for confirmation.
     pub confirm_remove: Option<LibraryId>,
     /// Libraries whose folder can't be reached, with the time it was
@@ -223,6 +251,8 @@ pub enum Message {
     Booted(Result<Engine, Arc<CoreError>>),
     MonitorStarted(Arc<printdex_core::Monitor>),
     Files(crate::files::Fx),
+    CrashNotice(CrashUx),
+    Report(ReportUx),
     Updates(crate::updates::Ux),
     Backup(crate::backup_ui::Bx),
     Sync(crate::sync_ui::Sx),
@@ -305,6 +335,7 @@ impl App {
             .map(crate::apps::Apps::load)
             .unwrap_or_default();
         let settings = options.settings;
+        let crash = options.crash.clone();
         let mut search = SearchState::default();
         search.query.sort = settings.sort;
         App {
@@ -338,6 +369,7 @@ impl App {
             chips: Vec::new(),
             filter_menu: false,
             settings_section: SettingsSection::default(),
+            crash,
             confirm_remove: None,
             offline: HashMap::new(),
             renaming: None,
@@ -1016,6 +1048,26 @@ impl App {
                 self.error = Some(t("error-launch"));
                 Task::none()
             }
+            Message::CrashNotice(ux) => match ux {
+                CrashUx::Show => match self.crash.as_ref().map(|c| c.path.clone()) {
+                    Some(path) => launch(move || opener::reveal(&path)),
+                    None => Task::none(),
+                },
+                CrashUx::Report => {
+                    self.screen = Screen::Settings;
+                    self.settings_section = SettingsSection::About;
+                    Task::none()
+                }
+                CrashUx::Dismiss => {
+                    let log_dir = diagnostics::log_dir(&self.options.data_dir);
+                    if let Err(e) = diagnostics::mark_crashes_seen(&log_dir) {
+                        tracing::warn!(error = %e, "could not remember the crash was seen");
+                    }
+                    self.crash = None;
+                    Task::none()
+                }
+            },
+            Message::Report(ux) => self.on_report(ux),
             Message::OpenSettings => {
                 self.screen = Screen::Settings;
                 Task::none()
@@ -1396,6 +1448,69 @@ impl App {
         }
     }
 
+    fn redactor(&self) -> diagnostics::Redactor {
+        let home = directories::BaseDirs::new().map(|b| b.home_dir().to_path_buf());
+        let roots: Vec<PathBuf> = self.libraries.iter().map(|l| l.path.clone()).collect();
+        diagnostics::Redactor::new(home.as_deref(), &roots)
+    }
+
+    fn system_summary(&self) -> String {
+        let backend = std::env::var("ICED_BACKEND").ok();
+        let renderer = crate::report::renderer_label(self.viewer.software, backend.as_deref());
+        diagnostics::system_summary(env!("CARGO_PKG_VERSION"), renderer)
+    }
+
+    fn on_report(&mut self, ux: ReportUx) -> Task<Message> {
+        match ux {
+            ReportUx::OpenIssue => {
+                // The record from startup, which Dismiss doesn't clear.
+                let url = crate::report::issue_url(
+                    &self.system_summary(),
+                    self.options.crash.as_ref(),
+                    &self.redactor(),
+                );
+                launch(move || opener::open_browser(url))
+            }
+            ReportUx::SaveDiagnostics => {
+                let log_dir = diagnostics::log_dir(&self.options.data_dir);
+                let summary = self.system_summary();
+                let redactor = self.redactor();
+                let name =
+                    crate::report::bundle_name(&jiff::ZonedDateTime::now().date().to_string());
+                Task::perform(
+                    async move {
+                        let dest = rfd::AsyncFileDialog::new()
+                            .set_file_name(name)
+                            .add_filter("zip", &["zip"])
+                            .save_file()
+                            .await?
+                            .path()
+                            .to_path_buf();
+                        let out = dest.clone();
+                        let done = tokio::task::spawn_blocking(move || {
+                            diagnostics::save_bundle(&log_dir, &dest, &summary, &redactor)
+                        })
+                        .await;
+                        Some(match done {
+                            Ok(Ok(())) => Ok(out),
+                            Ok(Err(e)) => Err(e.to_string()),
+                            Err(e) => Err(e.to_string()),
+                        })
+                    },
+                    |r| match r {
+                        Some(r) => Message::Report(ReportUx::Saved(r)),
+                        None => Message::Launched(Ok(())),
+                    },
+                )
+            }
+            ReportUx::Saved(Ok(_)) => self.show_info(t("report-saved")),
+            ReportUx::Saved(Err(e)) => {
+                tracing::warn!(error = %e, "could not save diagnostics");
+                self.show_info(t_args("report-save-failed", &[("error", Arg::str(e))]))
+            }
+        }
+    }
+
     /// A short success note, bottom centre, in the undo toast's place.
     pub(crate) fn show_info(&mut self, text: String) -> Task<Message> {
         if self.files.toast.is_some() {
@@ -1735,6 +1850,66 @@ mod tests {
         assert!(scan_summary_text("Empty", &summary(0, 0, 0, 10), true).starts_with("No models"));
     }
     use printdex_core::ModelKind;
+
+    fn crash_report(dir: &std::path::Path) -> CrashReport {
+        CrashReport {
+            path: dir.join("crash-1.txt"),
+            at_ms: 1,
+            message: "boom".into(),
+            location: "x.rs:1:1".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn report_saved_and_failed_show_a_note() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut a = App::new(Options::in_memory(dir.path().to_path_buf()));
+        let _ = a.update(Message::Report(ReportUx::Saved(Ok(dir
+            .path()
+            .join("d.zip")))));
+        assert_eq!(a.files.info.as_deref(), Some("Diagnostics saved"));
+        a.files.info = None;
+        let _ = a.update(Message::Report(ReportUx::Saved(Err("disk full".into()))));
+        assert!(a.files.info.as_deref().unwrap().contains("disk full"));
+    }
+
+    #[test]
+    fn crash_notice_shows_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let logs = diagnostics::log_dir(tmp.path());
+        std::fs::create_dir_all(&logs).unwrap();
+        let mut a = App::new(Options {
+            crash: Some(crash_report(&logs)),
+            ..Options::in_memory(tmp.path().to_path_buf())
+        });
+        assert!(a.crash.is_some());
+        assert!(
+            crate::view::crash_notice(
+                &a,
+                Palette::new(ColorTheme::default(), Mode::Light, Surface::Solid)
+            )
+            .is_some()
+        );
+        let _ = a.update(Message::CrashNotice(CrashUx::Report));
+        assert_eq!(a.screen, Screen::Settings);
+        assert_eq!(a.settings_section, SettingsSection::About);
+        assert!(a.crash.is_some());
+        let _ = a.update(Message::CrashNotice(CrashUx::Dismiss));
+        assert!(a.crash.is_none());
+        assert!(logs.join(".crash-seen").exists());
+    }
+
+    #[test]
+    fn no_crash_no_notice() {
+        let a = app();
+        assert!(
+            crate::view::crash_notice(
+                &a,
+                Palette::new(ColorTheme::default(), Mode::Light, Surface::Solid)
+            )
+            .is_none()
+        );
+    }
 
     fn app() -> App {
         App::new(Options::in_memory(PathBuf::from("/nonexistent")))

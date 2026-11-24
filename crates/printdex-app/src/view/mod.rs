@@ -24,7 +24,7 @@ pub use organize::notes_editor_id;
 use iced::widget::{Space, button, column, container, row, stack, text};
 use iced::{Alignment, Element, Length};
 
-use crate::app::{App, Boot, Message, Screen};
+use crate::app::{App, Boot, CrashUx, Message, Screen};
 use crate::i18n::{Arg, t, t_args};
 use crate::icons::{self, Icon};
 use crate::settings::ViewMode;
@@ -103,6 +103,9 @@ fn library(app: &App, p: Palette) -> Element<'_, Message> {
 
     let mut top = column![];
     if let Some(b) = update_banner(app, p) {
+        top = top.push(b).push(hairline(p));
+    }
+    if let Some(b) = crash_notice(app, p) {
         top = top.push(b).push(hairline(p));
     }
     if let Some(b) = restore::relink_banner(app, p) {
@@ -209,6 +212,40 @@ fn update_banner(app: &App, p: Palette) -> Option<Element<'_, Message>> {
     for a in actions {
         r = r.push(a);
     }
+    Some(
+        container(r)
+            .padding([theme::S3, theme::S7])
+            .width(Length::Fill)
+            .style(move |_| p.bar())
+            .into(),
+    )
+}
+
+/// Over the library after a crash: says so, with where to read about it.
+pub fn crash_notice(app: &App, p: Palette) -> Option<Element<'_, Message>> {
+    app.crash.as_ref()?;
+    let ghost = |label: String, ux: CrashUx| -> Element<'_, Message> {
+        button(text(label).size(theme::SIZE_CAPTION))
+            .padding([5.0, theme::S4])
+            .style(move |_, status| p.button_ghost(status))
+            .on_press(Message::CrashNotice(ux))
+            .into()
+    };
+    let r = row![
+        icons::icon(Icon::Alert, theme::ICON, p.status.partial),
+        text(t("crash-notice"))
+            .size(theme::SIZE_BODY)
+            .color(p.n.ink)
+            .width(Length::Fill),
+        ghost(t("crash-show"), CrashUx::Show),
+        button(text(t("crash-report")).size(theme::SIZE_CAPTION))
+            .padding([5.0, theme::S4])
+            .style(move |_, status| p.button_primary(status))
+            .on_press(Message::CrashNotice(CrashUx::Report)),
+        ghost(t("crash-dismiss"), CrashUx::Dismiss),
+    ]
+    .spacing(theme::S3)
+    .align_y(Alignment::Center);
     Some(
         container(r)
             .padding([theme::S3, theme::S7])

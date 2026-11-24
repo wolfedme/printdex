@@ -91,15 +91,8 @@ const EXIT_CANCELLED: u8 = 130;
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn,sqlx=error")),
-        )
-        .init();
-
     let cli = Cli::parse();
+    let _log_guard = init_diagnostics(cli.data_dir.as_deref());
     match run(cli).await {
         Ok(code) => code,
         Err(e) => {
@@ -111,6 +104,20 @@ async fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// Logs to stderr and the data folder's log file, and records panics.
+fn init_diagnostics(
+    data_dir: Option<&std::path::Path>,
+) -> Option<tracing_appender::non_blocking::WorkerGuard> {
+    let data_dir = data_dir
+        .map(std::path::Path::to_path_buf)
+        .or_else(Engine::default_data_dir)?;
+    let log_dir = printdex_core::diagnostics::log_dir(&data_dir);
+    let filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "warn,sqlx=error".to_string());
+    let guard = printdex_core::diagnostics::init(&log_dir, &filter);
+    printdex_core::diagnostics::install_panic_hook(log_dir, env!("CARGO_PKG_VERSION"));
+    guard
 }
 
 async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
