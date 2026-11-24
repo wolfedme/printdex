@@ -184,6 +184,7 @@ impl Db {
     /// Deletes library `id` and, by cascade, its models, parts and assets.
     /// Returns whether a row was deleted. Never touches files.
     pub async fn delete_library(&self, id: LibraryId) -> Result<bool> {
+        // Safe because the user confirmed removing the library; its files and sidecars stay on disk.
         let r = sqlx::query!("DELETE FROM libraries WHERE id = ?", id)
             .execute(self.writer())
             .await?;

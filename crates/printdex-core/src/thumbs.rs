@@ -395,6 +395,7 @@ impl ThumbnailService {
     /// shown.
     pub async fn clear_cache(&self) -> std::io::Result<()> {
         let root = self.inner.root().to_owned();
+        // Safe because the cache holds only thumbnails, which are rendered again.
         tokio::task::spawn_blocking(move || match std::fs::remove_dir_all(&root) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),
@@ -454,6 +455,7 @@ fn evict(root: &Path, limit: u64) -> u64 {
         if total <= goal {
             break;
         }
+        // Safe because the cache holds only thumbnails, which are rendered again.
         if std::fs::remove_file(&f.path).is_ok() {
             total -= f.size;
             freed += f.size;
@@ -699,15 +701,10 @@ impl Inner {
     /// Writes `bytes` under `key` with extension `ext`, atomically.
     async fn store(&self, key: &str, ext: &str, bytes: Vec<u8>) -> Option<PathBuf> {
         let path = self.path_for(key, ext);
-        let tmp = path.with_extension(format!("{ext}.tmp{:08x}", fastrand::u32(..)));
         self.dirty.store(true, Ordering::Relaxed);
         tokio::task::spawn_blocking(move || {
             std::fs::create_dir_all(path.parent()?).ok()?;
-            std::fs::write(&tmp, bytes).ok()?;
-            if std::fs::rename(&tmp, &path).is_err() {
-                let _ = std::fs::remove_file(&tmp);
-                return None;
-            }
+            crate::fsx::durable_write(&path, &bytes, crate::fsx::Durability::Cache).ok()?;
             Some(path)
         })
         .await

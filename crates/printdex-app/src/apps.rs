@@ -81,18 +81,35 @@ impl Apps {
     }
 
     /// Loads `dir/apps.toml`; empty when missing or unreadable.
+    #[cfg(test)]
     pub fn load(dir: &Path) -> Apps {
-        std::fs::read_to_string(dir.join(FILE_NAME))
-            .map(|t| Apps::parse(&t))
-            .unwrap_or_default()
+        Apps::load_with_status(dir).0
+    }
+
+    /// Like [`Apps::load`], plus where a file that didn't parse was set
+    /// aside (`apps.toml.broken-<unix_ms>`). A file that can't be read is
+    /// left where it is.
+    pub fn load_with_status(dir: &Path) -> (Apps, crate::settings::ConfigStatus) {
+        Apps::load_with_status_using(dir, crate::settings::set_aside)
+    }
+
+    /// [`Apps::load_with_status`] with the rename supplied (for tests).
+    pub(crate) fn load_with_status_using(
+        dir: &Path,
+        aside: impl FnOnce(&Path) -> Option<PathBuf>,
+    ) -> (Apps, crate::settings::ConfigStatus) {
+        let (text, status) = crate::settings::read_config(&dir.join(FILE_NAME), aside);
+        (text.map_or_else(Apps::default, |t| Apps::parse(&t)), status)
     }
 
     /// Writes `dir/apps.toml` atomically.
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
-        let tmp = dir.join(format!("{FILE_NAME}.tmp"));
-        std::fs::write(&tmp, self.to_toml())?;
-        std::fs::rename(&tmp, dir.join(FILE_NAME))
+        printdex_core::fsx::durable_write(
+            &dir.join(FILE_NAME),
+            self.to_toml().as_bytes(),
+            printdex_core::fsx::Durability::UserData,
+        )
     }
 }
 
@@ -143,6 +160,35 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         a.save(dir.path()).unwrap();
         assert_eq!(Apps::load(dir.path()), a);
+    }
+
+    #[test]
+    fn broken_apps_are_set_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(FILE_NAME), "open-with = [").unwrap();
+        let (a, status) = Apps::load_with_status(dir.path());
+        assert_eq!(a, Apps::default());
+        let crate::settings::ConfigStatus::SetAside(aside) = status else {
+            panic!("not set aside: {status:?}")
+        };
+        assert!(
+            aside
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("apps.toml.broken-")
+        );
+        assert_eq!(std::fs::read_to_string(&aside).unwrap(), "open-with = [");
+        assert!(!dir.path().join(FILE_NAME).exists());
+    }
+
+    #[test]
+    fn failed_apps_set_aside_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(FILE_NAME), "open-with = [").unwrap();
+        let (a, status) = Apps::load_with_status_using(dir.path(), |_| None);
+        assert_eq!(a, Apps::default());
+        assert_eq!(status, crate::settings::ConfigStatus::BrokenKept);
     }
 
     #[test]

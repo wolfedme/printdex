@@ -334,3 +334,49 @@ fn passphrase_change_keeps_snapshots() {
     let repo = Repo::open(&folder(&target), &secrets("new"), &RepoOptions::default()).unwrap();
     assert_eq!(repo.snapshots(&SnapshotFilter::default()).unwrap().len(), 1);
 }
+
+/// A library whose share is unmounted can still look like an empty folder,
+/// so its model backups come out empty. Thinning never forgets the last
+/// snapshot that still holds the models' files.
+#[test]
+fn prune_keeps_last_snapshot_with_models() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (src, empty, target, out) = (
+        tmp.path().join("src"),
+        tmp.path().join("empty"),
+        tmp.path().join("repo"),
+        tmp.path().join("out"),
+    );
+    source(&src);
+    std::fs::create_dir_all(&empty).unwrap();
+    let mut repo =
+        Repo::open_or_init(&folder(&target), &secrets(""), &RepoOptions::default()).unwrap();
+    let full = backup(&mut repo, &src).unwrap();
+    for _ in 0..3 {
+        assert_eq!(backup(&mut repo, &empty).unwrap().files, 0);
+    }
+    // All from today: one daily alone would keep only the newest, empty one.
+    let keep = printdex_core::backup::Keep {
+        daily: 1,
+        weekly: 0,
+        monthly: 0,
+    };
+    let tag = "printdex-models:test";
+    repo.forget(keep, "host-a", tag).unwrap();
+    repo.prune().unwrap();
+    let left: Vec<String> = repo
+        .snapshots(&SnapshotFilter {
+            host: Some("host-a".into()),
+            tag: Some(tag.into()),
+        })
+        .unwrap()
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert!(left.contains(&full.id), "{left:?}");
+    assert_eq!(left.len(), 2, "the newest and the last one with files");
+    repo.restore(&full.id, "", &out, &CancellationToken::new(), None)
+        .unwrap();
+    assert!(out.join("Hook/hook.stl").is_file());
+    repo.check(100.0).unwrap();
+}

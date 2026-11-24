@@ -23,6 +23,7 @@ pub const SIDECARS_FROM_DB: &str = "restore_sidecars_from_db";
 
 const STAGING: &str = "restore-staging";
 const READY: &str = ".ready";
+const SWAP: &str = "SWAP";
 const DB_FILE: &str = "printdex.db";
 const PHOTOS: &str = "photos";
 
@@ -81,30 +82,82 @@ fn join_err(e: tokio::task::JoinError) -> CoreError {
     BackupError::Repository(e.to_string()).into()
 }
 
-/// Moves `from` to `to`, copying when they are on different drives.
-fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
+/// Puts the restored file `from` at `to`. The restored contents first go
+/// to a temporary file next to `to` (renamed, or copied and fsynced from
+/// another drive); only then does a changed `to` (`replace`) go to the
+/// trash and the temporary file take its name, never replacing anything.
+/// A failure before the trash leaves `to` untouched. A failure after it
+/// keeps the restored copy as `.<name>.restored-<uuid>` (which the temp
+/// sweep leaves alone), and the error names it.
+fn put_restored(from: &Path, to: &Path, replace: bool) -> std::io::Result<()> {
+    use crate::fsx::{self, faults, faults::Op};
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    if std::fs::rename(from, to).is_ok() {
-        return Ok(());
+    let tmp = fsx::temp_path(to)?;
+    match fsx::rename_no_replace(from, &tmp) {
+        Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+            fsx::copy_file_durable(from, &tmp)?;
+        }
+        other => other?,
     }
-    std::fs::copy(from, to)?;
-    std::fs::remove_file(from)
+    if replace {
+        // Safe because the restored copy is ready beside it, and the trash keeps the old file.
+        let trashed = faults::perform(Op::Trash, to, || {
+            trash::delete(to).map_err(|e| std::io::Error::other(e.to_string()))
+        });
+        if let Err(e) = trashed {
+            // Safe because it is our own temporary copy; the backup has it.
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+    }
+    let Err(e) = fsx::rename_no_replace(&tmp, to) else {
+        return Ok(());
+    };
+    if !replace {
+        // Safe because it is our own temporary copy, `to` was never there
+        // to lose, and the backup has it.
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    // The old file is in the trash: the restored copy is now the only one
+    // here. Keep it, under a name the temp sweep leaves alone.
+    let kept = fsx::restored_path(to)
+        .and_then(|k| fsx::rename_no_replace(&tmp, &k).map(|()| k))
+        .unwrap_or(tmp);
+    tracing::warn!(
+        path = %to.display(),
+        kept = %kept.display(),
+        error = %e,
+        "the old file is in the trash but the restored copy couldn't take its name"
+    );
+    Err(std::io::Error::new(
+        e.kind(),
+        format!(
+            "{e}; the old file is in the trash and the restored copy is at {}",
+            kept.display()
+        ),
+    ))
 }
 
+/// Moves a file or folder to `to`, which must not exist. On another drive
+/// it copies (verified) and removes the source only after that succeeded.
 fn move_any(from: &Path, to: &Path) -> std::io::Result<()> {
-    if from.is_dir() {
-        if std::fs::rename(from, to).is_ok() {
-            return Ok(());
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    match crate::fsx::rename_no_replace(from, to) {
+        Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+            crate::fsx::copy_tree_verified(from, to)?;
+            // Safe because the source goes only after its verified copy is complete.
+            if from.is_dir() {
+                std::fs::remove_dir_all(from)
+            } else {
+                std::fs::remove_file(from)
+            }
         }
-        for entry in walk_files(from)? {
-            let rel = entry.strip_prefix(from).unwrap_or(&entry);
-            move_file(&entry, &to.join(rel))?;
-        }
-        std::fs::remove_dir_all(from)
-    } else {
-        move_file(from, to)
+        other => other,
     }
 }
 
@@ -151,36 +204,65 @@ fn same_content(a: &Path, b: &Path) -> std::io::Result<bool> {
 /// previous database and photos move to `pre-restore-<time>/`. An
 /// unfinished staging folder is removed. Returns whether a restore was
 /// applied.
+///
+/// Every step can be repeated: the name of the `pre-restore-` folder is
+/// written to `SWAP` first, a live item moves aside only if it is still
+/// there and isn't aside yet, and an item already moved in is no longer in
+/// staging. So a swap that was interrupted finishes on the next run.
 pub(crate) fn apply_staged(data_dir: &Path) -> Result<bool> {
     let staging = data_dir.join(STAGING);
     if !staging.exists() {
         return Ok(false);
     }
-    if !staging.join(READY).exists() || !staging.join(DB_FILE).exists() {
+    if !staging.join(READY).exists() {
         tracing::warn!("removing an unfinished restore");
+        // Safe because without READY the staging folder is a half-done download; the backup has it all.
         std::fs::remove_dir_all(&staging).map_err(|e| io_err(&staging, e))?;
         return Ok(false);
     }
-    let old = data_dir.join(format!("pre-restore-{}", now_ms()));
+    let swap_file = staging.join(SWAP);
+    let existing = std::fs::read_to_string(&swap_file)
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| s.starts_with("pre-restore-") && !s.contains(['/', '\\']));
+    let folder = match existing {
+        Some(name) => name,
+        None => {
+            let name = format!("pre-restore-{}", now_ms());
+            crate::fsx::durable_write(
+                &swap_file,
+                name.as_bytes(),
+                crate::fsx::Durability::UserData,
+            )
+            .map_err(|e| io_err(&swap_file, e))?;
+            name
+        }
+    };
+    let old = data_dir.join(folder);
     std::fs::create_dir_all(&old).map_err(|e| io_err(&old, e))?;
-    for name in [
-        DB_FILE.to_owned(),
-        format!("{DB_FILE}-wal"),
-        format!("{DB_FILE}-shm"),
-        PHOTOS.to_owned(),
-    ] {
-        let from = data_dir.join(&name);
-        if from.exists() {
-            move_any(&from, &old.join(&name)).map_err(|e| io_err(&from, e))?;
-        }
-    }
     for name in [DB_FILE, PHOTOS] {
-        let from = staging.join(name);
-        if from.exists() {
-            let to = data_dir.join(name);
-            move_any(&from, &to).map_err(|e| io_err(&from, e))?;
+        let staged = staging.join(name);
+        if !staged.exists() {
+            continue;
         }
+        let mut live = vec![name.to_owned()];
+        if name == DB_FILE {
+            live.push(format!("{DB_FILE}-wal"));
+            live.push(format!("{DB_FILE}-shm"));
+        }
+        for item in live {
+            let (from, aside) = (data_dir.join(&item), old.join(&item));
+            if from.exists() && !aside.exists() {
+                move_any(&from, &aside).map_err(|e| io_err(&from, e))?;
+            }
+        }
+        let to = data_dir.join(name);
+        move_any(&staged, &to).map_err(|e| io_err(&staged, e))?;
     }
+    // Safe because everything staged has moved in: what is left is SWAP,
+    // READY and the snapshot's settings.toml/apps.toml, which the app
+    // copies into its config folder right after the restore, before the
+    // restart.
     std::fs::remove_dir_all(&staging).map_err(|e| io_err(&staging, e))?;
     tracing::info!(previous = %old.display(), "applied a restored backup");
     Ok(true)
@@ -193,6 +275,7 @@ pub(crate) fn remove_pre_restore(data_dir: &Path) {
     };
     for e in entries.flatten() {
         if e.file_name().to_string_lossy().starts_with("pre-restore-")
+            // Safe because the user chose to restore, and a backup of the restored data now exists.
             && let Err(err) = std::fs::remove_dir_all(e.path())
         {
             tracing::warn!(error = %err, "could not remove data a restore replaced");
@@ -251,6 +334,7 @@ impl Engine {
         remember: bool,
     ) -> Result<RestoredData> {
         let staging = self.data_dir.join(STAGING);
+        // Safe because a staging folder is only a restore not yet applied; the backup still has it.
         if staging.exists() {
             std::fs::remove_dir_all(&staging).map_err(|e| io_err(&staging, e))?;
         }
@@ -297,7 +381,8 @@ impl Engine {
         let (install, target_id) = prepared?;
         self.set_secrets_for(install, target_id, secrets, remember);
 
-        std::fs::write(staging.join(READY), b"").map_err(|e| io_err(&staging, e))?;
+        crate::fsx::durable_write(&staging.join(READY), b"", crate::fsx::Durability::UserData)
+            .map_err(|e| io_err(&staging, e))?;
         let settings_files = ["settings.toml", "apps.toml"]
             .iter()
             .map(|n| staging.join(n))
@@ -490,6 +575,7 @@ impl Engine {
         .map_err(join_err)?;
         match files {
             Ok(f) => Ok((tmp, f)),
+            // Safe because `tmp` holds only files just restored from the backup.
             Err(e) => {
                 let _ = std::fs::remove_dir_all(&tmp);
                 Err(e)
@@ -521,6 +607,7 @@ impl Engine {
                     FileDiff { rel, change }
                 })
                 .collect::<Vec<_>>();
+            // Safe because `tmp` holds only files just restored from the backup.
             let _ = std::fs::remove_dir_all(&tmp);
             out
         })
@@ -568,21 +655,18 @@ impl Engine {
                 } else {
                     FileChange::Changed
                 };
-                match change {
-                    FileChange::Same => continue,
-                    FileChange::Changed => {
-                        trash::delete(&to)
-                            .map_err(|e| io_err(&to, std::io::Error::other(e.to_string())))?;
-                    }
-                    FileChange::Missing => {}
+                if change == FileChange::Same {
+                    continue;
                 }
-                move_file(&from, &to).map_err(|e| io_err(&to, e))?;
+                put_restored(&from, &to, change == FileChange::Changed)
+                    .map_err(|e| io_err(&to, e))?;
                 out.push(FileDiff { rel, change });
             }
             Ok(out)
         })
         .await
         .map_err(join_err);
+        // Safe because `tmp` holds only files just restored from the backup.
         let _ = std::fs::remove_dir_all(&tmp);
         let written = written??;
         if dest == ModelRestoreDest::Original {

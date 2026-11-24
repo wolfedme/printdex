@@ -64,6 +64,7 @@ impl Db {
     /// on a reader connection so writes go on meanwhile).
     pub(crate) async fn copy_into(&self, dest: &Path) -> Result<()> {
         let path = dest.to_string_lossy().into_owned();
+        // Safe because `dest` is the database copy in the backup staging folder.
         let _ = std::fs::remove_file(dest);
         let on_reader = sqlx::query("VACUUM INTO ?")
             .bind(&path)
@@ -71,6 +72,7 @@ impl Db {
             .await;
         if let Err(e) = on_reader {
             tracing::debug!(error = %e, "VACUUM INTO on a reader failed; using the writer");
+            // Safe because `dest` is the database copy in the backup staging folder.
             let _ = std::fs::remove_file(dest);
             sqlx::query("VACUUM INTO ?")
                 .bind(&path)

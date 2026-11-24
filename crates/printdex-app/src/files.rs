@@ -148,6 +148,7 @@ pub fn error_text(e: &CoreError) -> String {
         CoreError::NameTaken(name) => {
             t_args("files-error-taken", &[("name", Arg::str(name.clone()))])
         }
+        CoreError::HasLinks(_) => t("files-error-has-links"),
         CoreError::TargetOffline => t("files-error-offline"),
         CoreError::LibraryOffline(_) => t("files-error-source-offline"),
         CoreError::AlreadyScanning(_) => t("files-error-busy"),
@@ -547,6 +548,10 @@ impl App {
     }
 
     fn save_apps(&self) -> Task<Message> {
+        if self.apps_kept {
+            tracing::warn!("apps.toml is kept (unreadable, or restored); not saving apps");
+            return Task::none();
+        }
         let Some(dir) = self.options.config_dir.clone() else {
             return Task::none();
         };
@@ -587,5 +592,19 @@ impl App {
             },
             Message::Launched,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn links_across_drives_have_their_own_text() {
+        let e = CoreError::HasLinks(std::path::PathBuf::from("Hook"));
+        assert_eq!(
+            error_text(&e),
+            "This folder contains links, which Printdex can't move between drives."
+        );
     }
 }

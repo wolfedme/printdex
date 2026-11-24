@@ -13,6 +13,7 @@ pub mod events;
 pub mod file_ops;
 pub mod fingerprint;
 pub mod fs;
+pub mod fsx;
 pub mod grouping;
 pub mod identity;
 pub mod ids;

@@ -13,6 +13,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -245,16 +246,77 @@ fn write_atomic(path: &Path, text: &str) -> std::io::Result<i64> {
             "model folder not found",
         ));
     }
-    let tmp = dir.join(format!(".printdex-{:016x}.tmp", fastrand::u64(..)));
-    let result = std::fs::write(&tmp, text).and_then(|()| std::fs::rename(&tmp, path));
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result?;
+    set_aside_if_broken(path)?;
+    crate::fsx::durable_write(path, text.as_bytes(), crate::fsx::Durability::UserData)?;
     Ok(std::fs::metadata(path)?
         .modified()
         .map(system_time_to_ns)
         .unwrap_or(0))
+}
+
+/// Renames an existing sidecar that cannot be read as one (bad TOML, wrong
+/// schema, too large) to `.<name>.broken-<unix_ms>` beside it, so the write
+/// that follows doesn't destroy the person's file. Other read errors leave
+/// the file alone. Best effort: a failed rename is logged and the write
+/// goes on. Blocking.
+fn set_aside_if_broken(path: &Path) -> std::io::Result<()> {
+    use std::io::Read;
+    // Broken: too large, not UTF-8, or not a sidecar. Missing: nothing to
+    // do. Any other I/O error is returned, so the write doesn't go over a
+    // file that couldn't be looked at.
+    let broken = match std::fs::File::open(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+        Ok(f) => {
+            if f.metadata()?.len() > MAX_BYTES {
+                true
+            } else {
+                let mut bytes = Vec::new();
+                f.take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
+                match String::from_utf8(bytes) {
+                    Ok(text) => bytes_too_big(&text) || SidecarFile::parse(&text).is_err(),
+                    Err(_) => true,
+                }
+            }
+        }
+    };
+    if !broken {
+        return Ok(());
+    }
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        return Err(std::io::Error::other("sidecar has no folder"));
+    };
+    // Sidecar names start with a dot already.
+    let name = name.to_string_lossy();
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    for n in 0..100 {
+        let suffix = if n == 0 {
+            format!("{at}")
+        } else {
+            format!("{at}-{n}")
+        };
+        let to = dir.join(format!("{name}.broken-{suffix}"));
+        match crate::fsx::rename_no_replace(path, &to) {
+            Ok(()) => {
+                tracing::warn!(from = %path.display(), to = %to.display(), "unreadable sidecar set aside");
+                return Ok(());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => {
+                tracing::warn!(error = %e, path = %path.display(), "could not set aside unreadable sidecar; not overwriting it");
+                return Err(e);
+            }
+        }
+    }
+    Err(std::io::Error::other(
+        "no free name to set the sidecar aside",
+    ))
+}
+
+fn bytes_too_big(text: &str) -> bool {
+    text.len() as u64 > MAX_BYTES
 }
 
 /// Reads a sidecar, refusing files over [`MAX_BYTES`]. Blocking.
@@ -292,13 +354,25 @@ pub async fn write_now(db: &Db, id: ModelId, install: Uuid) -> Result<bool> {
     let text = file.to_toml()?;
     let path = sidecar_path(&target);
     let p = path.clone();
-    let mtime = tokio::task::spawn_blocking(move || write_atomic(&p, &text))
-        .await
-        .map_err(|e| CoreError::Io {
-            path: path.clone(),
-            source: std::io::Error::other(e.to_string()),
-        })?
-        .map_err(|source| CoreError::Io { path, source })?;
+    // A single file's sidecar sits in a folder that outlives the file: if
+    // the file is gone (moved or deleted by hand), write nothing there.
+    let model =
+        (target.kind == ModelKind::SingleFile).then(|| join_rel(&target.root, &target.rel_path));
+    let mtime = tokio::task::spawn_blocking(move || {
+        if model.is_some_and(|m| !m.exists()) {
+            return Ok(None);
+        }
+        write_atomic(&p, &text).map(Some)
+    })
+    .await
+    .map_err(|e| CoreError::Io {
+        path: path.clone(),
+        source: std::io::Error::other(e.to_string()),
+    })?
+    .map_err(|source| CoreError::Io { path, source })?;
+    let Some(mtime) = mtime else {
+        return Ok(false);
+    };
     db.set_sidecar_mtime(id, Some(mtime)).await?;
     Ok(true)
 }
@@ -478,6 +552,9 @@ enum Cmd {
 #[derive(Clone, Debug)]
 pub struct SidecarWriter {
     tx: mpsc::UnboundedSender<Cmd>,
+    /// Held for each write, and by file actions while they move models, so
+    /// a write never lands at a path a model is being moved away from.
+    gate: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl std::fmt::Debug for Cmd {
@@ -493,8 +570,16 @@ impl SidecarWriter {
     /// Starts the writer task. Must be called inside a tokio runtime.
     pub fn start(db: Db, install: Uuid, delay: Duration) -> SidecarWriter {
         let (tx, rx) = mpsc::unbounded_channel();
-        tokio::spawn(run(db, install, delay, rx));
-        SidecarWriter { tx }
+        let gate = Arc::new(tokio::sync::Mutex::new(()));
+        tokio::spawn(run(db, install, delay, rx, gate.clone()));
+        SidecarWriter { tx, gate }
+    }
+
+    /// Waits for a write in progress and keeps new ones from starting until
+    /// the guard is dropped. File actions hold it while they move models
+    /// and update their paths.
+    pub(crate) async fn hold(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.gate.clone().lock_owned().await
     }
 
     /// Writes model `id`'s sidecar after the debounce delay.
@@ -511,7 +596,13 @@ impl SidecarWriter {
     }
 }
 
-async fn run(db: Db, install: Uuid, delay: Duration, mut rx: mpsc::UnboundedReceiver<Cmd>) {
+async fn run(
+    db: Db,
+    install: Uuid,
+    delay: Duration,
+    mut rx: mpsc::UnboundedReceiver<Cmd>,
+    gate: Arc<tokio::sync::Mutex<()>>,
+) {
     let mut pending: HashMap<ModelId, Instant> = HashMap::new();
     loop {
         let next = pending.values().min().copied();
@@ -521,16 +612,16 @@ async fn run(db: Db, install: Uuid, delay: Duration, mut rx: mpsc::UnboundedRece
                     pending.insert(id, Instant::now() + delay);
                 }
                 Some(Cmd::Flush(done)) => {
-                    write_due(&db, install, &mut pending, None).await;
+                    write_due(&db, install, &mut pending, None, &gate).await;
                     let _ = done.send(());
                 }
                 None => {
-                    write_due(&db, install, &mut pending, None).await;
+                    write_due(&db, install, &mut pending, None, &gate).await;
                     return;
                 }
             },
             () = tokio::time::sleep_until(next.unwrap_or_else(Instant::now)), if next.is_some() => {
-                write_due(&db, install, &mut pending, Some(Instant::now())).await;
+                write_due(&db, install, &mut pending, Some(Instant::now()), &gate).await;
             }
         }
     }
@@ -542,6 +633,7 @@ async fn write_due(
     install: Uuid,
     pending: &mut HashMap<ModelId, Instant>,
     now: Option<Instant>,
+    gate: &tokio::sync::Mutex<()>,
 ) {
     let due: Vec<ModelId> = pending
         .iter()
@@ -550,6 +642,7 @@ async fn write_due(
         .collect();
     for id in due {
         pending.remove(&id);
+        let _gate = gate.lock().await;
         match write_now(db, id, install).await {
             Ok(_) => {}
             Err(e) => {

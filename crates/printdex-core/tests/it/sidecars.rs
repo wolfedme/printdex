@@ -448,3 +448,231 @@ async fn sidecar_brings_number_back_after_reinstall() {
     rest.sort_unstable();
     assert_eq!(rest, [4, 5, 6]);
 }
+
+#[tokio::test]
+async fn sidecar_write_failure_keeps_old_sidecar() {
+    use printdex_core::fsx::faults::{Action, Op, arm};
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    let bin = f.model("Bin").await;
+    f.engine.add_tag(bin, "first").await.unwrap();
+    f.engine.flush_sidecars().await;
+    let path = f.root().join("Bin/.printdex.toml");
+    let before = fs::read_to_string(&path).unwrap();
+
+    let g = arm(
+        &f.root(),
+        Op::Rename,
+        0,
+        Action::Fail(std::io::ErrorKind::StorageFull),
+    );
+    f.engine.add_tag(bin, "second").await.unwrap();
+    f.engine.flush_sidecars().await;
+    assert_eq!(g.fired(), 1, "the sidecar write went through fsx");
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
+    let names: Vec<_> = fs::read_dir(f.root().join("Bin"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(names.iter().all(|n| !n.contains("tmp")), "{names:?}");
+}
+
+#[tokio::test]
+async fn scan_sweeps_stale_temp_next_to_sidecar() {
+    const U: &str = "0190aaaabbbbccccddddeeeeffff0000";
+    let f = Fx::new(&["Bin/a.stl", "Other/b.stl"]).await;
+    let bin = f.model("Bin").await;
+    f.engine.add_tag(bin, "x").await.unwrap();
+    f.engine.flush_sidecars().await;
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 3600);
+    let make = |rel: &str, aged: bool| {
+        let p = f.root().join(rel);
+        fs::write(&p, b"partial").unwrap();
+        if aged {
+            fs::File::options()
+                .write(true)
+                .open(&p)
+                .unwrap()
+                .set_modified(old)
+                .unwrap();
+        }
+        p
+    };
+    let stale = make(&format!("Bin/.printdex.toml.tmp-{U}"), true);
+    let fresh = make(&format!("Bin/.fresh.toml.tmp-{U}"), false);
+    // A folder without a sidecar is not visited.
+    let elsewhere = make(&format!("Other/.x.tmp-{U}"), true);
+    f.rescan().await;
+    assert!(!stale.exists(), "stale temp next to a sidecar is swept");
+    assert!(fresh.exists(), "a recent temp may still be in use");
+    assert!(elsewhere.exists());
+}
+
+#[tokio::test]
+async fn broken_sidecar_is_set_aside_before_rewrite() {
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    let bin = f.model("Bin").await;
+    let path = f.root().join("Bin/.printdex.toml");
+    fs::write(&path, "garbage = [").unwrap();
+    // A scan only reads: the broken file stays where it is.
+    f.rescan().await;
+    assert_eq!(fs::read_to_string(&path).unwrap(), "garbage = [");
+    f.engine.add_tag(bin, "kept").await.unwrap();
+    f.engine.flush_sidecars().await;
+    assert_eq!(f.read("Bin/.printdex.toml").tags, ["kept"]);
+    let broken: Vec<_> = fs::read_dir(f.root().join("Bin"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(".printdex.toml.broken-")
+        })
+        .collect();
+    assert_eq!(broken.len(), 1, "{broken:?}");
+    assert_eq!(fs::read_to_string(&broken[0]).unwrap(), "garbage = [");
+    // Neither a later scan nor the temp sweep takes the set-aside file, and
+    // it is never read as a sidecar.
+    f.rescan().await;
+    assert!(broken[0].exists());
+    assert!(!printdex_core::walk::is_sidecar_name(
+        &broken[0].file_name().unwrap().to_string_lossy()
+    ));
+}
+
+#[tokio::test]
+async fn failed_set_aside_keeps_broken_sidecar() {
+    use printdex_core::fsx::faults::{Action, Op, arm};
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    let bin = f.model("Bin").await;
+    let path = f.root().join("Bin/.printdex.toml");
+    fs::write(&path, "garbage = [").unwrap();
+    let g = arm(
+        &f.root(),
+        Op::Rename,
+        0,
+        Action::Fail(std::io::ErrorKind::PermissionDenied),
+    );
+    f.engine.add_tag(bin, "x").await.unwrap();
+    f.engine.flush_sidecars().await;
+    assert_eq!(g.fired(), 1);
+    assert_eq!(fs::read(&path).unwrap(), b"garbage = [");
+}
+
+#[tokio::test]
+async fn non_utf8_sidecar_is_set_aside() {
+    let f = Fx::new(&["Bin/a.stl"]).await;
+    let bin = f.model("Bin").await;
+    let path = f.root().join("Bin/.printdex.toml");
+    let bytes = b"schema = 1\nnotes = \"\xff\xfe\"\n";
+    fs::write(&path, bytes).unwrap();
+    f.engine.add_tag(bin, "x").await.unwrap();
+    f.engine.flush_sidecars().await;
+    assert_eq!(f.read("Bin/.printdex.toml").tags, ["x"]);
+    let kept: Vec<_> = fs::read_dir(f.root().join("Bin"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.to_string_lossy().contains(".printdex.toml.broken-"))
+        .collect();
+    assert_eq!(kept.len(), 1);
+    assert_eq!(fs::read(&kept[0]).unwrap(), bytes);
+}
+
+/// The debounced writer is about to write a single file's sidecar when a
+/// move of that file starts: the sidecar ends up next to the file at its
+/// new place, and none is recreated at the old one (its folder is still
+/// there, so the write would succeed).
+#[tokio::test]
+async fn sidecar_write_after_move_goes_to_new_path() {
+    use printdex_core::fsx::faults::{Action, Op, arm};
+    use std::sync::{Mutex, mpsc};
+    use std::time::Duration;
+    let f = Fx::new(&["Misc/hook.stl", "Misc/Sub/x.stl"]).await;
+    let hook = f.model("hook").await;
+    f.engine.add_tag(hook, "first").await.unwrap();
+    f.engine.flush_sidecars().await;
+    let old = f.root().join("Misc/.hook.stl.printdex.toml");
+    assert!(old.exists());
+
+    let (at_write, writing) = mpsc::channel::<()>();
+    let (moved, wait_moved) = mpsc::channel::<()>();
+    let (at_write, wait_moved) = (Mutex::new(at_write), Mutex::new(wait_moved));
+    let _g = arm(
+        &old,
+        Op::Write,
+        0,
+        Action::Before(Box::new(move |_| {
+            let _ = at_write.lock().unwrap().send(());
+            // The move runs now, unless it has to wait for this write.
+            let _ = wait_moved
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(3));
+        })),
+    );
+    f.engine.add_tag(hook, "second").await.unwrap();
+    let engine = f.engine.clone();
+    let flush = tokio::spawn(async move { engine.flush_sidecars().await });
+    tokio::task::spawn_blocking(move || writing.recv_timeout(Duration::from_secs(10)).unwrap())
+        .await
+        .unwrap();
+    f.engine
+        .move_models(&[hook], f.lib.id, "Away")
+        .await
+        .unwrap();
+    let _ = moved.send(());
+    flush.await.unwrap();
+    f.engine.flush_sidecars().await;
+    assert!(!old.exists(), "a sidecar was recreated at the old path");
+    let mut tags = f.read("Away/.hook.stl.printdex.toml").tags;
+    tags.sort();
+    assert_eq!(tags, ["first", "second"]);
+}
+
+/// A single file moved away by hand before its queued sidecar write: no
+/// sidecar appears next to the file that is gone.
+#[tokio::test]
+async fn sidecar_not_written_next_to_a_file_that_is_gone() {
+    let f = Fx::new(&["Misc/hook.stl", "Misc/Sub/x.stl"]).await;
+    let hook = f.model("hook").await;
+    f.engine.set_notes(hook, "Print flat.").await.unwrap();
+    fs::create_dir_all(f.root().join("Away")).unwrap();
+    fs::rename(
+        f.root().join("Misc/hook.stl"),
+        f.root().join("Away/hook.stl"),
+    )
+    .unwrap();
+    f.engine.flush_sidecars().await;
+    assert!(!f.root().join("Misc/.hook.stl.printdex.toml").exists());
+}
+
+/// A single file moved by hand, leaving its sidecar behind, after the
+/// sidecar was edited outside Printdex: the edit is imported and the
+/// sidecar follows the file instead of being deleted.
+#[tokio::test]
+async fn moved_file_keeps_its_unimported_sidecar_edit() {
+    let f = Fx::new(&["Misc/hook.stl", "Misc/Sub/x.stl"]).await;
+    let hook = f.model("hook").await;
+    f.engine.add_tag(hook, "first").await.unwrap();
+    f.engine.flush_sidecars().await;
+    let mut s = f.read("Misc/.hook.stl.printdex.toml");
+    s.tags.push("edited".into());
+    s.updated_at += 1000;
+    fs::write(
+        f.root().join("Misc/.hook.stl.printdex.toml"),
+        s.to_toml().unwrap(),
+    )
+    .unwrap();
+    // Files at the library root are single-file models.
+    fs::rename(f.root().join("Misc/hook.stl"), f.root().join("hook.stl")).unwrap();
+    let summary = f.rescan().await;
+    assert_eq!(summary.models_moved, 1, "{summary:?}");
+    f.engine.flush_sidecars().await;
+    let mut tags = f.engine.model_data(hook).await.unwrap().unwrap().tags;
+    tags.sort();
+    assert_eq!(tags, ["edited", "first"]);
+    let mut on_disk = f.read(".hook.stl.printdex.toml").tags;
+    on_disk.sort();
+    assert_eq!(on_disk, ["edited", "first"]);
+    assert!(!f.root().join("Misc/.hook.stl.printdex.toml").exists());
+}

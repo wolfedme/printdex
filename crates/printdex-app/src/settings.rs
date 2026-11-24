@@ -117,6 +117,73 @@ fn translucency_key(t: Translucency) -> &'static str {
     }
 }
 
+/// What loading a config file found.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum ConfigStatus {
+    /// Missing, fine, or unreadable for a reason other than its content
+    /// (the file is left alone).
+    #[default]
+    Ok,
+    /// Unusable content (bad TOML, not UTF-8); renamed to this path.
+    SetAside(PathBuf),
+    /// Unusable content, and the rename failed. The file is still there and
+    /// must not be saved over.
+    BrokenKept,
+}
+
+/// Reads a config file as text. `None` for the text means use defaults;
+/// the status says whether the file was set aside (`aside` does the rename)
+/// or is broken and still in place.
+pub(crate) fn read_config(
+    path: &Path,
+    aside: impl FnOnce(&Path) -> Option<PathBuf>,
+) -> (Option<String>, ConfigStatus) {
+    let broken = |aside: Option<PathBuf>| match aside {
+        Some(to) => (None, ConfigStatus::SetAside(to)),
+        None => (None, ConfigStatus::BrokenKept),
+    };
+    match std::fs::read(path) {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(text) if text.parse::<toml::Table>().is_ok() => (Some(text), ConfigStatus::Ok),
+            Ok(_) | Err(_) => broken(aside(path)),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (None, ConfigStatus::Ok),
+        Err(e) => {
+            tracing::warn!(error = %e, path = %path.display(), "could not read config file; using defaults");
+            (None, ConfigStatus::Ok)
+        }
+    }
+}
+
+/// Renames a config file to `<name>.broken-<unix_ms>` beside it and says
+/// where it went; `None` when the rename failed (logged).
+pub(crate) fn set_aside(path: &Path) -> Option<PathBuf> {
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    for n in 0..100 {
+        let suffix = if n == 0 {
+            format!("{at}")
+        } else {
+            format!("{at}-{n}")
+        };
+        let to = path.with_file_name(format!("{name}.broken-{suffix}"));
+        match printdex_core::fsx::rename_no_replace(path, &to) {
+            Ok(()) => {
+                tracing::warn!(from = %path.display(), to = %to.display(), "config file does not parse; set aside");
+                return Some(to);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => {
+                tracing::warn!(error = %e, path = %path.display(), "could not set aside broken config file");
+                return None;
+            }
+        }
+    }
+    None
+}
+
 impl Settings {
     /// The settings file in the OS config folder.
     pub fn default_dir() -> Option<PathBuf> {
@@ -197,24 +264,40 @@ impl Settings {
     }
 
     /// Loads `dir/settings.toml`; defaults when it is missing or unreadable.
+    /// A file that doesn't parse is set aside (see [`Settings::load_with_status`]).
+    #[cfg(test)]
     pub fn load(dir: &Path) -> Settings {
-        match std::fs::read_to_string(dir.join(FILE_NAME)) {
-            Ok(text) => Settings::parse(&text),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Settings::default(),
-            Err(e) => {
-                tracing::warn!(error = %e, "could not read settings; using defaults");
-                Settings::default()
-            }
-        }
+        Settings::load_with_status(dir).0
+    }
+
+    /// Like [`Settings::load`], plus what became of a file with unusable
+    /// content (`settings.toml.broken-<unix_ms>`). A file that can't be read
+    /// at all is left where it is.
+    pub fn load_with_status(dir: &Path) -> (Settings, ConfigStatus) {
+        Settings::load_with_status_using(dir, set_aside)
+    }
+
+    /// [`Settings::load_with_status`] with the rename supplied (for tests).
+    pub(crate) fn load_with_status_using(
+        dir: &Path,
+        aside: impl FnOnce(&Path) -> Option<PathBuf>,
+    ) -> (Settings, ConfigStatus) {
+        let (text, status) = read_config(&dir.join(FILE_NAME), aside);
+        (
+            text.map_or_else(Settings::default, |t| Settings::parse(&t)),
+            status,
+        )
     }
 
     /// Writes `dir/settings.toml` atomically: a temporary file in the same
     /// folder, then a rename over the old one.
     pub fn save(self, dir: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
-        let tmp = dir.join(format!("{FILE_NAME}.tmp"));
-        std::fs::write(&tmp, self.to_toml())?;
-        std::fs::rename(&tmp, dir.join(FILE_NAME))
+        printdex_core::fsx::durable_write(
+            &dir.join(FILE_NAME),
+            self.to_toml().as_bytes(),
+            printdex_core::fsx::Durability::UserData,
+        )
     }
 }
 
@@ -241,6 +324,87 @@ mod tests {
         assert_eq!(Settings::load(dir.path()), Settings::default());
         assert_eq!(Settings::default().color_theme, ColorTheme::GraphiteSignal);
         assert_eq!(Settings::default().mode, ThemeMode::System);
+    }
+
+    #[test]
+    fn settings_save_uses_unique_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        let barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|s| {
+            for _ in 0..2 {
+                s.spawn(|| {
+                    barrier.wait();
+                    for _ in 0..50 {
+                        changed().save(dir.path()).unwrap();
+                    }
+                });
+            }
+        });
+        assert_eq!(Settings::load(dir.path()), changed());
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, [FILE_NAME]);
+    }
+
+    #[test]
+    fn broken_settings_are_set_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(FILE_NAME), "mode = 3 =").unwrap();
+        let (s, status) = Settings::load_with_status(dir.path());
+        assert_eq!(s, Settings::default());
+        let ConfigStatus::SetAside(aside) = status else {
+            panic!("not set aside: {status:?}")
+        };
+        assert!(
+            aside
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("settings.toml.broken-")
+        );
+        assert_eq!(std::fs::read_to_string(&aside).unwrap(), "mode = 3 =");
+        assert!(!dir.path().join(FILE_NAME).exists());
+        // Loading again finds nothing to set aside.
+        assert_eq!(Settings::load_with_status(dir.path()).1, ConfigStatus::Ok);
+    }
+
+    #[test]
+    fn unreadable_settings_are_not_renamed() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory in the file's place: reading fails, parsing never runs.
+        std::fs::create_dir(dir.path().join(FILE_NAME)).unwrap();
+        let (s, status) = Settings::load_with_status(dir.path());
+        assert_eq!(s, Settings::default());
+        assert_eq!(status, ConfigStatus::Ok);
+        assert!(dir.path().join(FILE_NAME).is_dir());
+    }
+
+    #[test]
+    fn non_utf8_settings_are_set_aside() {
+        let dir = tempfile::tempdir().unwrap();
+        let bytes = b"mode = \"\xff\xfe\"\n";
+        std::fs::write(dir.path().join(FILE_NAME), bytes).unwrap();
+        let (s, status) = Settings::load_with_status(dir.path());
+        assert_eq!(s, Settings::default());
+        let ConfigStatus::SetAside(aside) = status else {
+            panic!("not set aside: {status:?}")
+        };
+        assert_eq!(std::fs::read(aside).unwrap(), bytes);
+    }
+
+    #[test]
+    fn failed_set_aside_is_reported_and_keeps_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(FILE_NAME), "mode = 3 =").unwrap();
+        let (s, status) = Settings::load_with_status_using(dir.path(), |_| None);
+        assert_eq!(s, Settings::default());
+        assert_eq!(status, ConfigStatus::BrokenKept);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(FILE_NAME)).unwrap(),
+            "mode = 3 ="
+        );
     }
 
     #[test]

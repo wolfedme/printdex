@@ -79,6 +79,29 @@ pub struct ScanSummary {
     pub partial: bool,
 }
 
+/// Removes stale temporary files (left by a crashed write) from each folder
+/// holding a sidecar the scan walked. Runs on the blocking pool.
+async fn sweep_sidecar_folders(root: &Path, sidecars: &[(String, i64)]) {
+    if sidecars.is_empty() {
+        return;
+    }
+    let root = root.to_path_buf();
+    let folders: std::collections::BTreeSet<String> = sidecars
+        .iter()
+        .map(|(rel, _)| rel.rsplit_once('/').map_or("", |(d, _)| d).to_owned())
+        .collect();
+    let _ = tokio::task::spawn_blocking(move || {
+        for rel in folders {
+            let dir = rel
+                .split('/')
+                .filter(|s| !s.is_empty())
+                .fold(root.clone(), |p, s| p.join(s));
+            crate::fsx::sweep_temp_files(&dir, std::time::Duration::from_secs(3600));
+        }
+    })
+    .await;
+}
+
 /// What a scan needs to read sidecars back: the writer (to rewrite merged
 /// files) and this install's id.
 #[derive(Clone, Copy, Debug)]
@@ -261,6 +284,7 @@ pub(crate) fn clone_error(e: &CoreError) -> CoreError {
         CoreError::Sync(s) => CoreError::Sync(s.clone()),
         CoreError::NameInvalid => CoreError::NameInvalid,
         CoreError::NameTaken(n) => CoreError::NameTaken(n.clone()),
+        CoreError::HasLinks(p) => CoreError::HasLinks(p.clone()),
         CoreError::TargetOffline => CoreError::TargetOffline,
         CoreError::TrashUnavailable => CoreError::TrashUnavailable,
         CoreError::UndoUnavailable => CoreError::UndoUnavailable,
@@ -460,7 +484,8 @@ async fn run_scan_with(
         })
         .collect();
     let groups = group_models_with(&files, &opaque);
-    let sidecar_files = walked_sidecars;
+    let mut sidecar_files = walked_sidecars;
+    sweep_sidecar_folders(&lib.path, &sidecar_files).await;
     progress(ScanPhase::Writing, 0, groups.len());
     let stats = db
         .apply_scan(
@@ -496,10 +521,31 @@ async fn run_scan_with(
         for m in &stats.moved {
             ctx.writer.queue(m.model);
             if m.kind == crate::grouping::ModelKind::SingleFile {
-                // Printdex's own file under the old name; the writer makes
-                // the new one.
+                // The sidecar under the old name follows the file (never
+                // replacing one already there), so an edit made to it
+                // outside Printdex is still imported below; the writer
+                // then rewrites it.
                 let old = crate::sidecar::path_for(&lib.path, &m.from, m.kind);
-                let _ = std::fs::remove_file(old);
+                let new = crate::sidecar::path_for(&lib.path, &m.to, m.kind);
+                let (o, n) = (old.clone(), new.clone());
+                let moved =
+                    tokio::task::spawn_blocking(move || crate::fsx::rename_no_replace(&o, &n))
+                        .await
+                        .unwrap_or_else(|e| Err(std::io::Error::other(e.to_string())));
+                match moved {
+                    Ok(()) => {
+                        let rel = |p: &Path| p.strip_prefix(&lib.path).ok().and_then(rel_string);
+                        if let (Some(from), Some(to)) = (rel(&old), rel(&new)) {
+                            for entry in sidecar_files.iter_mut().filter(|e| e.0 == from) {
+                                entry.0.clone_from(&to);
+                            }
+                        }
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => {
+                        tracing::warn!(path = %old.display(), error = %e, "left a moved file's old sidecar in place");
+                    }
+                }
             }
         }
     }

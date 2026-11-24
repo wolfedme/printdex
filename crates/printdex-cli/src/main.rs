@@ -116,7 +116,11 @@ fn init_diagnostics(
     let log_dir = printdex_core::diagnostics::log_dir(&data_dir);
     let filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "warn,sqlx=error".to_string());
     let guard = printdex_core::diagnostics::init(&log_dir, &filter);
-    printdex_core::diagnostics::install_panic_hook(log_dir, env!("CARGO_PKG_VERSION"));
+    printdex_core::diagnostics::install_panic_hook(
+        log_dir,
+        env!("CARGO_PKG_VERSION"),
+        printdex_core::diagnostics::CrashSource::Cli,
+    );
     guard
 }
 

@@ -71,6 +71,8 @@ pub struct Options {
     pub mode: Option<Mode>,
     /// Settings as loaded at startup.
     pub settings: Settings,
+    /// What loading `settings.toml` found at startup.
+    pub settings_status: crate::settings::ConfigStatus,
     /// Whether the window was created transparent with an OS blur. Fixed
     /// for the window's lifetime.
     pub glass_window: bool,
@@ -110,6 +112,7 @@ impl Options {
             config_dir: None,
             mode: None,
             settings: Settings::default(),
+            settings_status: crate::settings::ConfigStatus::Ok,
             glass_window: false,
             crash: None,
         }
@@ -216,6 +219,13 @@ pub struct App {
     pub settings_section: SettingsSection,
     /// The unseen crash the notice above the library is about.
     pub crash: Option<CrashReport>,
+    /// A startup note (a config file was set aside), shown once at boot.
+    pub config_notice: Option<String>,
+    /// Never save over `settings.toml`: it is broken and couldn't be set
+    /// aside, or a data restore put it back and the restart is pending.
+    pub settings_kept: bool,
+    /// Likewise for `apps.toml`.
+    pub apps_kept: bool,
     /// The library whose "Remove" asks for confirmation.
     pub confirm_remove: Option<LibraryId>,
     /// Libraries whose folder can't be reached, with the time it was
@@ -331,11 +341,25 @@ pub enum Message {
 impl App {
     /// State before the engine is open.
     pub fn new(options: Options) -> App {
-        let apps = options
+        let (apps, apps_status) = options
             .config_dir
             .as_deref()
-            .map(crate::apps::Apps::load)
+            .map(crate::apps::Apps::load_with_status)
             .unwrap_or_default();
+        use crate::settings::ConfigStatus as Cs;
+        let settings_kept = options.settings_status == Cs::BrokenKept;
+        let apps_kept = apps_status == Cs::BrokenKept;
+        let config_notice = if settings_kept {
+            Some(t("settings-broken-kept"))
+        } else if apps_kept {
+            Some(t("apps-broken-kept"))
+        } else if matches!(options.settings_status, Cs::SetAside(_)) {
+            Some(t("settings-broken"))
+        } else if matches!(apps_status, Cs::SetAside(_)) {
+            Some(t("apps-broken"))
+        } else {
+            None
+        };
         let settings = options.settings;
         let crash = options.crash.clone();
         let mut search = SearchState::default();
@@ -372,6 +396,9 @@ impl App {
             filter_menu: false,
             settings_section: SettingsSection::default(),
             crash,
+            config_notice,
+            settings_kept,
+            apps_kept,
             confirm_remove: None,
             offline: HashMap::new(),
             renaming: None,
@@ -406,7 +433,11 @@ impl App {
         let mut app = App::new(options);
         app.updates = crate::updates::Updates::start();
         let check = Task::done(Message::Updates(crate::updates::Ux::Tick));
-        (app, Task::batch([open, mode, check]))
+        let notice = match app.config_notice.take() {
+            Some(text) => app.show_info(text),
+            None => Task::none(),
+        };
+        (app, Task::batch([open, mode, check, notice]))
     }
 
     /// Light or dark right now: the `--mode` override, else the setting,
@@ -1221,6 +1252,10 @@ impl App {
 
     /// Writes the settings file off the UI thread.
     pub(crate) fn save_settings(&self) -> Task<Message> {
+        if self.settings_kept {
+            tracing::warn!("settings.toml is kept (unreadable, or restored); not saving settings");
+            return Task::none();
+        }
         let Some(dir) = self.options.config_dir.clone() else {
             return Task::none();
         };
@@ -1486,11 +1521,13 @@ impl App {
                 let redactor = self.redactor();
                 let name =
                     crate::report::bundle_name(&jiff::ZonedDateTime::now().date().to_string());
+                // Looked up here: the strings are per thread.
+                let filter = t("report-zip-filter");
                 Task::perform(
                     async move {
                         let dest = rfd::AsyncFileDialog::new()
                             .set_file_name(name)
-                            .add_filter("zip", &["zip"])
+                            .add_filter(filter, &["zip"])
                             .save_file()
                             .await?
                             .path()
@@ -1895,6 +1932,24 @@ mod tests {
         a.files.info = None;
         let _ = a.update(Message::Report(ReportUx::Saved(Err("disk full".into()))));
         assert!(a.files.info.as_deref().unwrap().contains("disk full"));
+    }
+
+    #[test]
+    fn kept_broken_settings_block_saving_and_say_so() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = App::new(Options {
+            settings_status: crate::settings::ConfigStatus::BrokenKept,
+            ..Options::in_memory(tmp.path().to_path_buf())
+        });
+        assert!(a.settings_kept);
+        assert!(!a.apps_kept);
+        assert_eq!(a.config_notice, Some(t("settings-broken-kept")));
+        let b = App::new(Options {
+            settings_status: crate::settings::ConfigStatus::SetAside("x".into()),
+            ..Options::in_memory(tmp.path().to_path_buf())
+        });
+        assert!(!b.settings_kept);
+        assert_eq!(b.config_notice, Some(t("settings-broken")));
     }
 
     #[test]

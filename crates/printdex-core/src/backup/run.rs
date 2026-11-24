@@ -263,6 +263,7 @@ impl Engine {
     /// Backs up Printdex's own data.
     async fn backup_data(&self) -> Result<RunSummary> {
         let staging = self.data_dir.join("backup-staging");
+        // Safe because the staging folder holds only copies Printdex made for the last data backup.
         let _ = std::fs::remove_dir_all(&staging);
         std::fs::create_dir_all(&staging).map_err(|source| CoreError::Io {
             path: staging.clone(),
@@ -291,6 +292,7 @@ impl Engine {
             }
             Err(e) => Err(e),
         };
+        // Safe because the staging folder holds only copies Printdex made for this backup.
         let _ = std::fs::remove_dir_all(&staging);
         if out.is_ok() {
             // A new backup exists, so the data a restore replaced can go.

@@ -361,12 +361,28 @@ async fn restore_library_files_into_new_folder() {
 
 #[tokio::test]
 async fn model_restore_trashes_changed_files_only() {
+    use printdex_core::fsx::faults::{self, Action, Op};
     let fx = Fx::new().await;
     let bin = Fx::model(&fx.engine, "Bin").await;
     fx.backup().await;
     let snaps = fx.engine.model_snapshots(bin).await.unwrap();
     assert_eq!(snaps.len(), 1);
-    write(&fx.root(), "Bin/a.stl", "solid broken\nendsolid broken\n");
+    let broken = "solid broken\nendsolid broken\n";
+    write(&fx.root(), "Bin/a.stl", broken);
+    // Keep the system trash out of it: the changed file goes to a folder.
+    let trash = fx.dir.path().join(".test-trash");
+    let trashed = {
+        let trash = trash.clone();
+        faults::arm(
+            &fx.root(),
+            Op::Trash,
+            0,
+            Action::Instead(Box::new(move |p| {
+                fs::create_dir_all(&trash)?;
+                fs::rename(p, trash.join("0"))
+            })),
+        )
+    };
     let b_mtime = fs::metadata(fx.root().join("Bin/b.stl"))
         .unwrap()
         .modified()
@@ -389,6 +405,12 @@ async fn model_restore_trashes_changed_files_only() {
     let rels: Vec<_> = written.iter().map(|d| d.rel.as_str()).collect();
     assert_eq!(rels, ["a.stl"]);
     assert_eq!(
+        trashed.fired(),
+        1,
+        "only the changed file went to the trash"
+    );
+    assert_eq!(fs::read_to_string(trash.join("0")).unwrap(), broken);
+    assert_eq!(
         fs::read_to_string(fx.root().join("Bin/a.stl")).unwrap(),
         "solid a\nendsolid a\n"
     );
@@ -409,6 +431,128 @@ async fn model_restore_trashes_changed_files_only() {
         .unwrap();
     assert!(other.join("Bin/a.stl").is_file());
     assert!(other.join("Bin/b.stl").is_file());
+}
+
+/// Restoring a model's changed file fails while the restored copy is
+/// written (another drive, disk full): the user's file is still there,
+/// untouched and not in the trash, and no temporary file is left.
+#[tokio::test]
+async fn failed_model_restore_keeps_the_original() {
+    use printdex_core::fsx::faults::{self, Action, Op};
+    use std::io::ErrorKind;
+    let fx = Fx::new().await;
+    let bin = Fx::model(&fx.engine, "Bin").await;
+    fx.backup().await;
+    let snaps = fx.engine.model_snapshots(bin).await.unwrap();
+    let broken = "solid broken\nendsolid broken\n";
+    write(&fx.root(), "Bin/a.stl", broken);
+    let root = fx.root();
+    let trash = fx.dir.path().join(".test-trash");
+    let _cross = faults::arm(
+        &root,
+        Op::Rename,
+        0,
+        Action::Fail(ErrorKind::CrossesDevices),
+    );
+    let full = faults::arm(&root, Op::Copy, 0, Action::Fail(ErrorKind::StorageFull));
+    let _trash = {
+        let trash = trash.clone();
+        faults::arm(
+            &root,
+            Op::Trash,
+            0,
+            Action::Instead(Box::new(move |p| {
+                fs::create_dir_all(&trash)?;
+                fs::rename(p, trash.join("0"))
+            })),
+        )
+    };
+    let r = fx
+        .engine
+        .restore_model(bin, &snaps[0].id, ModelRestoreDest::Original)
+        .await;
+    assert!(r.is_err(), "{r:?}");
+    assert_eq!(full.fired(), 1, "the restored copy went through fsx");
+    assert_eq!(
+        fs::read_to_string(fx.root().join("Bin/a.stl")).unwrap(),
+        broken
+    );
+    assert!(!trash.exists(), "nothing went to the trash");
+    let names: Vec<_> = fs::read_dir(fx.root().join("Bin"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(names.iter().all(|n| !n.contains("tmp")), "{names:?}");
+}
+
+/// The changed file went to the trash, then the restored copy can't take
+/// its name: the copy is kept under a name the temp sweep leaves alone,
+/// and the error says where.
+#[tokio::test]
+async fn restored_copy_is_kept_when_the_last_rename_fails() {
+    use printdex_core::fsx::faults::{self, Action, Op};
+    use std::io::ErrorKind;
+    let fx = Fx::new().await;
+    let bin = Fx::model(&fx.engine, "Bin").await;
+    fx.backup().await;
+    let snaps = fx.engine.model_snapshots(bin).await.unwrap();
+    write(&fx.root(), "Bin/a.stl", "solid broken\nendsolid broken\n");
+    let root = fx.root();
+    let trash = fx.dir.path().join(".test-trash");
+    let _trash = {
+        let trash = trash.clone();
+        faults::arm(
+            &root,
+            Op::Trash,
+            0,
+            Action::Instead(Box::new(move |p| {
+                fs::create_dir_all(&trash)?;
+                fs::rename(p, trash.join("0"))
+            })),
+        )
+    };
+    // Rename 0 puts the restored copy beside a.stl; rename 1 would give it
+    // a.stl's name.
+    let last = faults::arm(
+        &root,
+        Op::Rename,
+        1,
+        Action::Fail(ErrorKind::PermissionDenied),
+    );
+    let r = fx
+        .engine
+        .restore_model(bin, &snaps[0].id, ModelRestoreDest::Original)
+        .await;
+    let err = format!("{}", r.unwrap_err());
+    assert_eq!(last.fired(), 1);
+    assert!(
+        trash.join("0").is_file(),
+        "the changed file is in the trash"
+    );
+    let bin_dir = fx.root().join("Bin");
+    let kept: Vec<_> = fs::read_dir(&bin_dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(".a.stl.restored-")
+        })
+        .collect();
+    assert_eq!(
+        kept.len(),
+        1,
+        "{:?}",
+        fs::read_dir(&bin_dir).unwrap().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        fs::read_to_string(&kept[0]).unwrap(),
+        "solid a\nendsolid a\n"
+    );
+    assert!(err.contains(".a.stl.restored-"), "{err}");
+    printdex_core::fsx::sweep_temp_files(&bin_dir, std::time::Duration::ZERO);
+    assert!(kept[0].is_file(), "the sweep leaves it alone");
 }
 
 #[tokio::test]
@@ -445,4 +589,101 @@ async fn deleted_model_restores_from_backup() {
         fx.engine.model_data(hook).await.unwrap().unwrap().tags,
         ["hanger"]
     );
+}
+
+mod swap {
+    use super::*;
+    use printdex_core::fsx::faults::{self, Action, Op};
+    use std::io::ErrorKind;
+
+    /// Creates a database in `dir`, closes it (so nothing is left in its
+    /// `-wal`) and returns its install id.
+    async fn db_at(dir: &Path) -> String {
+        fs::create_dir_all(dir).unwrap();
+        let db = printdex_core::db::Db::open(&dir.join("printdex.db"))
+            .await
+            .unwrap();
+        let id = db.install_id().await.unwrap().to_string();
+        db.close().await;
+        id
+    }
+
+    /// A data folder holding an old install (its database, `photos/old.png`
+    /// and a stale `-wal`) and a staged restore of another one (`photos/new.png`).
+    /// Returns the folder and the old and restored install ids.
+    async fn staged() -> (tempfile::TempDir, PathBuf, String, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        let other = dir.path().join("other");
+        let old_id = db_at(&data).await;
+        write(&data, "photos/old.png", "old photo");
+        write(&data, "printdex.db-wal", "stale wal");
+        let new_id = db_at(&other).await;
+        let staging = data.join("restore-staging");
+        fs::create_dir_all(&staging).unwrap();
+        fs::rename(other.join("printdex.db"), staging.join("printdex.db")).unwrap();
+        write(&staging, "photos/new.png", "new photo");
+        fs::write(staging.join(".ready"), b"").unwrap();
+        (dir, data, old_id, new_id)
+    }
+
+    fn asides(data: &Path) -> Vec<PathBuf> {
+        fs::read_dir(data)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("pre-restore-")
+            })
+            .collect()
+    }
+
+    async fn check_done(data: &Path, new_id: &str) {
+        let engine = Engine::open(data).await.unwrap();
+        assert_eq!(engine.install_id().to_string(), new_id, "restored db");
+        drop(engine);
+        assert!(data.join("photos/new.png").is_file());
+        assert!(!data.join("photos/old.png").exists());
+        assert!(!data.join("restore-staging").exists());
+        let aside = asides(data);
+        assert_eq!(aside.len(), 1, "one pre-restore folder");
+        assert!(aside[0].join("printdex.db").is_file());
+        assert!(aside[0].join("photos/old.png").is_file());
+        assert_eq!(
+            fs::read_to_string(aside[0].join("printdex.db-wal")).unwrap(),
+            "stale wal"
+        );
+    }
+
+    #[tokio::test]
+    async fn interrupted_swap_keeps_restored_photos() {
+        for k in 0..50 {
+            let (_dir, data, _old, new_id) = staged().await;
+            let guard = faults::arm(&data, Op::Rename, k, Action::Fail(ErrorKind::Other));
+            let first = Engine::open(&data).await;
+            let fired = guard.fired();
+            drop(guard);
+            if fired == 0 {
+                assert!(first.is_ok(), "k={k}: no fault, so it finishes");
+                drop(first);
+                check_done(&data, &new_id).await;
+                assert!(k > 0, "the fault fired at least once");
+                return;
+            }
+            assert!(first.is_err(), "k={k}: the fault surfaces");
+            check_done(&data, &new_id).await;
+        }
+        panic!("the swap never ran without hitting the fault");
+    }
+
+    #[tokio::test]
+    async fn swap_twice_is_noop() {
+        let (_dir, data, _old, new_id) = staged().await;
+        drop(Engine::open(&data).await.unwrap());
+        check_done(&data, &new_id).await;
+        check_done(&data, &new_id).await;
+    }
 }

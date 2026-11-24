@@ -48,7 +48,8 @@ pub fn store_photo(
     })?;
     let name = format!("{photo}.{ext}");
     let dest = dir.join(&name);
-    std::fs::copy(src, &dest).map_err(|source| CoreError::Io { path: dest, source })?;
+    crate::fsx::copy_file_durable(src, &dest)
+        .map_err(|source| CoreError::Io { path: dest, source })?;
     Ok(name)
 }
 
@@ -56,6 +57,7 @@ pub fn store_photo(
 /// logged.
 pub fn delete_files(paths: &[std::path::PathBuf]) {
     for p in paths {
+        // Safe because callers pass only photos whose rows a delete (here or synced) already removed.
         if let Err(e) = std::fs::remove_file(p)
             && e.kind() != std::io::ErrorKind::NotFound
         {

@@ -1,8 +1,8 @@
 //! Log file, crash records and the diagnostics bundle.
 //!
 //! [`init`] installs the tracing subscriber (stderr plus a daily rolling log
-//! file), [`install_panic_hook`] writes a `crash-<unix_ms>.txt` for every
-//! panic, and [`save_bundle`] zips the newest logs and crash records, with
+//! file), [`install_panic_hook`] writes a `crash-<unix_ms>.txt` (the app)
+//! or `cli-crash-<unix_ms>.txt` (the command line) for every panic, and [`save_bundle`] zips the newest logs and crash records, with
 //! user paths removed by a [`Redactor`], for a bug report.
 
 use std::io::{self, Write};
@@ -16,6 +16,7 @@ use tracing_subscriber::{EnvFilter, Layer};
 
 const LOG_PREFIX: &str = "printdex.log";
 const CRASH_PREFIX: &str = "crash-";
+const CLI_CRASH_PREFIX: &str = "cli-crash-";
 const CRASH_SUFFIX: &str = ".txt";
 const SEEN_MARKER: &str = ".crash-seen";
 const MAX_LOG_FILES: usize = 7;
@@ -74,9 +75,56 @@ fn unix_ms() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
+/// Which program a crash record comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrashSource {
+    /// The desktop app: `crash-<unix_ms>.txt`, shown by the app's crash
+    /// notice ([`unseen_crash`]).
+    App,
+    /// The command line: `cli-crash-<unix_ms>.txt`, only bundled.
+    Cli,
+}
+
+impl CrashSource {
+    fn prefix(self) -> &'static str {
+        match self {
+            CrashSource::App => CRASH_PREFIX,
+            CrashSource::Cli => CLI_CRASH_PREFIX,
+        }
+    }
+}
+
+/// Creates `<prefix><at>.txt` holding `body`, never replacing a file: a
+/// second crash in the same millisecond gets `<prefix><at>-1.txt`, then
+/// `-2`, and so on.
+fn write_crash_file(dir: &Path, prefix: &str, at: i64, body: &str) -> io::Result<PathBuf> {
+    let mut n = 0u32;
+    loop {
+        let name = if n == 0 {
+            format!("{prefix}{at}{CRASH_SUFFIX}")
+        } else {
+            format!("{prefix}{at}-{n}{CRASH_SUFFIX}")
+        };
+        let path = dir.join(name);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut f) => {
+                f.write_all(body.as_bytes())?;
+                return Ok(path);
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists && n < 1000 => n += 1,
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 /// Writes one crash file. Never panics.
 fn write_crash(
     dir: &Path,
+    source: CrashSource,
     version: &str,
     message: &str,
     location: &str,
@@ -84,7 +132,6 @@ fn write_crash(
 ) -> io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
     let at = unix_ms();
-    let path = dir.join(format!("{CRASH_PREFIX}{at}{CRASH_SUFFIX}"));
     let backtrace = std::backtrace::Backtrace::force_capture();
     let body = format!(
         "Printdex {version} crashed\ntime: {at}\nos: {} {}\nthread: {thread}\nmessage: {}\nlocation: {location}\nbacktrace:\n{backtrace}\n",
@@ -92,8 +139,7 @@ fn write_crash(
         std::env::consts::ARCH,
         message.replace(['\r', '\n'], " "),
     );
-    std::fs::write(&path, body)?;
-    Ok(path)
+    write_crash_file(dir, source.prefix(), at, &body)
 }
 
 fn payload_message(payload: &(dyn std::any::Any + Send)) -> String {
@@ -108,9 +154,9 @@ fn format_location(l: &std::panic::Location<'_>) -> String {
     format!("{}:{}:{}", l.file(), l.line(), l.column())
 }
 
-/// Writes `crash-<unix_ms>.txt` into `log_dir` on every panic, then calls
-/// the previous hook.
-pub fn install_panic_hook(log_dir: PathBuf, version: &'static str) {
+/// Writes a crash file for `source` into `log_dir` on every panic, then
+/// calls the previous hook.
+pub fn install_panic_hook(log_dir: PathBuf, version: &'static str, source: CrashSource) {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let message = payload_message(info.payload());
@@ -119,7 +165,7 @@ pub fn install_panic_hook(log_dir: PathBuf, version: &'static str) {
             .map_or_else(|| "unknown".to_string(), format_location);
         let thread = std::thread::current();
         let name = thread.name().unwrap_or("unnamed");
-        let _ = write_crash(&log_dir, version, &message, &location, name);
+        let _ = write_crash(&log_dir, source, version, &message, &location, name);
         previous(info);
     }));
 }
@@ -137,32 +183,35 @@ pub struct CrashReport {
     pub location: String,
 }
 
-fn crash_files(dir: &Path) -> Vec<(i64, PathBuf)> {
+/// The `<prefix><ms>[-<n>].txt` files in `dir` with their time, newest
+/// first (within a millisecond, the highest `n` first).
+fn crash_files(dir: &Path, prefix: &str) -> Vec<(i64, PathBuf)> {
     let Ok(read) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
-    let mut files: Vec<(i64, PathBuf)> = read
+    let mut files: Vec<((i64, u32), PathBuf)> = read
         .flatten()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
-            let ms = name
-                .strip_prefix(CRASH_PREFIX)?
-                .strip_suffix(CRASH_SUFFIX)?
-                .parse()
-                .ok()?;
-            Some((ms, e.path()))
+            let stem = name.strip_prefix(prefix)?.strip_suffix(CRASH_SUFFIX)?;
+            let (ms, n) = match stem.split_once('-') {
+                Some((ms, n)) => (ms.parse().ok()?, n.parse().ok()?),
+                None => (stem.parse().ok()?, 0),
+            };
+            Some(((ms, n), e.path()))
         })
         .collect();
-    files.sort_by(|a, b| b.cmp(a));
-    files
+    files.sort_by_key(|f| std::cmp::Reverse(f.0));
+    files.into_iter().map(|((ms, _), p)| (ms, p)).collect()
 }
 
-/// The newest crash file written after the last [`mark_crashes_seen`].
+/// The newest app crash file (`crash-*`, not the command line's) written
+/// after the last [`mark_crashes_seen`].
 pub fn unseen_crash(log_dir: &Path) -> Option<CrashReport> {
     let seen = std::fs::metadata(log_dir.join(SEEN_MARKER))
         .and_then(|m| m.modified())
         .ok();
-    let (at_ms, path) = crash_files(log_dir).into_iter().next()?;
+    let (at_ms, path) = crash_files(log_dir, CRASH_PREFIX).into_iter().next()?;
     if let Some(seen) = seen {
         let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok()?;
         if modified <= seen {
@@ -288,7 +337,8 @@ pub fn system_summary(version: &str, renderer: &str) -> String {
 }
 
 /// Writes a zip with `summary.txt`, the 3 newest `printdex.log*` files and
-/// the 5 newest `crash-*.txt`, each passed through `redactor`.
+/// the 5 newest crash records (`crash-*.txt` and `cli-crash-*.txt`), each
+/// passed through `redactor`.
 pub fn save_bundle(
     log_dir: &Path,
     dest: &Path,
@@ -305,7 +355,11 @@ pub fn save_bundle(
     // Dated suffixes sort chronologically, so the largest names are newest.
     logs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
     logs.truncate(BUNDLE_LOGS);
-    let crashes: Vec<PathBuf> = crash_files(log_dir)
+    let mut crashes = crash_files(log_dir, CRASH_PREFIX);
+    crashes.extend(crash_files(log_dir, CLI_CRASH_PREFIX));
+    // Stable: within a millisecond each prefix keeps its newest-first order.
+    crashes.sort_by_key(|c| std::cmp::Reverse(c.0));
+    let crashes: Vec<PathBuf> = crashes
         .into_iter()
         .take(BUNDLE_CRASHES)
         .map(|(_, p)| p)
@@ -371,6 +425,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = write_crash(
             tmp.path(),
+            CrashSource::App,
             "1.0",
             "line one\nline two",
             "a.rs:1:2",
@@ -384,16 +439,62 @@ mod tests {
     }
 
     #[test]
+    fn crashes_in_the_same_millisecond_keep_both_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let a = write_crash_file(dir, CRASH_PREFIX, 1234, "first").unwrap();
+        let b = write_crash_file(dir, CRASH_PREFIX, 1234, "second").unwrap();
+        let c = write_crash_file(dir, CRASH_PREFIX, 1234, "third").unwrap();
+        assert_eq!(a.file_name().unwrap(), "crash-1234.txt");
+        assert_eq!(b.file_name().unwrap(), "crash-1234-1.txt");
+        assert_eq!(c.file_name().unwrap(), "crash-1234-2.txt");
+        assert_eq!(std::fs::read_to_string(&a).unwrap(), "first");
+        assert_eq!(std::fs::read_to_string(&b).unwrap(), "second");
+        // The newest of the same millisecond comes first.
+        let found: Vec<PathBuf> = crash_files(dir, CRASH_PREFIX)
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect();
+        assert_eq!(found, [c, b, a]);
+    }
+
+    #[test]
+    fn cli_crashes_are_bundled_but_raise_no_app_notice() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let cli = write_crash(dir, CrashSource::Cli, "1", "cli boom", "c.rs:1:1", "main").unwrap();
+        assert!(
+            cli.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("cli-crash-")
+        );
+        assert!(unseen_crash(dir).is_none());
+        write_crash(dir, CrashSource::App, "1", "app boom", "a.rs:1:1", "main").unwrap();
+        assert_eq!(unseen_crash(dir).unwrap().message, "app boom");
+
+        let dest = tmp.path().join("bundle.zip");
+        save_bundle(dir, &dest, "s", &Redactor::new(None, &[])).unwrap();
+        let zip = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();
+        let names: Vec<String> = zip.file_names().map(|n| n.unwrap().into_owned()).collect();
+        assert!(
+            names.iter().any(|n| n.starts_with("cli-crash-")),
+            "{names:?}"
+        );
+        assert!(names.iter().any(|n| n.starts_with("crash-")), "{names:?}");
+    }
+
+    #[test]
     fn crash_seen_marker_hides_older_crashes() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
-        write_crash(dir, "1", "first", "a.rs:1:1", "t").unwrap();
+        write_crash(dir, CrashSource::App, "1", "first", "a.rs:1:1", "t").unwrap();
         assert_eq!(unseen_crash(dir).unwrap().message, "first");
         std::thread::sleep(Duration::from_millis(50));
         mark_crashes_seen(dir).unwrap();
         assert!(unseen_crash(dir).is_none());
         std::thread::sleep(Duration::from_millis(50));
-        write_crash(dir, "1", "second", "a.rs:2:2", "t").unwrap();
+        write_crash(dir, CrashSource::App, "1", "second", "a.rs:2:2", "t").unwrap();
         assert_eq!(unseen_crash(dir).unwrap().message, "second");
     }
 

@@ -260,6 +260,46 @@ mod tests {
         }
     }
 
+    /// An install whose clock runs a day ahead does not win every later
+    /// edit: each install's clock moves past every stamp it has applied, so
+    /// an edit made after seeing the other's always wins, on both sides.
+    #[test]
+    fn clock_a_day_ahead_does_not_win_later_edits() {
+        const DAY: i64 = 24 * 60 * 60 * 1000;
+        let sim = |id: u128| Sim {
+            id: Uuid::from_u128(id),
+            hlc: Hlc::new(Uuid::from_u128(id), None),
+            rows: HashMap::new(),
+            seq: 0,
+            observed: BTreeMap::new(),
+        };
+        let (mut ahead, mut right) = (sim(1), sim(2));
+        // Edits alternate, a minute apart in real time; `ahead` stamps a
+        // day later than the real time.
+        for minute in 0..6_i64 {
+            let ahead_turn = minute % 2 == 0;
+            let (from, to) = if ahead_turn {
+                (&mut ahead, &mut right)
+            } else {
+                (&mut right, &mut ahead)
+            };
+            let now = minute * 60_000 + if ahead_turn { DAY } else { 0 };
+            let rec = notes(&format!("edit {minute}"), from.hlc.tick(now));
+            from.seq += 1;
+            from.rows
+                .insert(rec.key.text(), row_for(&rec, Some(MODEL), from.seq));
+            let (writer, seq, observed) = (from.id, from.seq, from.observed.clone());
+            to.apply(writer, seq, &observed, std::slice::from_ref(&rec));
+            for s in [&ahead, &right] {
+                assert_eq!(
+                    s.rows[&rec.key.text()].value,
+                    json!(format!("edit {minute}")),
+                    "minute {minute}"
+                );
+            }
+        }
+    }
+
     /// (writer, seq, observed, records)
     type SimBatch = (Uuid, u64, BTreeMap<Uuid, u64>, Vec<Record>);
 
