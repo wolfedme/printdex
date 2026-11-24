@@ -19,7 +19,9 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use sqlx::SqlitePool;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
+};
 
 use crate::error::{CoreError, Result};
 
@@ -49,7 +51,28 @@ pub struct Db {
 
 impl Db {
     /// Opens (creating if needed) the database at `path` and runs migrations.
+    ///
+    /// An existing database is checked first through a read-only
+    /// connection, which never checkpoints or deletes the `-wal`: one from
+    /// a newer Printdex, or one SQLite can't read, is reported without a
+    /// byte of it or its `-wal` changing. That connection stays open until
+    /// the pools are closed again on failure, so their closing can't
+    /// checkpoint either (only the last connection to close does).
     pub async fn open(path: &Path) -> Result<Db> {
+        let guard = if path.exists() {
+            Some(check_existing(path).await?)
+        } else {
+            None
+        };
+        let opened = Db::open_pools(path).await;
+        if let Some(guard) = guard {
+            use sqlx::Connection;
+            let _ = guard.close().await;
+        }
+        opened
+    }
+
+    async fn open_pools(path: &Path) -> Result<Db> {
         let base = SqliteConnectOptions::from_str("sqlite://")?
             .filename(path)
             .journal_mode(SqliteJournalMode::Wal)
@@ -61,12 +84,21 @@ impl Db {
             .max_connections(1)
             .connect_with(base.clone().create_if_missing(true))
             .await?;
-        sqlx::migrate!("./migrations").run(&writer).await?;
-
-        let reader = SqlitePoolOptions::new()
+        if let Err(e) = sqlx::migrate!("./migrations").run(&writer).await {
+            writer.close().await;
+            return Err(e.into());
+        }
+        let reader = match SqlitePoolOptions::new()
             .max_connections(4)
             .connect_with(base.read_only(true))
-            .await?;
+            .await
+        {
+            Ok(reader) => reader,
+            Err(e) => {
+                writer.close().await;
+                return Err(e.into());
+            }
+        };
         let photo_dir = path
             .parent()
             .map_or_else(|| PathBuf::from("photos"), |p| p.join("photos"));
@@ -75,8 +107,18 @@ impl Db {
             reader,
             photo_dir,
         };
-        // Parts from before path materials were stored (migration 0009).
-        db.fill_path_materials().await?;
+        let ready = async {
+            // Parts from before path materials were stored (migration 0009).
+            db.fill_path_materials().await?;
+            // The first write: fails here rather than in the engine.
+            db.install_id().await?;
+            Ok(())
+        };
+        if let Err(e) = ready.await {
+            db.reader.close().await;
+            db.writer.close().await;
+            return Err(e);
+        }
         Ok(db)
     }
 
@@ -93,6 +135,47 @@ impl Db {
     /// The reader pool, so searches never wait behind a scan's writes.
     pub(crate) fn reader(&self) -> &SqlitePool {
         &self.reader
+    }
+}
+
+/// Reads an existing database through a read-only connection: its schema
+/// (so SQLite checks the header and page 1, with the `-wal` applied) and
+/// its applied migrations, failing with `VersionMissing` for one this
+/// build doesn't know. Returns the connection, still open.
+async fn check_existing(path: &Path) -> Result<SqliteConnection> {
+    use sqlx::{ConnectOptions, Connection};
+    let mut conn = SqliteConnectOptions::from_str("sqlite://")?
+        .filename(path)
+        .read_only(true)
+        .connect()
+        .await?;
+    match check_schema(&mut conn).await {
+        Ok(()) => Ok(conn),
+        Err(e) => {
+            let _ = conn.close().await;
+            Err(e)
+        }
+    }
+}
+
+async fn check_schema(conn: &mut SqliteConnection) -> Result<()> {
+    let tables: Vec<(String,)> =
+        sqlx::query_as("SELECT name FROM sqlite_master WHERE type = 'table'")
+            .fetch_all(&mut *conn)
+            .await?;
+    if !tables.iter().any(|(t,)| t == "_sqlx_migrations") {
+        return Ok(());
+    }
+    let applied: Vec<(i64,)> = sqlx::query_as("SELECT version FROM _sqlx_migrations")
+        .fetch_all(&mut *conn)
+        .await?;
+    let known: std::collections::HashSet<i64> = sqlx::migrate!("./migrations")
+        .iter()
+        .map(|m| m.version)
+        .collect();
+    match applied.into_iter().find(|(v,)| !known.contains(v)) {
+        Some((v,)) => Err(sqlx::migrate::MigrateError::VersionMissing(v).into()),
+        None => Ok(()),
     }
 }
 
@@ -239,6 +322,77 @@ mod open_error_tests {
     fn classify_maps_newer_migrations() {
         let e = CoreError::Migrate(sqlx::migrate::MigrateError::VersionMissing(9999));
         assert!(matches!(classify_open_error(e, &db()), CoreError::DataTooNew(p) if p == db()));
+    }
+
+    /// An SQLite error the classification doesn't know (`SQLITE_ERROR`).
+    #[derive(Debug)]
+    struct Plain;
+
+    impl std::fmt::Display for Plain {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("(code: 1) something went wrong")
+        }
+    }
+
+    impl std::error::Error for Plain {}
+
+    impl sqlx::error::DatabaseError for Plain {
+        fn message(&self) -> &str {
+            "something went wrong"
+        }
+        fn code(&self) -> Option<std::borrow::Cow<'_, str>> {
+            Some("1".into())
+        }
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+            self
+        }
+        fn kind(&self) -> sqlx::error::ErrorKind {
+            sqlx::error::ErrorKind::Other
+        }
+    }
+
+    fn plain() -> CoreError {
+        CoreError::Db(sqlx::Error::Database(Box::new(Plain)))
+    }
+
+    async fn created(dir: &Path) -> PathBuf {
+        let path = dir.join("printdex.db");
+        Db::open(&path).await.unwrap().close().await;
+        path
+    }
+
+    /// An unclassified SQLite error on a file whose pages after the first
+    /// are garbage: `quick_check` finds the damage.
+    #[tokio::test]
+    async fn diagnose_runs_quick_check_on_plain_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = created(dir.path()).await;
+        let mut bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.len() > 4096, "more than one page");
+        for b in &mut bytes[4096..] {
+            *b = 0xAB;
+        }
+        std::fs::write(&path, &bytes).unwrap();
+        let e = diagnose_open_error(plain(), &path).await;
+        assert!(matches!(e, CoreError::DataCorrupt(p) if p == path));
+        assert_eq!(std::fs::read(&path).unwrap(), bytes, "the check only reads");
+    }
+
+    #[tokio::test]
+    async fn diagnose_leaves_plain_errors_on_healthy_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = created(dir.path()).await;
+        let e = diagnose_open_error(plain(), &path).await;
+        assert!(
+            matches!(e, CoreError::Db(sqlx::Error::Database(_))),
+            "{e:?}"
+        );
     }
 
     #[test]

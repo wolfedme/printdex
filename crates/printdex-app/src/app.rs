@@ -278,7 +278,8 @@ pub struct App {
     /// Watches libraries for changes and offline shares while the app runs.
     pub monitor: Option<Arc<printdex_core::Monitor>>,
     pub boot: Boot,
-    /// Shown once the engine opens: where a damaged database was set aside.
+    /// Where a damaged database was set aside: shown once the engine opens,
+    /// beside the stopped-task toasts, until dismissed.
     pub boot_note: Option<String>,
     pub libraries: Vec<Library>,
     pub counts: HashMap<LibraryId, u64>,
@@ -357,6 +358,8 @@ pub enum Message {
     BootAction(BootUx),
     /// The damaged database was moved to this path, or why it wasn't.
     SetAside(Result<PathBuf, Arc<CoreError>>),
+    /// Hide the "damaged database kept at …" note.
+    DismissBootNote,
     MonitorStarted(Arc<printdex_core::Monitor>),
     Files(crate::files::Fx),
     CrashNotice(CrashUx),
@@ -717,13 +720,8 @@ impl App {
                 };
                 self.engine = Some(engine);
                 self.boot = Boot::Ready;
-                let note = match self.boot_note.take() {
-                    Some(text) => self.show_info(text),
-                    None => Task::none(),
-                };
                 let ticket = self.search.refresh();
                 Task::batch([
-                    note,
                     monitor,
                     self.load_libraries(),
                     self.run_search(ticket),
@@ -1227,6 +1225,10 @@ impl App {
                     Task::none()
                 }
             },
+            Message::DismissBootNote => {
+                self.boot_note = None;
+                Task::none()
+            }
             Message::DismissTaskStopped(task) => {
                 self.stopped.retain(|t| *t != task);
                 Task::none()
@@ -2452,11 +2454,22 @@ mod tests {
         let _ = a.update(msg);
         assert_eq!(a.boot, Boot::Ready);
         let note = a
-            .files
-            .info
+            .boot_note
             .clone()
             .expect("a note says where the old file is");
         assert!(note.contains(&old.display().to_string()), "{note}");
+        // It stays past the usual toast time, until dismissed.
+        let seq = a.files.toast_seq;
+        let _ = a.update(Message::Files(crate::files::Fx::HideToast(seq)));
+        assert_eq!(a.boot_note.as_ref(), Some(&note));
+        let p = Palette::new(ColorTheme::default(), Mode::Light, Surface::Solid);
+        assert!(
+            crate::view::task_stopped(&a, p).is_some(),
+            "the note is drawn"
+        );
+        let _ = a.update(Message::DismissBootNote);
+        assert!(a.boot_note.is_none());
+        assert!(crate::view::task_stopped(&a, p).is_none());
     }
 
     #[tokio::test]

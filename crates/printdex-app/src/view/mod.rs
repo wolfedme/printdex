@@ -276,15 +276,37 @@ fn update_banner(app: &App, p: Palette) -> Option<Element<'_, Message>> {
     )
 }
 
-/// Bottom right, one per engine task that stopped after repeated errors:
-/// stays until dismissed, with the crash notice's "Report a bug".
+/// Bottom right, notes that stay until dismissed: one per engine task that
+/// stopped after repeated errors (with the crash notice's "Report a bug"),
+/// and where a damaged database was set aside.
 pub fn task_stopped(app: &App, p: Palette) -> Option<Element<'_, Message>> {
-    if app.stopped.is_empty() {
+    if app.stopped.is_empty() && app.boot_note.is_none() {
         return None;
     }
+    let dismiss = |msg: Message| {
+        button(text(t("crash-dismiss")).size(theme::SIZE_CAPTION))
+            .padding([3.0, theme::S3])
+            .style(move |_, status| p.button_ghost(status))
+            .on_press(msg)
+    };
+    let card = |r: iced::widget::Row<'static, Message>| {
+        container(r.spacing(theme::S3).align_y(Alignment::Center))
+            .padding([theme::S4, theme::S5])
+            .width(TASK_TOAST_WIDTH)
+            .style(move |_| p.dialog())
+    };
     let mut cards = column![].spacing(theme::S3).align_x(Alignment::End);
+    if let Some(note) = &app.boot_note {
+        cards = cards.push(card(row![
+            icons::icon(Icon::Success, theme::ICON_DENSE, p.status.ok),
+            text(note.clone())
+                .size(theme::SIZE_CAPTION)
+                .width(Length::Fill),
+            dismiss(Message::DismissBootNote),
+        ]));
+    }
     for &task in &app.stopped {
-        let r = row![
+        cards = cards.push(card(row![
             icons::icon(Icon::Alert, theme::ICON_DENSE, p.status.fail),
             text(task_stopped_text(task))
                 .size(theme::SIZE_CAPTION)
@@ -293,19 +315,8 @@ pub fn task_stopped(app: &App, p: Palette) -> Option<Element<'_, Message>> {
                 .padding([3.0, theme::S3])
                 .style(move |_, status| p.button_primary(status))
                 .on_press(Message::CrashNotice(CrashUx::Report)),
-            button(text(t("crash-dismiss")).size(theme::SIZE_CAPTION))
-                .padding([3.0, theme::S3])
-                .style(move |_, status| p.button_ghost(status))
-                .on_press(Message::DismissTaskStopped(task)),
-        ]
-        .spacing(theme::S3)
-        .align_y(Alignment::Center);
-        cards = cards.push(
-            container(r)
-                .padding([theme::S4, theme::S5])
-                .width(TASK_TOAST_WIDTH)
-                .style(move |_| p.dialog()),
-        );
+            dismiss(Message::DismissTaskStopped(task)),
+        ]));
     }
     Some(
         container(cards)
