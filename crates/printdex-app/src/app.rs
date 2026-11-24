@@ -13,7 +13,7 @@ use iced::{Event, Size, Subscription, Task, event, window};
 use printdex_core::diagnostics::{self, CrashReport};
 use printdex_core::{
     AttemptResult, CoreError, Engine, EngineEvent, Library, LibraryId, LibraryStatus, ModelDetail,
-    ModelHit, ModelId, PartInfo, ScanPhase, ScanSummary, Scope, SortOrder, ThumbTarget,
+    ModelHit, ModelId, PartInfo, ScanPhase, ScanSummary, Scope, SortOrder, TaskName, ThumbTarget,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -219,6 +219,9 @@ pub struct App {
     pub settings_section: SettingsSection,
     /// The unseen crash the notice above the library is about.
     pub crash: Option<CrashReport>,
+    /// Engine tasks that stopped after repeated errors, each with a toast
+    /// until dismissed, oldest first.
+    pub stopped: Vec<TaskName>,
     /// A startup note (a config file was set aside), shown once at boot.
     pub config_notice: Option<String>,
     /// Never save over `settings.toml`: it is broken and couldn't be set
@@ -253,6 +256,18 @@ pub struct App {
     started: std::time::Instant,
 }
 
+/// The toast text for an engine task that stopped after repeated errors.
+pub(crate) fn task_stopped_text(task: TaskName) -> String {
+    let label = t(match task {
+        TaskName::SidecarWriter => "task-sidecars",
+        TaskName::Thumbnails => "task-thumbnails",
+        TaskName::Monitor => "task-monitor",
+        TaskName::BackupScheduler => "task-backup",
+        TaskName::Sync => "task-sync",
+    });
+    t_args("task-stopped", &[("task", Arg::str(label))])
+}
+
 /// Libraries and their present-model counts.
 pub type LibrarySnapshot = (Vec<Library>, HashMap<LibraryId, u64>);
 
@@ -262,6 +277,8 @@ pub enum Message {
     MonitorStarted(Arc<printdex_core::Monitor>),
     Files(crate::files::Fx),
     CrashNotice(CrashUx),
+    /// Hide the "stopped after repeated errors" toast of this task.
+    DismissTaskStopped(TaskName),
     Report(ReportUx),
     Updates(crate::updates::Ux),
     Backup(crate::backup_ui::Bx),
@@ -396,6 +413,7 @@ impl App {
             filter_menu: false,
             settings_section: SettingsSection::default(),
             crash,
+            stopped: Vec::new(),
             config_notice,
             settings_kept,
             apps_kept,
@@ -1107,6 +1125,10 @@ impl App {
                     Task::none()
                 }
             },
+            Message::DismissTaskStopped(task) => {
+                self.stopped.retain(|t| *t != task);
+                Task::none()
+            }
             Message::Report(ux) => self.on_report(ux),
             Message::OpenSettings => {
                 self.screen = Screen::Settings;
@@ -1435,6 +1457,12 @@ impl App {
             | EngineEvent::SyncFinished { .. }
             | EngineEvent::SyncFailed { .. }
             | EngineEvent::SyncParked { .. }) => self.on_sync_event(event),
+            EngineEvent::TaskStopped(task) => {
+                if !self.stopped.contains(&task) {
+                    self.stopped.push(task);
+                }
+                Task::none()
+            }
         }
     }
 
@@ -1976,6 +2004,33 @@ mod tests {
         let _ = a.update(Message::CrashNotice(CrashUx::Dismiss));
         assert!(a.crash.is_none());
         assert!(logs.join(".crash-seen").exists());
+    }
+
+    #[test]
+    fn task_stopped_shows_toast() {
+        let mut a = app();
+        let palette = || Palette::new(ColorTheme::default(), Mode::Light, Surface::Solid);
+        assert!(crate::view::task_stopped(&a, palette()).is_none());
+        let _ = a.update(Message::Engine(EngineEvent::TaskStopped(
+            TaskName::Thumbnails,
+        )));
+        let _ = a.update(Message::Engine(EngineEvent::TaskStopped(
+            TaskName::Thumbnails,
+        )));
+        assert_eq!(a.stopped, [TaskName::Thumbnails], "one toast per task");
+        assert_eq!(
+            task_stopped_text(TaskName::Thumbnails),
+            "Thumbnail rendering stopped after repeated errors. Restart Printdex to try again."
+        );
+        assert!(crate::view::task_stopped(&a, palette()).is_some());
+        // The crash notice's "Report a bug", and the toast stays.
+        let _ = a.update(Message::CrashNotice(CrashUx::Report));
+        assert_eq!(a.screen, Screen::Settings);
+        assert_eq!(a.settings_section, SettingsSection::About);
+        assert_eq!(a.stopped, [TaskName::Thumbnails]);
+        let _ = a.update(Message::DismissTaskStopped(TaskName::Thumbnails));
+        assert!(a.stopped.is_empty());
+        assert!(crate::view::task_stopped(&a, palette()).is_none());
     }
 
     #[test]

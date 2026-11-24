@@ -28,6 +28,7 @@ use crate::cpu::run_cpu;
 use crate::db::{Db, ImageSource, ModelSources, PartSource};
 use crate::events::EngineEvent;
 use crate::ids::{ModelId, PartId};
+use crate::supervise::{TaskName, spawn_supervised};
 use crate::walk::PrintableFormat;
 
 /// Thumbnail size in pixels. The grid shows them at up to about 1.3× this
@@ -311,9 +312,11 @@ impl ThumbnailService {
             dirty: AtomicBool::new(true),
         });
         let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
-        for _ in 0..(cores / 2).clamp(1, 4) {
-            tokio::spawn(worker(inner.clone()));
-        }
+        let workers = (cores / 2).clamp(1, 4);
+        let run = inner.clone();
+        spawn_supervised(TaskName::Thumbnails, inner.events.clone(), move || {
+            run_workers(run.clone(), workers)
+        });
         ThumbnailService { inner }
     }
 
@@ -480,8 +483,31 @@ fn lock(q: &Mutex<Queue>) -> std::sync::MutexGuard<'_, Queue> {
     q.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+/// One supervised run: `n` workers on their own tasks. A panic in any of
+/// them ends the run (the others are aborted with it) and the supervisor
+/// restarts all of them.
+async fn run_workers(inner: Arc<Inner>, n: usize) {
+    // A restart follows a panic: nothing is running any more. The jobs that
+    // were are dropped until the app asks for them again (its visible set
+    // changes), so a model that panics the renderer is not retried in a
+    // loop.
+    lock(&inner.queue).running.clear();
+    let mut set = tokio::task::JoinSet::new();
+    for _ in 0..n {
+        set.spawn(crate::diagnostics::recovering_future(worker(inner.clone())));
+    }
+    while let Some(done) = set.join_next().await {
+        if let Err(e) = done
+            && e.is_panic()
+        {
+            std::panic::resume_unwind(e.into_panic());
+        }
+    }
+}
+
 async fn worker(inner: Arc<Inner>) {
     loop {
+        crate::fsx::faults::checkpoint(TaskName::Thumbnails);
         let target = loop {
             let notified = inner.wake.notified();
             if let Some(t) = lock(&inner.queue).next() {

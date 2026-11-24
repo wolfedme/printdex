@@ -26,7 +26,7 @@ use focus::button;
 use iced::widget::{Space, column, container, row, stack, text};
 use iced::{Alignment, Element, Length};
 
-use crate::app::{App, Boot, CrashUx, Message, Screen};
+use crate::app::{App, Boot, CrashUx, Message, Screen, task_stopped_text};
 use crate::i18n::{Arg, t, t_args};
 use crate::icons::{self, Icon};
 use crate::settings::ViewMode;
@@ -75,6 +75,9 @@ fn shell(app: &App, p: Palette) -> Element<'_, Message> {
     let mut layers = stack![r];
     if let Some(toast) = files::toast(app, p) {
         layers = layers.push(toast);
+    }
+    if let Some(toasts) = task_stopped(app, p) {
+        layers = layers.push(toasts);
     }
     if let Some(dialog) = files::dialog(app, p) {
         layers = layers.push(dialog);
@@ -223,6 +226,50 @@ fn update_banner(app: &App, p: Palette) -> Option<Element<'_, Message>> {
             .into(),
     )
 }
+
+/// Bottom right, one per engine task that stopped after repeated errors:
+/// stays until dismissed, with the crash notice's "Report a bug".
+pub fn task_stopped(app: &App, p: Palette) -> Option<Element<'_, Message>> {
+    if app.stopped.is_empty() {
+        return None;
+    }
+    let mut cards = column![].spacing(theme::S3).align_x(Alignment::End);
+    for &task in &app.stopped {
+        let r = row![
+            icons::icon(Icon::Alert, theme::ICON_DENSE, p.status.fail),
+            text(task_stopped_text(task))
+                .size(theme::SIZE_CAPTION)
+                .width(Length::Fill),
+            button(text(t("crash-report")).size(theme::SIZE_CAPTION))
+                .padding([3.0, theme::S3])
+                .style(move |_, status| p.button_primary(status))
+                .on_press(Message::CrashNotice(CrashUx::Report)),
+            button(text(t("crash-dismiss")).size(theme::SIZE_CAPTION))
+                .padding([3.0, theme::S3])
+                .style(move |_, status| p.button_ghost(status))
+                .on_press(Message::DismissTaskStopped(task)),
+        ]
+        .spacing(theme::S3)
+        .align_y(Alignment::Center);
+        cards = cards.push(
+            container(r)
+                .padding([theme::S4, theme::S5])
+                .width(TASK_TOAST_WIDTH)
+                .style(move |_| p.dialog()),
+        );
+    }
+    Some(
+        container(cards)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(Alignment::End)
+            .align_y(Alignment::End)
+            .padding(theme::S8)
+            .into(),
+    )
+}
+
+const TASK_TOAST_WIDTH: f32 = 460.0;
 
 /// Over the library after a crash: says so, with where to read about it.
 pub fn crash_notice(app: &App, p: Palette) -> Option<Element<'_, Message>> {

@@ -57,6 +57,8 @@ fault-injection = []
 # Itself, with fault injection on, for tests/it.
 printdex-core = { path = ".", features = ["fault-injection"] }
 tempfile.workspace = true
+# Paused time for the supervision tests.
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

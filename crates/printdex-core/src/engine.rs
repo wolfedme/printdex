@@ -155,7 +155,12 @@ impl Engine {
         let (events, _) = broadcast::channel(EVENT_CAPACITY);
         let thumbs = ThumbnailService::start(db.clone(), events.clone(), cache_dir);
         let install = db.install_id().await?;
-        let sidecars = SidecarWriter::start(db.clone(), install, crate::sidecar::DEBOUNCE);
+        let sidecars = SidecarWriter::start(
+            db.clone(),
+            install,
+            crate::sidecar::DEBOUNCE,
+            events.clone(),
+        );
         let engine = Engine {
             db,
             events,

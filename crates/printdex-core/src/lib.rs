@@ -22,6 +22,7 @@ pub mod monitor;
 pub mod photos;
 pub mod scan;
 pub mod sidecar;
+mod supervise;
 pub mod sync;
 pub mod thumbs;
 pub mod time;
@@ -45,6 +46,7 @@ pub use model_data::{
 };
 pub use monitor::{Monitor, MonitorConfig};
 pub use scan::ScanSummary;
+pub use supervise::TaskName;
 pub use thumbs::{
     DEFAULT_CACHE_LIMIT, Detail, Preview, THUMB_HEIGHT, THUMB_WIDTH, ThumbFailure, ThumbKind,
     ThumbTarget, ThumbnailService,

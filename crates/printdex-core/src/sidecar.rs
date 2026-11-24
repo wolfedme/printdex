@@ -17,16 +17,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio::time::Instant;
 
 use crate::db::{Db, Organize, SidecarTarget};
 use crate::error::{CoreError, Result};
+use crate::events::EngineEvent;
 use crate::grouping::ModelKind;
 use crate::ids::{AttemptId, ModelId, Uuid};
 use crate::model_data::{
     Attempt, AttemptResult, ModelData, PartOverride, PrintSettings, Recipe, RecipeNote,
 };
+use crate::supervise::{TaskName, spawn_supervised};
 use crate::time::system_time_to_ns;
 
 /// File name of a folder model's sidecar; single-file models use
@@ -567,11 +569,24 @@ impl std::fmt::Debug for Cmd {
 }
 
 impl SidecarWriter {
-    /// Starts the writer task. Must be called inside a tokio runtime.
-    pub fn start(db: Db, install: Uuid, delay: Duration) -> SidecarWriter {
+    /// Starts the writer task, supervised: a panic restarts it with the
+    /// queue intact. Must be called inside a tokio runtime.
+    pub(crate) fn start(
+        db: Db,
+        install: Uuid,
+        delay: Duration,
+        events: broadcast::Sender<EngineEvent>,
+    ) -> SidecarWriter {
         let (tx, rx) = mpsc::unbounded_channel();
         let gate = Arc::new(tokio::sync::Mutex::new(()));
-        tokio::spawn(run(db, install, delay, rx, gate.clone()));
+        let state = Arc::new(tokio::sync::Mutex::new(WriterState {
+            rx,
+            pending: HashMap::new(),
+        }));
+        let run_gate = gate.clone();
+        spawn_supervised(TaskName::SidecarWriter, events, move || {
+            run(db.clone(), install, delay, state.clone(), run_gate.clone())
+        });
         SidecarWriter { tx, gate }
     }
 
@@ -596,15 +611,26 @@ impl SidecarWriter {
     }
 }
 
+/// What the writer keeps across a restart: its commands and the models
+/// waiting for their write.
+struct WriterState {
+    rx: mpsc::UnboundedReceiver<Cmd>,
+    pending: HashMap<ModelId, Instant>,
+}
+
 async fn run(
     db: Db,
     install: Uuid,
     delay: Duration,
-    mut rx: mpsc::UnboundedReceiver<Cmd>,
+    state: Arc<tokio::sync::Mutex<WriterState>>,
     gate: Arc<tokio::sync::Mutex<()>>,
 ) {
-    let mut pending: HashMap<ModelId, Instant> = HashMap::new();
+    // Held for the whole run; a panic releases it (a tokio mutex is not
+    // poisoned) for the next run.
+    let mut state = state.lock().await;
+    let WriterState { rx, pending } = &mut *state;
     loop {
+        crate::fsx::faults::checkpoint(TaskName::SidecarWriter);
         let next = pending.values().min().copied();
         tokio::select! {
             cmd = rx.recv() => match cmd {
@@ -612,16 +638,16 @@ async fn run(
                     pending.insert(id, Instant::now() + delay);
                 }
                 Some(Cmd::Flush(done)) => {
-                    write_due(&db, install, &mut pending, None, &gate).await;
+                    write_due(&db, install, pending, None, &gate).await;
                     let _ = done.send(());
                 }
                 None => {
-                    write_due(&db, install, &mut pending, None, &gate).await;
+                    write_due(&db, install, pending, None, &gate).await;
                     return;
                 }
             },
             () = tokio::time::sleep_until(next.unwrap_or_else(Instant::now)), if next.is_some() => {
-                write_due(&db, install, &mut pending, Some(Instant::now()), &gate).await;
+                write_due(&db, install, pending, Some(Instant::now()), &gate).await;
             }
         }
     }

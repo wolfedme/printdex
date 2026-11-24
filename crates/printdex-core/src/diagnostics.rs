@@ -227,7 +227,7 @@ fn write_panic_record(
     write_crash_file(dir, prefix, at, &body)
 }
 
-fn payload_message(payload: &(dyn std::any::Any + Send)) -> String {
+pub(crate) fn payload_message(payload: &(dyn std::any::Any + Send)) -> String {
     payload
         .downcast_ref::<&str>()
         .map(|s| (*s).to_string())
