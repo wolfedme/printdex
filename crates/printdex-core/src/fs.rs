@@ -115,19 +115,33 @@ impl ChaosFs {
     }
 
     /// Calls under `path` fail as if the share dropped.
+    ///
+    /// The engine works with canonical library paths, which can differ from
+    /// the path a test holds (macOS `/var` is `/private/var`; Windows temp
+    /// folders can be given by an 8.3 short name), so both are unmounted.
     pub fn unmount(&self, path: &Path) {
-        self.unmounted
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .push(path.to_path_buf());
+        let mut unmounted = self.unmounted.lock().unwrap_or_else(|p| p.into_inner());
+        unmounted.extend(Self::spellings(path));
     }
 
     /// Undoes [`ChaosFs::unmount`].
     pub fn remount(&self, path: &Path) {
+        let spellings = Self::spellings(path);
         self.unmounted
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .retain(|p| p != path);
+            .retain(|p| !spellings.contains(p));
+    }
+
+    /// `path` as given, plus its canonical form when that differs.
+    fn spellings(path: &Path) -> Vec<PathBuf> {
+        let mut out = vec![path.to_path_buf()];
+        if let Ok(c) = dunce::canonicalize(path)
+            && c != path
+        {
+            out.push(c);
+        }
+        out
     }
 
     /// Filesystem calls made so far.
