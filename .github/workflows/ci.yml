@@ -114,7 +114,9 @@ jobs:
   test-macos:
     name: test (macos)
     if: *all-os
-    runs-on: macos-latest
+    # macOS arm64 runners queue 10+ min (GitHub capacity notice, 2026-11);
+    # the Intel image starts right away and tests the same file system.
+    runs-on: macos-15-intel
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
