@@ -2,8 +2,11 @@
 //!
 //! [`init`] installs the tracing subscriber (stderr plus a daily rolling log
 //! file), [`install_panic_hook`] writes a `crash-<unix_ms>.txt` (the app)
-//! or `cli-crash-<unix_ms>.txt` (the command line) for every panic, and [`save_bundle`] zips the newest logs and crash records, with
-//! user paths removed by a [`Redactor`], for a bug report.
+//! or `cli-crash-<unix_ms>.txt` (the command line) for every panic, except
+//! one inside [`recovering`] or [`recovering_future`], which is expected to be
+//! caught and goes to `recovered-<unix_ms>.txt` (never shown as a crash). [`save_bundle`] zips the
+//! newest logs, crash records and recovered records, with user paths removed
+//! by a [`Redactor`], for a bug report.
 
 use std::cell::Cell;
 use std::future::Future;
@@ -237,7 +240,8 @@ fn format_location(l: &std::panic::Location<'_>) -> String {
 }
 
 /// Writes a crash file for `source` into `log_dir` on every panic, then
-/// calls the previous hook.
+/// calls the previous hook. A panic inside [`recovering`] is written as a
+/// `recovered-*` file instead.
 pub fn install_panic_hook(log_dir: PathBuf, version: &'static str, source: CrashSource) {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -500,20 +504,30 @@ mod tests {
             .collect()
     }
 
+    /// Records with this prefix whose `message:` is exactly `msg`. Other
+    /// tests may panic while the global hook points at `dir`, so tests count
+    /// only their own uniquely worded panics.
+    fn records_with(dir: &Path, prefix: &str, msg: &str) -> Vec<PathBuf> {
+        let line = format!("message: {msg}\n");
+        files_starting(dir, prefix)
+            .into_iter()
+            .filter(|p| std::fs::read_to_string(p).is_ok_and(|t| t.contains(&line)))
+            .collect()
+    }
+
     #[test]
     fn recovered_panic_writes_recovered_file() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
         let r = with_hook(dir, || {
-            std::panic::catch_unwind(|| recovering(|| panic!("boom")))
+            std::panic::catch_unwind(|| recovering(|| panic!("rec-boom")))
         });
         assert!(r.is_err());
-        let found = files_starting(dir, "recovered-");
+        let found = records_with(dir, "recovered-", "rec-boom");
         assert_eq!(found.len(), 1);
         let text = std::fs::read_to_string(&found[0]).unwrap();
         assert!(text.contains("recovered: yes"), "{text}");
-        assert!(text.contains("message: boom"), "{text}");
-        assert!(files_starting(dir, CRASH_PREFIX).is_empty());
+        assert!(records_with(dir, CRASH_PREFIX, "rec-boom").is_empty());
     }
 
     #[test]
@@ -521,9 +535,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
         let _ = with_hook(dir, || {
-            std::panic::catch_unwind(|| recovering(|| panic!("boom")))
+            std::panic::catch_unwind(|| recovering(|| panic!("unseen-boom")))
         });
-        assert!(unseen_crash(dir).is_none());
+        assert_eq!(records_with(dir, "recovered-", "unseen-boom").len(), 1);
+        assert!(records_with(dir, CRASH_PREFIX, "unseen-boom").is_empty());
+        assert!(unseen_crash(dir).is_none_or(|c| c.message != "unseen-boom"));
     }
 
     #[test]
@@ -531,11 +547,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path();
         let _ = with_hook(dir, || {
-            let _ = std::panic::catch_unwind(|| recovering(|| panic!("a")));
-            std::panic::catch_unwind(|| panic!("b"))
+            let _ = std::panic::catch_unwind(|| recovering(|| panic!("again-a")));
+            std::panic::catch_unwind(|| panic!("again-b"))
         });
-        assert_eq!(files_starting(dir, CRASH_PREFIX).len(), 1);
-        assert_eq!(files_starting(dir, "recovered-").len(), 1);
+        assert_eq!(records_with(dir, CRASH_PREFIX, "again-b").len(), 1);
+        assert!(records_with(dir, CRASH_PREFIX, "again-a").is_empty());
+        assert_eq!(records_with(dir, "recovered-", "again-a").len(), 1);
     }
 
     #[tokio::test]
@@ -547,13 +564,13 @@ mod tests {
             let saved = std::panic::take_hook();
             std::panic::set_hook(Box::new(|_| {}));
             install_panic_hook(dir.to_path_buf(), "1", CrashSource::App);
-            let joined = tokio::spawn(recovering_future(async { panic!("x") })).await;
+            let joined = tokio::spawn(recovering_future(async { panic!("fut-x") })).await;
             std::panic::set_hook(saved);
             joined
         };
         assert!(joined.is_err());
-        assert_eq!(files_starting(dir, "recovered-").len(), 1);
-        assert!(files_starting(dir, CRASH_PREFIX).is_empty());
+        assert_eq!(records_with(dir, "recovered-", "fut-x").len(), 1);
+        assert!(records_with(dir, CRASH_PREFIX, "fut-x").is_empty());
     }
 
     #[test]

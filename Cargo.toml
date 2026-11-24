@@ -16,6 +16,7 @@ printdex-mesh = { path = "crates/printdex-mesh" }
 printdex-render = { path = "crates/printdex-render" }
 tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "sync", "signal", "fs", "time"] }
 tokio-util = "0.7"
+pin-project-lite = "0.2"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 trash = "5"
 sysinfo = { version = "0.40", default-features = false, features = ["disk", "system"] }

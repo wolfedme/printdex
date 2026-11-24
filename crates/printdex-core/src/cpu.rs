@@ -9,9 +9,7 @@ where
 {
     let (tx, rx) = tokio::sync::oneshot::channel();
     rayon::spawn(move || {
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            crate::diagnostics::recovering(f)
-        }));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
         // The receiver is gone only if the awaiting task was dropped.
         let _ = tx.send(result);
     });
