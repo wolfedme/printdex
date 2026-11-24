@@ -8,12 +8,15 @@ use glam::Vec3;
 /// An sRGB colour, 8 bits per channel.
 pub type Rgb = [u8; 3];
 
-/// What a model is printed in. Unknown uses the ASA neutral ramp.
+/// What a model is printed in, as far as previews care: ABS and ASA share
+/// the cool neutral ramp, and anything else (no material known, or one
+/// without a ramp of its own) is drawn in undyed "natural" filament.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Material {
     Petg,
     Pla,
     Tpu,
+    Asa,
     #[default]
     Unknown,
 }
@@ -52,11 +55,17 @@ impl Material {
                 shade: hex(0xb54481),
                 edge: hex(0x943569),
             },
-            Material::Unknown => Ramp {
+            Material::Asa => Ramp {
                 top: hex(0xc0c4cb),
                 side: hex(0x81868f),
                 shade: hex(0x4f5661),
                 edge: hex(0x3c434d),
+            },
+            Material::Unknown => Ramp {
+                top: hex(0xede6d4),
+                side: hex(0xcbbf9f),
+                shade: hex(0xa09272),
+                edge: hex(0x7f7357),
             },
         }
     }
@@ -266,7 +275,7 @@ mod tests {
 
     #[test]
     fn ramps_match_design_md() {
-        let r = Material::Unknown.ramp();
+        let r = Material::Asa.ramp();
         assert_eq!(r.top, [0xc0, 0xc4, 0xcb]);
         assert_eq!(r.side, [0x81, 0x86, 0x8f]);
         assert_eq!(r.shade, [0x4f, 0x56, 0x61]);
@@ -274,6 +283,8 @@ mod tests {
         assert_eq!(Material::Petg.ramp().side, [0x2b, 0xb3, 0xb9]);
         assert_eq!(Material::Pla.ramp().side, [0xf4, 0x97, 0x52]);
         assert_eq!(Material::Tpu.ramp().side, [0xde, 0x75, 0xb4]);
+        // Unknown is undyed natural filament, not the ASA grey.
+        assert_eq!(Material::Unknown.ramp().side, [0xcb, 0xbf, 0x9f]);
     }
 
     #[test]

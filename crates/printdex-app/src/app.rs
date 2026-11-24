@@ -2006,6 +2006,7 @@ mod tests {
             missing: false,
             created_at: 0,
             material: None,
+            preview_material: Default::default(),
             recipe: None,
             last_print: None,
         }

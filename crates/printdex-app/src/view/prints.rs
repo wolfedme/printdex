@@ -74,11 +74,35 @@ pub fn chip<'a>(p: Palette, s: String, mono: bool) -> Element<'a, Message> {
     .into()
 }
 
+/// A material chip: the material's swatch dot, then its name, so the
+/// chip names the colour the previews are drawn in.
+pub fn material_chip<'a>(p: Palette, m: &Material) -> Element<'a, Message> {
+    let ramp = printdex_core::preview_ramp(Some(m.clone()));
+    container(
+        row![
+            container(Space::new())
+                .width(7)
+                .height(7)
+                .style(move |_| p.material_dot(ramp)),
+            text(m.label().to_owned())
+                .size(theme::SIZE_DATA)
+                .font(theme::FONT_MEDIUM)
+                .color(p.n.ink_2)
+                .wrapping(text::Wrapping::None),
+        ]
+        .spacing(5)
+        .align_y(Alignment::Center),
+    )
+    .padding([1.0, 7.0])
+    .style(move |_| p.chip())
+    .into()
+}
+
 /// Chips for the settings of an attempt.
 fn setting_chips<'a>(p: Palette, s: &PrintSettings, duration: Option<u32>) -> Element<'a, Message> {
     let mut r = row![].spacing(theme::S2);
     if let Some(m) = &s.material {
-        r = r.push(chip(p, m.label().to_owned(), false));
+        r = r.push(material_chip(p, m));
     }
     if let Some(l) = s.layer_mm {
         r = r.push(chip(p, layer_text(l), true));
@@ -1205,7 +1229,7 @@ pub fn card_chips<'a>(p: Palette, hit: &printdex_core::ModelHit) -> Option<Eleme
     let r = hit.recipe.as_ref()?;
     let mut chips: Vec<Element<'a, Message>> = Vec::new();
     if let Some(m) = &r.material {
-        chips.push(chip(p, m.label().to_owned(), false));
+        chips.push(material_chip(p, m));
     }
     match (r.supports, r.layer_mm) {
         (Some(Supports::Normal | Supports::Tree), _) => {

@@ -81,11 +81,15 @@ fn preview_material(
     )
 }
 
-fn ramp(m: Option<crate::model_data::Material>) -> printdex_render::Material {
+/// The preview ramp for a material.
+pub fn ramp(m: Option<crate::model_data::Material>) -> printdex_render::Material {
     match m {
         Some(crate::model_data::Material::Petg) => printdex_render::Material::Petg,
         Some(crate::model_data::Material::Pla) => printdex_render::Material::Pla,
         Some(crate::model_data::Material::Tpu) => printdex_render::Material::Tpu,
+        Some(crate::model_data::Material::Asa | crate::model_data::Material::Abs) => {
+            printdex_render::Material::Asa
+        }
         _ => printdex_render::Material::Unknown,
     }
 }

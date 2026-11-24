@@ -36,7 +36,9 @@ pub use search::{
 };
 pub use sidecars::{SidecarState, SidecarTarget};
 pub use sync::{DeviceRow, EditEntry, FieldRow, SpaceKind, SpaceRow};
-pub use thumbs::{IMAGE_EXTENSIONS, ImageSource, ModelSources, PartSource, render_material};
+pub use thumbs::{
+    IMAGE_EXTENSIONS, ImageSource, ModelSources, PartSource, ramp as preview_ramp, render_material,
+};
 
 /// Handle to the Printdex database. Cheap to clone.
 #[derive(Clone, Debug)]

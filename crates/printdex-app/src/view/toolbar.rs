@@ -355,6 +355,11 @@ pub fn header(app: &App, p: Palette) -> Element<'_, Message> {
     .spacing(theme::S5)
     .align_y(Alignment::Center);
 
+    if !matches!(scope, Scope::Collection(_)) {
+        r = r
+            .push(Space::new().width(Length::Fill))
+            .push(quick_filters(app, p));
+    }
     if let Scope::Collection(id) = scope {
         let id = *id;
         r = r.push(Space::new().width(Length::Fill));
@@ -425,4 +430,37 @@ pub fn header(app: &App, p: Palette) -> Element<'_, Message> {
             right: theme::S7,
         })
         .into()
+}
+
+/// Material quick filters beside the heading: one pill per material with
+/// a ramp of its own, each with its swatch, toggling the same material
+/// chip the filter menu adds.
+fn quick_filters<'a>(app: &App, p: Palette) -> Element<'a, Message> {
+    use crate::filters::MatChip;
+    let mut r = row![].spacing(theme::S3).align_y(Alignment::Center);
+    for m in [MatChip::Petg, MatChip::Pla, MatChip::Tpu, MatChip::Asa] {
+        let chip = Chip::Material(m);
+        let on = app.chips.contains(&chip);
+        let material = m.material();
+        let ramp = printdex_core::preview_ramp(Some(material.clone()));
+        r = r.push(
+            button(
+                row![
+                    container(Space::new())
+                        .width(8)
+                        .height(8)
+                        .style(move |_| p.material_dot(ramp)),
+                    text(material.label().to_owned())
+                        .size(theme::SIZE_CAPTION)
+                        .font(theme::FONT_STRONG),
+                ]
+                .spacing(theme::S3)
+                .align_y(Alignment::Center),
+            )
+            .padding([3.0, 10.0])
+            .style(move |_, status| p.quick_filter(on, status))
+            .on_press(Message::ToggleChip(chip)),
+        );
+    }
+    r.into()
 }

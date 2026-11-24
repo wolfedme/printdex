@@ -90,6 +90,7 @@ fn list_row<'a>(app: &App, p: Palette, hit: &ModelHit) -> Element<'a, Message> {
     };
     let hovered = app.hovered == Some(hit.id);
     let id = hit.id;
+    let material = hit.preview_material;
     let well = container(preview(
         app,
         p,
@@ -99,7 +100,7 @@ fn list_row<'a>(app: &App, p: Palette, hit: &ModelHit) -> Element<'a, Message> {
     .padding(theme::S2)
     .width(40)
     .height(32)
-    .style(move |_| p.well());
+    .style(move |_| p.material_well(material));
     let mut thumb = iced::widget::stack![well];
     if picked {
         thumb = thumb.push(
