@@ -100,6 +100,10 @@ mod armed {
     struct Armed {
         id: u64,
         root: PathBuf,
+        /// `root` resolved the way the engine stores library paths: on
+        /// Windows a temp folder can be given by its 8.3 short name
+        /// (`RUNNER~1`) while the engine works with the long name.
+        canonical: Option<PathBuf>,
         op: Op,
         nth: usize,
         seen: usize,
@@ -143,6 +147,7 @@ mod armed {
         registry().push(Armed {
             id,
             root: root.to_path_buf(),
+            canonical: dunce::canonicalize(root).ok(),
             op,
             nth,
             seen: 0,
@@ -179,7 +184,11 @@ mod armed {
         let firing: Vec<Arc<Action>> = {
             let mut reg = registry();
             reg.iter_mut()
-                .filter(|a| a.op == op && path.starts_with(&a.root))
+                .filter(|a| {
+                    a.op == op
+                        && (path.starts_with(&a.root)
+                            || a.canonical.as_ref().is_some_and(|c| path.starts_with(c)))
+                })
                 .filter_map(|a| {
                     let hit = a.seen == a.nth;
                     a.seen += 1;
