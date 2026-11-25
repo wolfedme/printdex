@@ -11,7 +11,7 @@ It runs on Windows, macOS and Linux, needs no server or account, and works on li
 
 <picture>
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/readme/grid-light.png">
-  <img alt="The Printdex library: a grid of model previews in their material colours, with tags, collections and print results" src="docs/screenshots/readme/hero-dark.png">
+  <img alt="The Printdex library: a grid of model previews, each standing in a tray of its filament colour, with material quick filters, recipe chips and print results" src="docs/screenshots/readme/hero-dark.png">
 </picture>
 
 ## Status
