@@ -9,7 +9,8 @@ use crate::fs::{Fs, RealFs};
 use xxhash_rust::xxh3::Xxh3;
 
 /// Bytes sampled from each end of a large file.
-pub const SAMPLE_BYTES: u64 = 64 * 1024;
+pub const SAMPLE_BYTES: u64 = SAMPLE_LEN as u64;
+const SAMPLE_LEN: usize = 64 * 1024;
 
 /// Cheap content identity of a file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,7 +29,7 @@ pub fn fingerprint_with(fs: &dyn Fs, path: &Path) -> std::io::Result<Fingerprint
     let size = fs.metadata(path)?.len;
     let mut file = fs.open(path)?;
     let mut hasher = Xxh3::new();
-    let mut buf = vec![0u8; SAMPLE_BYTES as usize];
+    let mut buf = vec![0u8; SAMPLE_LEN];
     if size <= 2 * SAMPLE_BYTES {
         feed(&mut file, &mut hasher, &mut buf, size)?;
     } else {
@@ -44,6 +45,10 @@ pub fn fingerprint_with(fs: &dyn Fs, path: &Path) -> std::io::Result<Fingerprint
 
 /// Feeds exactly `len` bytes from `file` into `hasher`. A file that shrank
 /// since its size was read fails with `UnexpectedEof`.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "n is min(left, buf.len()), so n <= buf.len()"
+)]
 fn feed(file: &mut dyn Read, hasher: &mut Xxh3, buf: &mut [u8], len: u64) -> std::io::Result<()> {
     let mut left = len;
     while left > 0 {

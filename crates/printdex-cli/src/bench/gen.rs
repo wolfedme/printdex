@@ -70,6 +70,12 @@ pub const VOCABULARY: &str = "\
 
 const PART_FOLDERS: &[&str] = &["STLs", "supported", "unsupported"];
 
+/// A random entry of `items`, or the empty string for an empty slice (the
+/// constant tables are never empty).
+pub(super) fn pick<'a>(rng: &mut fastrand::Rng, items: &[&'a str]) -> &'a str {
+    rng.choice(items).copied().unwrap_or("")
+}
+
 /// Writes a synthetic library under `root`.
 pub fn generate(root: &Path, spec: &GenSpec) -> std::io::Result<GenReport> {
     let vocab: Vec<&str> = VOCABULARY.split_whitespace().collect();
@@ -82,11 +88,9 @@ pub fn generate(root: &Path, spec: &GenSpec) -> std::io::Result<GenReport> {
 
     fs::create_dir_all(root)?;
     while left > 0 {
-        let category = CATEGORIES[rng.usize(..CATEGORIES.len())];
+        let category = pick(&mut rng, CATEGORIES);
         let n_words = rng.usize(1..=3);
-        let words: Vec<&str> = (0..n_words)
-            .map(|_| vocab[rng.usize(..vocab.len())])
-            .collect();
+        let words: Vec<&str> = (0..n_words).map(|_| pick(&mut rng, &vocab)).collect();
         words_used.extend(words.iter().map(|w| w.to_string()));
 
         // About 5 % of parts are loose files directly in a category folder.
@@ -111,7 +115,7 @@ pub fn generate(root: &Path, spec: &GenSpec) -> std::io::Result<GenReport> {
         }
         let model_dir = format!("{category}/{name}");
         let parts = rng.u64(1..=12).min(left);
-        let part_folder = (rng.f32() < 0.4).then(|| PART_FOLDERS[rng.usize(..PART_FOLDERS.len())]);
+        let part_folder = (rng.f32() < 0.4).then(|| pick(&mut rng, PART_FOLDERS));
         for k in 0..parts {
             let ext = extension(&mut rng);
             let rel = match part_folder {

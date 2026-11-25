@@ -359,7 +359,7 @@ pub fn print_log<'a>(app: &'a App, p: Palette, data: &'a ModelData) -> Element<'
     } else {
         SHOWN_ATTEMPTS.min(data.attempts.len())
     };
-    for (i, a) in data.attempts[..shown].iter().enumerate() {
+    for (i, a) in data.attempts.iter().take(shown).enumerate() {
         if i > 0 {
             col = col.push(widgets::hairline(p));
         }

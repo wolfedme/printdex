@@ -145,9 +145,10 @@ pub(crate) async fn fingerprint_entries(
 ) {
     let jobs: Vec<(usize, PathBuf, u64, bool)> = which
         .iter()
-        .map(|&i| {
-            let is_3mf = files[i].kind == FileKind::Printable(PrintableFormat::ThreeMf);
-            (i, root.join(&files[i].rel_path), files[i].size, is_3mf)
+        .filter_map(|&i| {
+            let f = files.get(i)?;
+            let is_3mf = f.kind == FileKind::Printable(PrintableFormat::ThreeMf);
+            Some((i, root.join(&f.rel_path), f.size, is_3mf))
         })
         .collect();
     let results = run_cpu(move || {
@@ -303,6 +304,10 @@ pub(crate) fn clone_error(e: &CoreError) -> CoreError {
             max: *max,
         },
         CoreError::PhotoInvalid => CoreError::PhotoInvalid,
+        CoreError::DataTooNew(p) => CoreError::DataTooNew(p.clone()),
+        CoreError::DataCorrupt(p) => CoreError::DataCorrupt(p.clone()),
+        CoreError::DataReadOnly(p) => CoreError::DataReadOnly(p.clone()),
+        CoreError::DiskFull(p) => CoreError::DiskFull(p.clone()),
         CoreError::Io { path, source } => CoreError::Io {
             path: path.clone(),
             source: std::io::Error::new(source.kind(), source.to_string()),
@@ -414,8 +419,11 @@ async fn run_scan_with(
         }
     }
     let known: HashMap<&str, &KnownFile> = known.iter().map(|k| (k.rel_path.as_str(), k)).collect();
-    let which: Vec<usize> = (0..files.len())
-        .filter(|&i| needs_fingerprint(&known, &files[i]))
+    let which: Vec<usize> = files
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| needs_fingerprint(&known, f))
+        .map(|(i, _)| i)
         .collect();
 
     let mut fingerprints = HashMap::with_capacity(which.len());
@@ -438,7 +446,12 @@ async fn run_scan_with(
     // Drop files that vanished or changed mid-scan; re-key fingerprints to
     // the new indices.
     if !failed.is_empty() {
-        keep.extend(failed.iter().map(|&i| files[i].rel_path.clone()));
+        keep.extend(
+            failed
+                .iter()
+                .filter_map(|&i| files.get(i))
+                .map(|f| f.rel_path.clone()),
+        );
         let failed: std::collections::HashSet<usize> = failed.iter().copied().collect();
         let mut remap = HashMap::with_capacity(fingerprints.len());
         let mut remap_materials = HashMap::with_capacity(materials.len());

@@ -135,7 +135,7 @@ impl Db {
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(id)
-            .bind(seq as i64)
+            .bind(super::index_to_db(seq))
             .bind(s.model)
             .bind(s.kind.as_str())
             .bind(&s.name)
@@ -157,7 +157,7 @@ impl Db {
         sqlx::query("UPDATE file_op_steps SET how = ? WHERE op_id = ? AND seq = ?")
             .bind(how.as_str())
             .bind(id)
-            .bind(seq as i64)
+            .bind(super::index_to_db(seq))
             .execute(self.writer())
             .await?;
         Ok(())

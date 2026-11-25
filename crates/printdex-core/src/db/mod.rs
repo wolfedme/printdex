@@ -19,9 +19,27 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use sqlx::SqlitePool;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
+};
 
-use crate::error::Result;
+use crate::error::{CoreError, Result};
+
+/// A stored file size as `u64`. Rows we wrote never hold a negative size; a
+/// damaged one reads as 0 instead of wrapping to a huge value.
+pub(crate) fn size_from_db(v: i64) -> u64 {
+    u64::try_from(v).unwrap_or(0)
+}
+
+/// A file size as the `i64` SQLite stores, saturating at `i64::MAX`.
+pub(crate) fn size_to_db(v: u64) -> i64 {
+    i64::try_from(v).unwrap_or(i64::MAX)
+}
+
+/// A row position as the `i64` SQLite stores, saturating at `i64::MAX`.
+pub(crate) fn index_to_db(v: usize) -> i64 {
+    i64::try_from(v).unwrap_or(i64::MAX)
+}
 
 pub use files::KnownFile;
 pub use libraries::{ChangeMode, Library, LibraryKind};
@@ -51,7 +69,28 @@ pub struct Db {
 
 impl Db {
     /// Opens (creating if needed) the database at `path` and runs migrations.
+    ///
+    /// An existing database is checked first through a read-only
+    /// connection, which never checkpoints or deletes the `-wal`: one from
+    /// a newer Printdex, or one SQLite can't read, is reported without a
+    /// byte of it or its `-wal` changing. That connection stays open until
+    /// the pools are closed again on failure, so their closing can't
+    /// checkpoint either (only the last connection to close does).
     pub async fn open(path: &Path) -> Result<Db> {
+        let guard = if path.exists() {
+            Some(check_existing(path).await?)
+        } else {
+            None
+        };
+        let opened = Db::open_pools(path).await;
+        if let Some(guard) = guard {
+            use sqlx::Connection;
+            let _ = guard.close().await;
+        }
+        opened
+    }
+
+    async fn open_pools(path: &Path) -> Result<Db> {
         let base = SqliteConnectOptions::from_str("sqlite://")?
             .filename(path)
             .journal_mode(SqliteJournalMode::Wal)
@@ -63,12 +102,21 @@ impl Db {
             .max_connections(1)
             .connect_with(base.clone().create_if_missing(true))
             .await?;
-        sqlx::migrate!("./migrations").run(&writer).await?;
-
-        let reader = SqlitePoolOptions::new()
+        if let Err(e) = sqlx::migrate!("./migrations").run(&writer).await {
+            writer.close().await;
+            return Err(e.into());
+        }
+        let reader = match SqlitePoolOptions::new()
             .max_connections(4)
             .connect_with(base.read_only(true))
-            .await?;
+            .await
+        {
+            Ok(reader) => reader,
+            Err(e) => {
+                writer.close().await;
+                return Err(e.into());
+            }
+        };
         let photo_dir = path
             .parent()
             .map_or_else(|| PathBuf::from("photos"), |p| p.join("photos"));
@@ -77,8 +125,18 @@ impl Db {
             reader,
             photo_dir,
         };
-        // Parts from before path materials were stored (migration 0009).
-        db.fill_path_materials().await?;
+        let ready = async {
+            // Parts from before path materials were stored (migration 0009).
+            db.fill_path_materials().await?;
+            // The first write: fails here rather than in the engine.
+            db.install_id().await?;
+            Ok(())
+        };
+        if let Err(e) = ready.await {
+            db.reader.close().await;
+            db.writer.close().await;
+            return Err(e);
+        }
         Ok(db)
     }
 
@@ -98,6 +156,280 @@ impl Db {
     }
 }
 
+/// Reads an existing database through a read-only connection: its schema
+/// (so SQLite checks the header and page 1, with the `-wal` applied) and
+/// its applied migrations, failing with `VersionMissing` for one this
+/// build doesn't know. Returns the connection, still open.
+async fn check_existing(path: &Path) -> Result<SqliteConnection> {
+    use sqlx::{ConnectOptions, Connection};
+    let mut conn = SqliteConnectOptions::from_str("sqlite://")?
+        .filename(path)
+        .read_only(true)
+        .connect()
+        .await?;
+    match check_schema(&mut conn).await {
+        Ok(()) => Ok(conn),
+        Err(e) => {
+            let _ = conn.close().await;
+            Err(e)
+        }
+    }
+}
+
+async fn check_schema(conn: &mut SqliteConnection) -> Result<()> {
+    let tables: Vec<(String,)> =
+        sqlx::query_as("SELECT name FROM sqlite_master WHERE type = 'table'")
+            .fetch_all(&mut *conn)
+            .await?;
+    if !tables.iter().any(|(t,)| t == "_sqlx_migrations") {
+        return Ok(());
+    }
+    let applied: Vec<(i64,)> = sqlx::query_as("SELECT version FROM _sqlx_migrations")
+        .fetch_all(&mut *conn)
+        .await?;
+    let known: std::collections::HashSet<i64> = sqlx::migrate!("./migrations")
+        .iter()
+        .map(|m| m.version)
+        .collect();
+    match applied.into_iter().find(|(v,)| !known.contains(v)) {
+        Some((v,)) => Err(sqlx::migrate::MigrateError::VersionMissing(v).into()),
+        None => Ok(()),
+    }
+}
+
+/// What a failed [`Db::open`] (or a first query right after it) means for
+/// the user, when it is one of the failures they can act on: a database
+/// from a newer Printdex, a damaged file, a folder that can't be written,
+/// a full disk. Anything else is returned unchanged. `db` is the database
+/// file, carried by the new error.
+pub(crate) fn classify_open_error(e: CoreError, db: &Path) -> CoreError {
+    use sqlx::migrate::MigrateError;
+    let kind: Option<fn(PathBuf) -> CoreError> = match &e {
+        CoreError::Migrate(MigrateError::VersionMissing(_) | MigrateError::VersionTooNew(..)) => {
+            Some(CoreError::DataTooNew)
+        }
+        CoreError::Migrate(MigrateError::Execute(s) | MigrateError::ExecuteMigration(s, _))
+        | CoreError::Db(s) => sqlx_failure(s, db),
+        CoreError::Io { source, .. } => io_failure(source),
+        _ => None,
+    };
+    match kind {
+        Some(f) => f(db.to_path_buf()),
+        None => e,
+    }
+}
+
+fn sqlx_failure(e: &sqlx::Error, db: &Path) -> Option<fn(PathBuf) -> CoreError> {
+    match e {
+        sqlx::Error::Io(io) => io_failure(io),
+        sqlx::Error::Database(d) => {
+            // sqlx reports the extended result code; the low byte is the
+            // primary one.
+            let code = d.code()?.parse::<i32>().ok()? & 0xff;
+            match code {
+                SQLITE_CORRUPT | SQLITE_NOTADB => Some(CoreError::DataCorrupt),
+                SQLITE_READONLY => Some(CoreError::DataReadOnly),
+                SQLITE_CANTOPEN if !writable(db) => Some(CoreError::DataReadOnly),
+                SQLITE_FULL => Some(CoreError::DiskFull),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn io_failure(e: &std::io::Error) -> Option<fn(PathBuf) -> CoreError> {
+    (e.kind() == std::io::ErrorKind::StorageFull).then_some(CoreError::DiskFull)
+}
+
+// SQLite primary result codes (https://www.sqlite.org/rescode.html).
+const SQLITE_READONLY: i32 = 8;
+const SQLITE_CORRUPT: i32 = 11;
+const SQLITE_FULL: i32 = 13;
+const SQLITE_CANTOPEN: i32 = 14;
+const SQLITE_NOTADB: i32 = 26;
+
+/// Whether this process can write the database file (when it exists) and
+/// its folder, where SQLite keeps the `-wal` and `-shm` files.
+fn writable(db: &Path) -> bool {
+    let dir = db.parent().unwrap_or(Path::new("."));
+    (!db.exists() || can_write(db)) && can_write(dir)
+}
+
+#[cfg(unix)]
+fn can_write(path: &Path) -> bool {
+    rustix::fs::access(path, rustix::fs::Access::WRITE_OK).is_ok()
+}
+
+#[cfg(not(unix))]
+fn can_write(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| !m.permissions().readonly())
+}
+
+/// [`classify_open_error`], and when that leaves a plain SQLite error,
+/// whether `PRAGMA quick_check(1)` finds the file damaged. Runs only after
+/// opening failed: the check reads every page, too slow for every start.
+pub(crate) async fn diagnose_open_error(e: CoreError, db: &Path) -> CoreError {
+    let e = classify_open_error(e, db);
+    let plain_sqlite = matches!(
+        &e,
+        CoreError::Db(sqlx::Error::Database(_))
+            | CoreError::Migrate(sqlx::migrate::MigrateError::Execute(sqlx::Error::Database(
+                _
+            )))
+            | CoreError::Migrate(sqlx::migrate::MigrateError::ExecuteMigration(
+                sqlx::Error::Database(_),
+                _
+            ))
+    );
+    if plain_sqlite && quick_check_fails(db).await {
+        return CoreError::DataCorrupt(db.to_path_buf());
+    }
+    e
+}
+
+/// Runs `PRAGMA quick_check(1)` on a read-only connection: true when it
+/// reports a problem or can't run because the file is damaged.
+async fn quick_check_fails(db: &Path) -> bool {
+    use sqlx::{ConnectOptions, Connection};
+    let Ok(opts) = SqliteConnectOptions::from_str("sqlite://") else {
+        return false;
+    };
+    let check = async {
+        let mut conn = opts.filename(db).read_only(true).connect().await?;
+        let row = sqlx::query_as::<_, (String,)>("PRAGMA quick_check(1)")
+            .fetch_one(&mut conn)
+            .await;
+        // Close on every path: an open handle blocks moving the file aside
+        // on Windows.
+        let _ = conn.close().await;
+        Ok::<_, sqlx::Error>(row?.0)
+    };
+    match check.await {
+        Ok(result) => result != "ok",
+        Err(e) => matches!(
+            classify_open_error(CoreError::Db(e), db),
+            CoreError::DataCorrupt(_)
+        ),
+    }
+}
+
+#[cfg(test)]
+mod open_error_tests {
+    use super::*;
+
+    fn db() -> PathBuf {
+        PathBuf::from("/data/printdex.db")
+    }
+
+    #[test]
+    fn classify_maps_disk_full() {
+        let e = CoreError::Io {
+            path: PathBuf::from("/data"),
+            source: std::io::Error::from(std::io::ErrorKind::StorageFull),
+        };
+        assert!(matches!(classify_open_error(e, &db()), CoreError::DiskFull(p) if p == db()));
+        let e = CoreError::Db(sqlx::Error::Io(std::io::Error::from(
+            std::io::ErrorKind::StorageFull,
+        )));
+        assert!(matches!(
+            classify_open_error(e, &db()),
+            CoreError::DiskFull(_)
+        ));
+    }
+
+    #[test]
+    fn classify_maps_newer_migrations() {
+        let e = CoreError::Migrate(sqlx::migrate::MigrateError::VersionMissing(9999));
+        assert!(matches!(classify_open_error(e, &db()), CoreError::DataTooNew(p) if p == db()));
+    }
+
+    /// An SQLite error the classification doesn't know (`SQLITE_ERROR`).
+    #[derive(Debug)]
+    struct Plain;
+
+    impl std::fmt::Display for Plain {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("(code: 1) something went wrong")
+        }
+    }
+
+    impl std::error::Error for Plain {}
+
+    impl sqlx::error::DatabaseError for Plain {
+        fn message(&self) -> &str {
+            "something went wrong"
+        }
+        fn code(&self) -> Option<std::borrow::Cow<'_, str>> {
+            Some("1".into())
+        }
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+            self
+        }
+        fn kind(&self) -> sqlx::error::ErrorKind {
+            sqlx::error::ErrorKind::Other
+        }
+    }
+
+    fn plain() -> CoreError {
+        CoreError::Db(sqlx::Error::Database(Box::new(Plain)))
+    }
+
+    async fn created(dir: &Path) -> PathBuf {
+        let path = dir.join("printdex.db");
+        Db::open(&path).await.unwrap().close().await;
+        path
+    }
+
+    /// An unclassified SQLite error on a file whose pages after the first
+    /// are garbage: `quick_check` finds the damage.
+    #[tokio::test]
+    async fn diagnose_runs_quick_check_on_plain_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = created(dir.path()).await;
+        let mut bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.len() > 4096, "more than one page");
+        for b in &mut bytes[4096..] {
+            *b = 0xAB;
+        }
+        std::fs::write(&path, &bytes).unwrap();
+        let e = diagnose_open_error(plain(), &path).await;
+        assert!(matches!(e, CoreError::DataCorrupt(p) if p == path));
+        assert_eq!(std::fs::read(&path).unwrap(), bytes, "the check only reads");
+    }
+
+    #[tokio::test]
+    async fn diagnose_leaves_plain_errors_on_healthy_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = created(dir.path()).await;
+        let e = diagnose_open_error(plain(), &path).await;
+        assert!(
+            matches!(e, CoreError::Db(sqlx::Error::Database(_))),
+            "{e:?}"
+        );
+    }
+
+    #[test]
+    fn classify_leaves_other_errors() {
+        let e = classify_open_error(CoreError::Cancelled, &db());
+        assert!(matches!(e, CoreError::Cancelled));
+        let e = CoreError::Io {
+            path: db(),
+            source: std::io::Error::from(std::io::ErrorKind::NotFound),
+        };
+        assert!(matches!(
+            classify_open_error(e, &db()),
+            CoreError::Io { .. }
+        ));
+    }
+}
+
 #[cfg(test)]
 mod migration_tests {
     /// Two branches merged migrations with the same number once (0008),
@@ -113,5 +445,24 @@ mod migration_tests {
                 panic!("migrations {other} and {name} share version {version}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+
+    #[test]
+    fn negative_stored_size_reads_as_zero() {
+        assert_eq!(size_from_db(-1), 0);
+        assert_eq!(size_from_db(i64::MIN), 0);
+        assert_eq!(size_from_db(42), 42);
+    }
+
+    #[test]
+    fn oversized_values_saturate() {
+        assert_eq!(size_to_db(u64::MAX), i64::MAX);
+        assert_eq!(size_to_db(7), 7);
+        assert_eq!(index_to_db(3), 3);
     }
 }

@@ -24,16 +24,17 @@ const RETRIES: usize = 5;
 
 /// The runtime OpenDAL's blocking API runs its futures on. Backups run on
 /// blocking threads, never on the engine's async workers.
-fn runtime() -> &'static Runtime {
+fn runtime() -> std::io::Result<&'static Runtime> {
     static RUNTIME: OnceLock<Runtime> = OnceLock::new();
-    RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .thread_name("printdex-backup-io")
-            .enable_all()
-            .build()
-            .expect("backup I/O runtime")
-    })
+    if let Some(rt) = RUNTIME.get() {
+        return Ok(rt);
+    }
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_name("printdex-backup-io")
+        .enable_all()
+        .build()?;
+    Ok(RUNTIME.get_or_init(|| rt))
 }
 
 /// An upload limit in bytes per second (with a one-second burst).
@@ -69,7 +70,14 @@ pub(crate) fn layered_operator(
 impl RemoteBackend {
     /// Wraps a layered operator (see [`layered_operator`]).
     pub fn from_operator(op: opendal::Operator, location: String) -> RusticResult<Self> {
-        let _guard = runtime().enter();
+        let rt = runtime().map_err(|e| {
+            RusticError::with_source(
+                ErrorKind::Backend,
+                "Starting the backup I/O runtime failed.",
+                e,
+            )
+        })?;
+        let _guard = rt.enter();
         let op = Operator::new(op)
             .map_err(|e| backend_err("Setting up the backup target failed.", e))?;
         Ok(Self { op, location })

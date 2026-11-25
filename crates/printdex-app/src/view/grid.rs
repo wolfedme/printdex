@@ -25,10 +25,9 @@ pub fn view(app: &App, p: Palette) -> Element<'_, Message> {
 
     let mut col = column![Space::new().height(GRID_PAD_Y + visible.start as f32 * stride)];
     for r in visible.clone() {
-        let start = r * m.columns;
-        let end = (start + m.columns).min(hits.len());
+        let items = crate::grid::item_range(r..r + 1, m.columns, hits.len());
         let mut panes = row![].spacing(COLUMN_GAP);
-        for hit in &hits[start..end] {
+        for hit in hits.get(items).unwrap_or_default() {
             panes = panes.push(pane(app, p, &m, hit));
         }
         col = col.push(container(panes).height(stride).align_y(Alignment::Start));

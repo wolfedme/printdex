@@ -8,6 +8,7 @@ use crate::db::Library;
 use crate::error::CoreError;
 use crate::ids::{LibraryId, ModelId};
 use crate::scan::ScanSummary;
+use crate::supervise::TaskName;
 use crate::thumbs::{ThumbFailure, ThumbKind, ThumbTarget};
 
 /// Stage of a running scan.
@@ -114,4 +115,7 @@ pub enum EngineEvent {
         space: i64,
         count: usize,
     },
+    /// A background task panicked repeatedly and was stopped for the rest
+    /// of the session.
+    TaskStopped(TaskName),
 }

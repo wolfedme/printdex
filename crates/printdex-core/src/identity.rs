@@ -57,9 +57,8 @@ pub fn match_moves(arrivals: &[Arrival], candidates: &[Candidate]) -> HashMap<us
         }
         let mut scored: Vec<(usize, f64)> = hits
             .into_iter()
-            .filter(|&(c, _)| candidates[c].kind == arr.kind)
             .filter_map(|(c, n)| {
-                let cand = &candidates[c];
+                let cand = candidates.get(c).filter(|cand| cand.kind == arr.kind)?;
                 let old_share = n as f64 / cand.keys.len() as f64;
                 let new_share = n as f64 / arr.keys.len() as f64;
                 let ok = match arr.kind {
@@ -89,7 +88,7 @@ pub fn match_moves(arrivals: &[Arrival], candidates: &[Candidate]) -> HashMap<us
     for c in best.values() {
         *claims.entry(*c).or_default() += 1;
     }
-    best.retain(|_, c| claims[c] == 1);
+    best.retain(|_, c| claims.get(c) == Some(&1));
     best
 }
 

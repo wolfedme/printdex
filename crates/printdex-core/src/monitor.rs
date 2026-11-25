@@ -27,6 +27,7 @@ use crate::engine::{Engine, LibraryStatus, folder_status};
 use crate::error::CoreError;
 use crate::events::EngineEvent;
 use crate::ids::LibraryId;
+use crate::supervise::{TaskName, spawn_supervised};
 use crate::walk::is_sidecar_name;
 
 /// Timings and limits of the monitor. The defaults are the product's;
@@ -100,8 +101,18 @@ impl Engine {
     /// Starts the monitor with `config`.
     pub fn start_monitor_with(&self, config: MonitorConfig) -> Monitor {
         let cancel = CancellationToken::new();
-        let events = self.subscribe();
-        let task = tokio::spawn(supervise(self.clone(), config, events, cancel.clone()));
+        let engine = self.clone();
+        let token = cancel.clone();
+        // A restart re-enters with the config and lines the libraries up
+        // with the database again.
+        let task = spawn_supervised(TaskName::Monitor, self.events.clone(), move || {
+            supervise(
+                engine.clone(),
+                config.clone(),
+                engine.subscribe(),
+                token.clone(),
+            )
+        });
         Monitor {
             cancel,
             task: Some(task),
@@ -138,12 +149,16 @@ async fn supervise(
     mut events: broadcast::Receiver<EngineEvent>,
     cancel: CancellationToken,
 ) {
+    // Stops this run's library workers however it ends, also when it
+    // panics, so a restart does not start them twice.
+    let run = cancel.child_token();
+    let _stop_workers = run.clone().drop_guard();
     let mut workers: HashMap<LibraryId, Worker> = HashMap::new();
     let start = |workers: &mut HashMap<LibraryId, Worker>, lib: Library| {
         if let Some(old) = workers.remove(&lib.id) {
             old.cancel.cancel();
         }
-        let token = cancel.child_token();
+        let token = run.child_token();
         workers.insert(
             lib.id,
             Worker {
@@ -151,7 +166,10 @@ async fn supervise(
                 cancel: token.clone(),
             },
         );
-        tokio::spawn(run_library(engine.clone(), lib, config.clone(), token));
+        let (engine, config) = (engine.clone(), config.clone());
+        spawn_supervised(TaskName::Monitor, engine.events.clone(), move || {
+            run_library(engine.clone(), lib.clone(), config.clone(), token.clone())
+        });
     };
 
     let mut libs = engine.libraries().await.unwrap_or_default();
@@ -172,6 +190,7 @@ async fn supervise(
     }
 
     loop {
+        crate::fsx::faults::checkpoint_at(TaskName::Monitor, "supervise");
         let event = tokio::select! {
             () = cancel.cancelled() => break,
             e = events.recv() => e,
@@ -375,6 +394,7 @@ async fn run_library(
     let mut pending = Pending::default();
 
     loop {
+        crate::fsx::faults::checkpoint_at(TaskName::Monitor, "library");
         tokio::select! {
             () = cancel.cancelled() => break,
             _ = probe.tick() => {

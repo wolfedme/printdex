@@ -37,8 +37,17 @@ pub fn pack(n: [f32; 3]) -> PackedNormal {
     if len == 0.0 || !len.is_finite() {
         return [0; 4];
     }
-    // Rounds by truncating a positive value (no libm call).
-    let c = |v: f32| ((v / len * 127.0 + 127.5) as i32 - 127) as i8;
+    // Rounds by truncating a positive value (no libm call). `v / len` can
+    // exceed 1 when `dot(n, n)` is subnormal and rounds down, so clamp
+    // before narrowing: a tiny vector saturates rather than flipping sign.
+    let c = |v: f32| {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "float-to-int `as` saturates (NaN is 0); the result is clamped next"
+        )]
+        let r = (v / len * 127.0 + 127.5) as i32;
+        i8::try_from(r.saturating_sub(127).clamp(-127, 127)).unwrap_or(0)
+    };
     [c(n[0]), c(n[1]), c(n[2]), 0]
 }
 
@@ -51,7 +60,14 @@ pub fn unpack(n: PackedNormal) -> [f32; 3] {
 /// the ids and the number of distinct positions.
 ///
 /// An open-addressing table of ids, probed linearly; several times faster
-/// than a general hash map for this one job.
+/// than a general hash map for this one job. Needs fewer than `u32::MAX`
+/// positions.
+#[expect(
+    clippy::indexing_slicing,
+    clippy::cast_possible_truncation,
+    reason = "slot indices are the top bits of a hash (h >> (64 - bits)) or masked with \
+              len - 1, below the power-of-two table length, so they fit usize and index in bounds"
+)]
 fn weld(positions: &[[f32; 3]]) -> (Vec<u32>, usize) {
     // A multiply-xorshift mix; tables take the high bits.
     let hash = |k: [u32; 3]| {
@@ -113,10 +129,16 @@ fn weld(positions: &[[f32; 3]]) -> (Vec<u32>, usize) {
 
 /// One smooth normal per corner of `mesh` (same order as
 /// `mesh.positions`), in the winding of the corner's own face.
-/// Degenerate faces get a zero normal.
+/// Degenerate faces, and the positions of a trailing partial triangle,
+/// get a zero normal.
 pub fn corner_normals(mesh: &Mesh) -> Vec<PackedNormal> {
+    // Vertex and corner ids are `u32`: too many corners draw flat.
+    if u32::try_from(mesh.positions.len()).is_err() {
+        return vec![[0; 4]; mesh.positions.len()];
+    }
     let tris = mesh.positions.as_chunks::<3>().0;
-    let (ids, verts) = weld(&mesh.positions);
+    // Only whole triangles: a partial one has no face to look up.
+    let (ids, verts) = weld(tris.as_flattened());
 
     // Unit face normals and areas (twice the area; only ratios matter).
     let faces: Vec<([f32; 3], f32)> = tris
@@ -132,20 +154,29 @@ pub fn corner_normals(mesh: &Mesh) -> Vec<PackedNormal> {
         })
         .collect();
 
-    // The corners at each vertex, as one flat list with offsets.
+    // The corners at each vertex, as one flat list with offsets: vertex
+    // `v`'s corners are `around[start[v]..start[v + 1]]`. (Every id is
+    // below `verts`, so the lookups below always succeed.)
     let mut start = vec![0u32; verts + 1];
     for &v in &ids {
-        start[v as usize + 1] += 1;
+        if let Some(n) = start.get_mut(v as usize + 1) {
+            *n += 1;
+        }
     }
-    for i in 0..verts {
-        start[i + 1] += start[i];
+    let mut total = 0;
+    for s in &mut start {
+        total += *s;
+        *s = total;
     }
     let mut fill = start.clone();
     let mut around = vec![0u32; ids.len()];
-    for (corner, &v) in ids.iter().enumerate() {
-        let slot = &mut fill[v as usize];
-        around[*slot as usize] = corner as u32;
-        *slot += 1;
+    for (corner, &v) in (0u32..).zip(&ids) {
+        if let Some(slot) = fill.get_mut(v as usize) {
+            if let Some(a) = around.get_mut(*slot as usize) {
+                *a = corner;
+            }
+            *slot += 1;
+        }
     }
     drop(fill);
     drop(ids);
@@ -155,10 +186,19 @@ pub fn corner_normals(mesh: &Mesh) -> Vec<PackedNormal> {
     let crease = CREASE_DEGREES.to_radians().cos();
     let mut out = vec![[0i8; 4]; mesh.positions.len()];
     let mut local: Vec<([f32; 3], f32)> = Vec::new();
-    for v in 0..verts {
-        let corners = &around[start[v] as usize..start[v + 1] as usize];
+    for span in start.windows(2) {
+        let &[from, to] = span else {
+            continue;
+        };
+        let corners = around.get(from as usize..to as usize).unwrap_or_default();
         local.clear();
-        local.extend(corners.iter().map(|&c| faces[c as usize / 3]));
+        local.extend(corners.iter().map(|&c| {
+            // A missing face counts as degenerate.
+            faces
+                .get(c as usize / 3)
+                .copied()
+                .unwrap_or(([0.0; 3], 0.0))
+        }));
         for (&c, &(own, area)) in corners.iter().zip(&local) {
             if area == 0.0 {
                 continue;
@@ -166,12 +206,14 @@ pub fn corner_normals(mesh: &Mesh) -> Vec<PackedNormal> {
             let mut sum = [0.0f32; 3];
             for &(n, a) in &local {
                 if dot(n, own) >= crease {
-                    for k in 0..3 {
-                        sum[k] += n[k] * a;
+                    for (s, v) in sum.iter_mut().zip(n) {
+                        *s += v * a;
                     }
                 }
             }
-            out[c as usize] = pack(sum);
+            if let Some(o) = out.get_mut(c as usize) {
+                *o = pack(sum);
+            }
         }
     }
     out
@@ -236,5 +278,34 @@ mod tests {
             positions: vec![[0.0; 3], [0.0; 3], [1.0, 0.0, 0.0]],
         };
         assert_eq!(corner_normals(&m), vec![[0; 4]; 3]);
+    }
+
+    #[test]
+    fn tiny_vectors_keep_their_sign() {
+        // dot(n, n) is subnormal and rounds down, so v / len exceeds 1.
+        assert_eq!(pack([4e-23, 0.0, 0.0]), [127, 0, 0, 0]);
+        assert_eq!(pack([-4e-23, 0.0, 0.0]), [-127, 0, 0, 0]);
+        let [x, y, z, _] = pack([0.0, 4e-23, -4e-23]);
+        assert!(x == 0 && y > 0 && z < 0, "{x} {y} {z}");
+    }
+
+    #[test]
+    fn trailing_positions_of_a_partial_triangle_get_zero() {
+        // A mesh built by hand can end with a partial triangle.
+        let mut m = Mesh {
+            positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        };
+        m.positions.extend([[5.0, 5.0, 5.0], [0.0, 0.0, 0.0]]);
+        let n = corner_normals(&m);
+        assert_eq!(n.len(), 5);
+        assert_eq!(&n[..3], &[[0, 0, 127, 0]; 3]);
+        assert_eq!(&n[3..], &[[0; 4]; 2]);
+        for short in 1..3 {
+            let m = Mesh {
+                positions: vec![[1.0; 3]; short],
+            };
+            assert_eq!(corner_normals(&m), vec![[0; 4]; short]);
+        }
+        assert!(corner_normals(&Mesh::default()).is_empty());
     }
 }

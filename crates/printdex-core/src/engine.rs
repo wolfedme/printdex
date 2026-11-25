@@ -19,6 +19,9 @@ use crate::scan::{ScanSummary, SidecarCtx, scan_library, scan_subtrees};
 use crate::sidecar::SidecarWriter;
 use crate::thumbs::ThumbnailService;
 
+/// The database file in the data folder.
+const DB_FILE: &str = "printdex.db";
+
 /// Event channel capacity. Slow subscribers miss old events (`Lagged`).
 const EVENT_CAPACITY: usize = 1024;
 
@@ -151,11 +154,24 @@ impl Engine {
         })?;
         crate::backup::restore::apply_staged(data_dir)?;
         sweep_data_dir(data_dir).await;
-        let db = Db::open(&data_dir.join("printdex.db")).await?;
+        let db_path = data_dir.join(DB_FILE);
+        let opened = async {
+            let db = Db::open(&db_path).await?;
+            let install = db.install_id().await?;
+            Ok::<_, CoreError>((db, install))
+        };
+        let (db, install) = match opened.await {
+            Ok(v) => v,
+            Err(e) => return Err(crate::db::diagnose_open_error(e, &db_path).await),
+        };
         let (events, _) = broadcast::channel(EVENT_CAPACITY);
         let thumbs = ThumbnailService::start(db.clone(), events.clone(), cache_dir);
-        let install = db.install_id().await?;
-        let sidecars = SidecarWriter::start(db.clone(), install, crate::sidecar::DEBOUNCE);
+        let sidecars = SidecarWriter::start(
+            db.clone(),
+            install,
+            crate::sidecar::DEBOUNCE,
+            events.clone(),
+        );
         let engine = Engine {
             db,
             events,
@@ -176,6 +192,65 @@ impl Engine {
             Err(e) => tracing::warn!(error = %e, "could not check interrupted file actions"),
         }
         Ok(engine)
+    }
+
+    /// Moves a damaged `printdex.db` (and its `-wal` and `-shm`, when
+    /// there) out of the way as `printdex.db.broken-<ms>` (`…-wal`,
+    /// `…-shm`), never replacing anything, so the next open starts an empty
+    /// database. Returns the database's new path. Call it only while no
+    /// engine has the folder open.
+    ///
+    /// The companions move first: a `-wal` left next to a new database
+    /// could be replayed into it. If the database itself can't be moved,
+    /// they are moved back.
+    pub fn set_aside_database(data_dir: &Path) -> Result<PathBuf> {
+        let db = data_dir.join(DB_FILE);
+        let io = |path: &Path, source: std::io::Error| {
+            let read_only = matches!(
+                source.kind(),
+                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+            );
+            if read_only {
+                return CoreError::DataReadOnly(db.clone());
+            }
+            crate::db::classify_open_error(
+                CoreError::Io {
+                    path: path.to_path_buf(),
+                    source,
+                },
+                &db,
+            )
+        };
+        db.symlink_metadata().map_err(|e| io(&db, e))?;
+        let aside = data_dir.join(format!("{DB_FILE}.broken-{}", crate::time::now_ms()));
+        let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
+        let undo = |moved: &[(PathBuf, PathBuf)]| {
+            for (from, to) in moved {
+                if let Err(e) = crate::fsx::rename_no_replace(to, from) {
+                    tracing::warn!(error = %e, path = %to.display(), "could not move back");
+                }
+            }
+        };
+        for suffix in ["-wal", "-shm"] {
+            let from = data_dir.join(format!("{DB_FILE}{suffix}"));
+            if from.symlink_metadata().is_err() {
+                continue;
+            }
+            let mut to = aside.clone().into_os_string();
+            to.push(suffix);
+            let to = PathBuf::from(to);
+            if let Err(e) = crate::fsx::rename_no_replace(&from, &to) {
+                undo(&moved);
+                return Err(io(&from, e));
+            }
+            moved.push((from, to));
+        }
+        if let Err(e) = crate::fsx::rename_no_replace(&db, &aside) {
+            undo(&moved);
+            return Err(io(&db, e));
+        }
+        tracing::warn!(path = %aside.display(), "set the damaged database aside");
+        Ok(aside)
     }
 
     /// This install's id (the host name of its backups).

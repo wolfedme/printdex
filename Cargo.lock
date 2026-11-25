@@ -4876,6 +4876,7 @@ dependencies = [
  "keyring",
  "notify",
  "opendal",
+ "pin-project-lite",
  "printdex-core",
  "printdex-mesh",
  "printdex-render",

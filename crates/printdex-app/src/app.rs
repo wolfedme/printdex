@@ -13,12 +13,12 @@ use iced::{Event, Size, Subscription, Task, event, window};
 use printdex_core::diagnostics::{self, CrashReport};
 use printdex_core::{
     AttemptResult, CoreError, Engine, EngineEvent, Library, LibraryId, LibraryStatus, ModelDetail,
-    ModelHit, ModelId, PartInfo, ScanPhase, ScanSummary, Scope, SortOrder, ThumbTarget,
+    ModelHit, ModelId, PartInfo, ScanPhase, ScanSummary, Scope, SortOrder, TaskName, ThumbTarget,
 };
 use tokio_util::sync::CancellationToken;
 
 use crate::filters::{self, Chip};
-use crate::grid::GridMetrics;
+use crate::grid::{self, GridMetrics};
 use crate::i18n::{Arg, t, t_args};
 use crate::motion::Motion;
 use crate::nav::{self, Move};
@@ -167,7 +167,84 @@ pub enum Screen {
 pub enum Boot {
     Opening,
     Ready,
-    Failed(PathBuf),
+    /// The engine didn't open the data folder `dir`.
+    Failed {
+        dir: PathBuf,
+        reason: BootFailure,
+    },
+}
+
+/// Why the data folder didn't open, by what the user can do about it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BootFailure {
+    /// A newer Printdex used it last: update Printdex.
+    TooNew,
+    /// The database is damaged: set it aside and start fresh.
+    Corrupt,
+    /// The folder or database can't be written: fix permissions.
+    ReadOnly,
+    /// The disk is full: free space and try again.
+    DiskFull,
+    Other,
+}
+
+impl BootFailure {
+    pub fn of(e: &CoreError) -> BootFailure {
+        match e {
+            CoreError::DataTooNew(_) => BootFailure::TooNew,
+            CoreError::DataCorrupt(_) => BootFailure::Corrupt,
+            CoreError::DataReadOnly(_) => BootFailure::ReadOnly,
+            CoreError::DiskFull(_) => BootFailure::DiskFull,
+            _ => BootFailure::Other,
+        }
+    }
+}
+
+/// What the buttons on the "could not open" screen do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BootUx {
+    /// Move the damaged database aside, then open again.
+    SetAside,
+    /// Open again (after freeing disk space).
+    Retry,
+    /// Open the data folder in the file manager.
+    ShowFolder,
+    /// Open a prefilled bug report.
+    Report,
+}
+
+/// The "could not open" screen's title and explanation for `reason`.
+pub(crate) fn boot_failure_text(reason: BootFailure, dir: &std::path::Path) -> (String, String) {
+    let path = || [("path", Arg::str(dir.display().to_string()))];
+    match reason {
+        BootFailure::TooNew => (t("boot-too-new-title"), t("boot-too-new")),
+        BootFailure::Corrupt => (t("boot-corrupt-title"), t_args("boot-corrupt", &path())),
+        BootFailure::ReadOnly => (t("boot-read-only-title"), t_args("boot-read-only", &path())),
+        BootFailure::DiskFull => (t("boot-disk-full-title"), t_args("boot-disk-full", &path())),
+        BootFailure::Other => (t("boot-other-title"), t_args("app-open-failed", &path())),
+    }
+}
+
+/// Opens the engine on `dir`; the result is the boot message.
+pub(crate) async fn open_engine(dir: PathBuf, cache: PathBuf) -> Message {
+    Message::Booted(
+        Engine::open_with_cache(&dir, &cache)
+            .await
+            .map_err(Arc::new),
+    )
+}
+
+/// Sets the damaged database in `dir` aside (off the UI thread).
+pub(crate) async fn set_aside(dir: PathBuf) -> Message {
+    let r = tokio::task::spawn_blocking(move || Engine::set_aside_database(&dir))
+        .await
+        .unwrap_or_else(|e| {
+            Err(CoreError::Io {
+                path: PathBuf::new(),
+                source: std::io::Error::other(e),
+            })
+        });
+    Message::SetAside(r.map_err(Arc::new))
 }
 
 /// Progress of one library's running scan.
@@ -201,6 +278,9 @@ pub struct App {
     /// Watches libraries for changes and offline shares while the app runs.
     pub monitor: Option<Arc<printdex_core::Monitor>>,
     pub boot: Boot,
+    /// Where a damaged database was set aside: shown once the engine opens,
+    /// beside the stopped-task toasts, until dismissed.
+    pub boot_note: Option<String>,
     pub libraries: Vec<Library>,
     pub counts: HashMap<LibraryId, u64>,
     pub scans: HashMap<LibraryId, ScanState>,
@@ -219,6 +299,9 @@ pub struct App {
     pub settings_section: SettingsSection,
     /// The unseen crash the notice above the library is about.
     pub crash: Option<CrashReport>,
+    /// Engine tasks that stopped after repeated errors, each with a toast
+    /// until dismissed, oldest first.
+    pub stopped: Vec<TaskName>,
     /// A startup note (a config file was set aside), shown once at boot.
     pub config_notice: Option<String>,
     /// Never save over `settings.toml`: it is broken and couldn't be set
@@ -253,15 +336,35 @@ pub struct App {
     started: std::time::Instant,
 }
 
+/// The toast text for an engine task that stopped after repeated errors.
+pub(crate) fn task_stopped_text(task: TaskName) -> String {
+    let label = t(match task {
+        TaskName::SidecarWriter => "task-sidecars",
+        TaskName::Thumbnails => "task-thumbnails",
+        TaskName::Monitor => "task-monitor",
+        TaskName::BackupScheduler => "task-backup",
+        TaskName::Sync => "task-sync",
+    });
+    t_args("task-stopped", &[("task", Arg::str(label))])
+}
+
 /// Libraries and their present-model counts.
 pub type LibrarySnapshot = (Vec<Library>, HashMap<LibraryId, u64>);
 
 #[derive(Clone, Debug)]
 pub enum Message {
     Booted(Result<Engine, Arc<CoreError>>),
+    /// A button on the "could not open" screen.
+    BootAction(BootUx),
+    /// The damaged database was moved to this path, or why it wasn't.
+    SetAside(Result<PathBuf, Arc<CoreError>>),
+    /// Hide the "damaged database kept at …" note.
+    DismissBootNote,
     MonitorStarted(Arc<printdex_core::Monitor>),
     Files(crate::files::Fx),
     CrashNotice(CrashUx),
+    /// Hide the "stopped after repeated errors" toast of this task.
+    DismissTaskStopped(TaskName),
     Report(ReportUx),
     Updates(crate::updates::Ux),
     Backup(crate::backup_ui::Bx),
@@ -377,6 +480,7 @@ impl App {
                 ..Default::default()
             },
             boot: Boot::Opening,
+            boot_note: None,
             libraries: Vec::new(),
             counts: HashMap::new(),
             scans: HashMap::new(),
@@ -396,6 +500,7 @@ impl App {
             filter_menu: false,
             settings_section: SettingsSection::default(),
             crash,
+            stopped: Vec::new(),
             config_notice,
             settings_kept,
             apps_kept,
@@ -419,16 +524,10 @@ impl App {
 
     /// Initial state and the tasks that open the engine and read the OS theme.
     pub fn boot(options: Options) -> (App, Task<Message>) {
-        let dir = options.data_dir.clone();
-        let cache = options.cache_dir.clone();
-        let open = Task::perform(
-            async move {
-                Engine::open_with_cache(&dir, &cache)
-                    .await
-                    .map_err(Arc::new)
-            },
-            Message::Booted,
-        );
+        let open = Task::future(open_engine(
+            options.data_dir.clone(),
+            options.cache_dir.clone(),
+        ));
         let mode = iced::system::theme().map(Message::SystemMode);
         let mut app = App::new(options);
         app.updates = crate::updates::Updates::start();
@@ -489,6 +588,13 @@ impl App {
         self.motion
             .selection_changed(self.selected, id, std::time::Instant::now());
         self.selected = id;
+    }
+
+    /// Clears the selection if it is `id`, a model that no longer exists.
+    pub(crate) fn forget_selection(&mut self, id: ModelId) {
+        if self.selected == Some(id) {
+            self.set_selected(None);
+        }
     }
 
     pub fn title(&self) -> String {
@@ -585,11 +691,12 @@ impl App {
                     ViewMode::Grid => {
                         let m = self.metrics();
                         let rows = m.visible_rows(vp.offset - GRID_PAD_Y, vp.height, hits.len());
-                        rows.start * m.columns..(rows.end * m.columns).min(hits.len())
+                        grid::item_range(rows, m.columns, hits.len())
                     }
                     ViewMode::List => crate::list::visible_rows(vp.offset, vp.height, hits.len()),
                 };
-                hits[range]
+                hits.get(range)
+                    .unwrap_or_default()
                     .iter()
                     .map(|h| ThumbTarget::Model(h.id))
                     .collect()
@@ -644,7 +751,26 @@ impl App {
             }
             Message::Booted(Err(e)) => {
                 tracing::error!(error = %e, "could not open engine");
-                self.boot = Boot::Failed(self.options.data_dir.clone());
+                self.boot = Boot::Failed {
+                    dir: self.options.data_dir.clone(),
+                    reason: BootFailure::of(&e),
+                };
+                Task::none()
+            }
+            Message::BootAction(ux) => self.on_boot_action(ux),
+            Message::SetAside(Ok(old)) => {
+                self.boot_note = Some(t_args(
+                    "boot-set-aside-done",
+                    &[("path", Arg::str(old.display().to_string()))],
+                ));
+                self.reopen()
+            }
+            Message::SetAside(Err(e)) => {
+                tracing::error!(error = %e, "could not set the database aside");
+                self.boot = Boot::Failed {
+                    dir: self.options.data_dir.clone(),
+                    reason: BootFailure::of(&e),
+                };
                 Task::none()
             }
             Message::Libraries(Ok((libraries, counts))) => {
@@ -1059,7 +1185,11 @@ impl App {
                         let part = part.min(detail.parts.len().saturating_sub(1));
                         ModelView::Loaded { detail, part }
                     }
-                    Ok(None) => ModelView::Missing(id),
+                    Ok(None) => {
+                        // Gone: keep the notice, drop the selection.
+                        self.forget_selection(id);
+                        ModelView::Missing(id)
+                    }
                     Err(e) => {
                         self.show_error(&e);
                         ModelView::Missing(id)
@@ -1107,6 +1237,14 @@ impl App {
                     Task::none()
                 }
             },
+            Message::DismissBootNote => {
+                self.boot_note = None;
+                Task::none()
+            }
+            Message::DismissTaskStopped(task) => {
+                self.stopped.retain(|t| *t != task);
+                Task::none()
+            }
             Message::Report(ux) => self.on_report(ux),
             Message::OpenSettings => {
                 self.screen = Screen::Settings;
@@ -1284,6 +1422,10 @@ impl App {
             EngineEvent::LibraryRemoved(id) => {
                 self.libraries.retain(|l| l.id != id);
                 self.counts.remove(&id);
+                let selected_there = self.selected_index().and_then(|i| self.search.hits.get(i));
+                if selected_there.is_some_and(|h| h.library_id == id) {
+                    self.set_selected(None);
+                }
                 let ticket = self.search.refresh();
                 Task::batch([self.load_libraries(), self.run_search(ticket)])
             }
@@ -1435,6 +1577,12 @@ impl App {
             | EngineEvent::SyncFinished { .. }
             | EngineEvent::SyncFailed { .. }
             | EngineEvent::SyncParked { .. }) => self.on_sync_event(event),
+            EngineEvent::TaskStopped(task) => {
+                if !self.stopped.contains(&task) {
+                    self.stopped.push(task);
+                }
+                Task::none()
+            }
         }
     }
 
@@ -1467,7 +1615,10 @@ impl App {
         let Some(index) = nav::step(self.selected_index(), mv, columns, len) else {
             return Task::none();
         };
-        self.set_selected(Some(self.search.hits[index].id));
+        let Some(hit) = self.search.hits.get(index) else {
+            return Task::none();
+        };
+        self.set_selected(Some(hit.id));
         if self.settings.view == ViewMode::List {
             let vp = self.grid_viewport();
             return match crate::list::scroll_target(index, vp.offset, vp.height) {
@@ -1555,6 +1706,30 @@ impl App {
                 self.show_info(t_args("report-save-failed", &[("error", Arg::str(e))]))
             }
         }
+    }
+
+    fn on_boot_action(&mut self, ux: BootUx) -> Task<Message> {
+        match ux {
+            BootUx::SetAside => {
+                self.boot = Boot::Opening;
+                Task::future(set_aside(self.options.data_dir.clone()))
+            }
+            BootUx::Retry => self.reopen(),
+            BootUx::ShowFolder => {
+                let dir = self.options.data_dir.clone();
+                launch(move || opener::open(&dir))
+            }
+            BootUx::Report => self.on_report(ReportUx::OpenIssue),
+        }
+    }
+
+    /// Opens the engine again after a failed start.
+    fn reopen(&mut self) -> Task<Message> {
+        self.boot = Boot::Opening;
+        Task::future(open_engine(
+            self.options.data_dir.clone(),
+            self.options.cache_dir.clone(),
+        ))
     }
 
     /// A short success note, bottom centre, in the undo toast's place.
@@ -1979,6 +2154,33 @@ mod tests {
     }
 
     #[test]
+    fn task_stopped_shows_toast() {
+        let mut a = app();
+        let palette = || Palette::new(ColorTheme::default(), Mode::Light, Surface::Solid);
+        assert!(crate::view::task_stopped(&a, palette()).is_none());
+        let _ = a.update(Message::Engine(EngineEvent::TaskStopped(
+            TaskName::Thumbnails,
+        )));
+        let _ = a.update(Message::Engine(EngineEvent::TaskStopped(
+            TaskName::Thumbnails,
+        )));
+        assert_eq!(a.stopped, [TaskName::Thumbnails], "one toast per task");
+        assert_eq!(
+            task_stopped_text(TaskName::Thumbnails),
+            "Thumbnail rendering stopped after repeated errors. Restart Printdex to try again."
+        );
+        assert!(crate::view::task_stopped(&a, palette()).is_some());
+        // The crash notice's "Report a bug", and the toast stays.
+        let _ = a.update(Message::CrashNotice(CrashUx::Report));
+        assert_eq!(a.screen, Screen::Settings);
+        assert_eq!(a.settings_section, SettingsSection::About);
+        assert_eq!(a.stopped, [TaskName::Thumbnails]);
+        let _ = a.update(Message::DismissTaskStopped(TaskName::Thumbnails));
+        assert!(a.stopped.is_empty());
+        assert!(crate::view::task_stopped(&a, palette()).is_none());
+    }
+
+    #[test]
     fn no_crash_no_notice() {
         let a = app();
         assert!(
@@ -2184,7 +2386,123 @@ mod tests {
     fn boot_failure_is_reported() {
         let mut a = app();
         let _ = a.update(Message::Booted(Err(Arc::new(CoreError::Cancelled))));
-        assert_eq!(a.boot, Boot::Failed(PathBuf::from("/nonexistent")));
+        assert_eq!(
+            a.boot,
+            Boot::Failed {
+                dir: PathBuf::from("/nonexistent"),
+                reason: BootFailure::Other,
+            }
+        );
+    }
+
+    #[test]
+    fn boot_failure_reasons() {
+        let db = PathBuf::from("/nonexistent/printdex.db");
+        let cases = [
+            (CoreError::DataTooNew(db.clone()), BootFailure::TooNew),
+            (CoreError::DataCorrupt(db.clone()), BootFailure::Corrupt),
+            (CoreError::DataReadOnly(db.clone()), BootFailure::ReadOnly),
+            (CoreError::DiskFull(db.clone()), BootFailure::DiskFull),
+            (CoreError::Cancelled, BootFailure::Other),
+        ];
+        for (e, reason) in cases {
+            let mut a = app();
+            let _ = a.update(Message::Booted(Err(Arc::new(e))));
+            assert_eq!(
+                a.boot,
+                Boot::Failed {
+                    dir: PathBuf::from("/nonexistent"),
+                    reason,
+                }
+            );
+        }
+    }
+
+    /// Each reason's screen draws with its own explanation.
+    #[test]
+    fn boot_failure_texts_differ() {
+        let dir = PathBuf::from("/data");
+        let texts: Vec<String> = [
+            BootFailure::TooNew,
+            BootFailure::Corrupt,
+            BootFailure::ReadOnly,
+            BootFailure::DiskFull,
+            BootFailure::Other,
+        ]
+        .into_iter()
+        .map(|r| boot_failure_text(r, &dir).1)
+        .collect();
+        for (i, a) in texts.iter().enumerate() {
+            assert!(!a.is_empty());
+            for b in &texts[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        assert!(texts[1].contains("/data"), "{}", texts[1]);
+    }
+
+    #[tokio::test]
+    async fn set_aside_reboots() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("printdex.db"), [0xAB; 4096]).unwrap();
+        let mut a = App::new(Options::in_memory(data.clone()));
+
+        let msg = open_engine(data.clone(), data.join("cache")).await;
+        let _ = a.update(msg);
+        assert_eq!(
+            a.boot,
+            Boot::Failed {
+                dir: data.clone(),
+                reason: BootFailure::Corrupt,
+            }
+        );
+
+        let _ = a.update(Message::BootAction(BootUx::SetAside));
+        assert_eq!(a.boot, Boot::Opening);
+        let msg = set_aside(data.clone()).await;
+        let Message::SetAside(Ok(old)) = &msg else {
+            panic!("set aside failed: {msg:?}");
+        };
+        assert_eq!(std::fs::read(old).unwrap(), [0xAB; 4096]);
+        let old = old.clone();
+        let _ = a.update(msg);
+        assert_eq!(a.boot, Boot::Opening);
+
+        let msg = open_engine(data.clone(), data.join("cache")).await;
+        let _ = a.update(msg);
+        assert_eq!(a.boot, Boot::Ready);
+        let note = a
+            .boot_note
+            .clone()
+            .expect("a note says where the old file is");
+        assert!(note.contains(&old.display().to_string()), "{note}");
+        // It stays past the usual toast time, until dismissed.
+        let seq = a.files.toast_seq;
+        let _ = a.update(Message::Files(crate::files::Fx::HideToast(seq)));
+        assert_eq!(a.boot_note.as_ref(), Some(&note));
+        let p = Palette::new(ColorTheme::default(), Mode::Light, Surface::Solid);
+        assert!(
+            crate::view::task_stopped(&a, p).is_some(),
+            "the note is drawn"
+        );
+        let _ = a.update(Message::DismissBootNote);
+        assert!(a.boot_note.is_none());
+        assert!(crate::view::task_stopped(&a, p).is_none());
+    }
+
+    #[tokio::test]
+    async fn disk_full_try_again_reboots() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut a = App::new(Options::in_memory(dir.path().to_path_buf()));
+        let db = dir.path().join("printdex.db");
+        let _ = a.update(Message::Booted(Err(Arc::new(CoreError::DiskFull(db)))));
+        let _ = a.update(Message::BootAction(BootUx::Retry));
+        assert_eq!(a.boot, Boot::Opening);
+        let msg = open_engine(dir.path().to_path_buf(), dir.path().join("cache")).await;
+        let _ = a.update(msg);
+        assert_eq!(a.boot, Boot::Ready);
     }
 
     #[test]
@@ -2885,6 +3203,103 @@ mod tests {
         let _ = a.update(Message::Org(Org::AskForget));
         let _ = a.update(Message::Org(Org::ConfirmForget(id)));
         assert!(!a.org.confirm_forget, "asked once, done");
+    }
+
+    /// Builds the whole window, as iced does every frame.
+    fn build_view(a: &App) {
+        let _ = crate::view::view(a);
+    }
+
+    #[test]
+    fn deleted_selected_model_clears_selection() {
+        // The model's detail comes back empty.
+        let mut a = app();
+        a.boot = Boot::Ready;
+        let h = hit("orc");
+        deliver(&mut a, vec![h.clone()]);
+        let _ = a.update(Message::Select(h.id));
+        let _ = a.update(Message::OpenModel(h.id));
+        let _ = a.update(Message::ModelLoaded(h.id, Ok(None)));
+        assert_eq!(a.selected, None);
+        assert_eq!(a.model, Some(ModelView::Missing(h.id)), "notice stays");
+        build_view(&a);
+        let _ = a.update(Message::Escape);
+        assert_eq!(a.selected, None);
+        build_view(&a);
+
+        // Its data comes back empty.
+        let mut a = app();
+        a.boot = Boot::Ready;
+        deliver(&mut a, vec![h.clone()]);
+        let _ = a.update(Message::Select(h.id));
+        let _ = a.update(Message::OpenModel(h.id));
+        let _ = a.update(Message::Org(Org::DataLoaded(h.id, Ok(None))));
+        assert_eq!(a.selected, None);
+        build_view(&a);
+
+        // Its library is removed.
+        let mut a = app();
+        a.boot = Boot::Ready;
+        let lib = Library {
+            id: h.library_id,
+            ..library("NAS")
+        };
+        a.libraries.push(lib.clone());
+        deliver(&mut a, vec![h.clone()]);
+        let _ = a.update(Message::Select(h.id));
+        let _ = a.update(Message::Engine(EngineEvent::LibraryRemoved(lib.id)));
+        assert_eq!(a.selected, None);
+        build_view(&a);
+
+        // Removing another library keeps it.
+        let mut a = app();
+        a.boot = Boot::Ready;
+        a.libraries.push(lib.clone());
+        deliver(&mut a, vec![h.clone()]);
+        let _ = a.update(Message::Select(h.id));
+        let _ = a.update(Message::Engine(EngineEvent::LibraryRemoved(
+            LibraryId::new(),
+        )));
+        assert_eq!(a.selected, Some(h.id));
+
+        // An empty result for a model that is not selected changes nothing.
+        let other = hit("goblin");
+        let _ = a.update(Message::OpenModel(other.id));
+        let _ = a.update(Message::Select(h.id));
+        let _ = a.update(Message::ModelLoaded(other.id, Ok(None)));
+        assert_eq!(a.selected, Some(h.id));
+    }
+
+    #[test]
+    fn view_builds_for_odd_states() {
+        // No libraries at all.
+        let mut a = app();
+        a.boot = Boot::Ready;
+        assert!(a.libraries.is_empty());
+        build_view(&a);
+        deliver(&mut a, vec![]);
+        build_view(&a);
+        // A model with no parts.
+        let id = ModelId::new();
+        let _ = a.update(Message::OpenModel(id));
+        let _ = a.update(Message::ModelLoaded(id, Ok(Some(detail(id, &[])))));
+        assert!(matches!(a.model, Some(ModelView::Loaded { part: 0, .. })));
+        build_view(&a);
+        let _ = a.update(Message::SelectPart(0));
+        let _ = a.update(Message::Nav(Move::Right));
+        let _ = a.update(Message::OpenPart);
+        build_view(&a);
+        // A window shrunk to one pixel, on each screen.
+        let _ = a.update(Message::WindowResized(Size::new(1.0, 1.0)));
+        build_view(&a);
+        let _ = a.update(Message::Back);
+        deliver(&mut a, vec![hit("a"), hit("b")]);
+        let _ = a.update(Message::Nav(Move::Down));
+        build_view(&a);
+        let _ = a.update(Message::OpenSettings);
+        build_view(&a);
+        let _ = a.update(Message::WindowResized(Size::new(0.0, 0.0)));
+        build_view(&a);
     }
 
     #[test]

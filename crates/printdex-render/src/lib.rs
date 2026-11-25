@@ -1,7 +1,20 @@
 //! Printdex rendering: the camera, lighting and material ramps shared by
 //! thumbnails and the interactive viewer, and the CPU thumbnail renderer.
+#![cfg_attr(
+    not(test),
+    warn(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_wrap
+    )
+)]
 
 pub mod camera;
+mod cast;
 pub mod gpu;
 pub mod material;
 pub mod raster;

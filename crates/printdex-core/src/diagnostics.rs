@@ -2,11 +2,18 @@
 //!
 //! [`init`] installs the tracing subscriber (stderr plus a daily rolling log
 //! file), [`install_panic_hook`] writes a `crash-<unix_ms>.txt` (the app)
-//! or `cli-crash-<unix_ms>.txt` (the command line) for every panic, and [`save_bundle`] zips the newest logs and crash records, with
-//! user paths removed by a [`Redactor`], for a bug report.
+//! or `cli-crash-<unix_ms>.txt` (the command line) for every panic, except
+//! one inside [`recovering`] or [`recovering_future`], which is expected to be
+//! caught and goes to `recovered-<unix_ms>.txt` (never shown as a crash). [`save_bundle`] zips the
+//! newest logs, crash records and recovered records, with user paths removed
+//! by a [`Redactor`], for a bug report.
 
+use std::cell::Cell;
+use std::future::Future;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tracing_appender::non_blocking::{NonBlocking, WorkerGuard};
@@ -17,6 +24,7 @@ use tracing_subscriber::{EnvFilter, Layer};
 const LOG_PREFIX: &str = "printdex.log";
 const CRASH_PREFIX: &str = "crash-";
 const CLI_CRASH_PREFIX: &str = "cli-crash-";
+const RECOVERED_PREFIX: &str = "recovered-";
 const CRASH_SUFFIX: &str = ".txt";
 const SEEN_MARKER: &str = ".crash-seen";
 const MAX_LOG_FILES: usize = 7;
@@ -121,7 +129,65 @@ fn write_crash_file(dir: &Path, prefix: &str, at: i64, body: &str) -> io::Result
     }
 }
 
+thread_local! {
+    /// How many [`recovering`] scopes the current thread is inside.
+    static RECOVERING: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Decrements the thread's recovering depth on drop, also when unwinding.
+struct RecoveringGuard;
+
+impl RecoveringGuard {
+    fn enter() -> RecoveringGuard {
+        RECOVERING.with(|d| d.set(d.get() + 1));
+        RecoveringGuard
+    }
+}
+
+impl Drop for RecoveringGuard {
+    fn drop(&mut self) {
+        RECOVERING.with(|d| d.set(d.get().saturating_sub(1)));
+    }
+}
+
+fn is_recovering() -> bool {
+    RECOVERING.with(|d| d.get() > 0)
+}
+
+/// Runs `f` with this thread marked as recovering: a panic inside is expected
+/// to be caught by the caller, so the panic hook records it as
+/// `recovered-<ms>.txt` instead of a crash. It does not catch the panic.
+pub fn recovering<T>(f: impl FnOnce() -> T) -> T {
+    let _guard = RecoveringGuard::enter();
+    f()
+}
+
+pin_project_lite::pin_project! {
+    /// A future whose every poll runs inside [`recovering`]. See
+    /// [`recovering_future`].
+    pub struct Recovering<F> {
+        #[pin]
+        inner: F,
+    }
+}
+
+impl<F: Future> Future for Recovering<F> {
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<F::Output> {
+        let this = self.project();
+        recovering(|| this.inner.poll(cx))
+    }
+}
+
+/// Wraps a supervised task so a panic in it is recorded as recovered, not as
+/// a crash.
+pub fn recovering_future<F: Future>(f: F) -> Recovering<F> {
+    Recovering { inner: f }
+}
+
 /// Writes one crash file. Never panics.
+#[cfg(test)]
 fn write_crash(
     dir: &Path,
     source: CrashSource,
@@ -130,19 +196,38 @@ fn write_crash(
     location: &str,
     thread: &str,
 ) -> io::Result<PathBuf> {
+    write_panic_record(dir, source, false, version, message, location, thread)
+}
+
+/// Writes a crash file, or with `recovered` a `recovered-*` file carrying the
+/// extra line `recovered: yes`. Never panics.
+fn write_panic_record(
+    dir: &Path,
+    source: CrashSource,
+    recovered: bool,
+    version: &str,
+    message: &str,
+    location: &str,
+    thread: &str,
+) -> io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
     let at = unix_ms();
     let backtrace = std::backtrace::Backtrace::force_capture();
+    let (prefix, flag) = if recovered {
+        (RECOVERED_PREFIX, "recovered: yes\n")
+    } else {
+        (source.prefix(), "")
+    };
     let body = format!(
-        "Printdex {version} crashed\ntime: {at}\nos: {} {}\nthread: {thread}\nmessage: {}\nlocation: {location}\nbacktrace:\n{backtrace}\n",
+        "Printdex {version} crashed\ntime: {at}\n{flag}os: {} {}\nthread: {thread}\nmessage: {}\nlocation: {location}\nbacktrace:\n{backtrace}\n",
         std::env::consts::OS,
         std::env::consts::ARCH,
         message.replace(['\r', '\n'], " "),
     );
-    write_crash_file(dir, source.prefix(), at, &body)
+    write_crash_file(dir, prefix, at, &body)
 }
 
-fn payload_message(payload: &(dyn std::any::Any + Send)) -> String {
+pub(crate) fn payload_message(payload: &(dyn std::any::Any + Send)) -> String {
     payload
         .downcast_ref::<&str>()
         .map(|s| (*s).to_string())
@@ -155,7 +240,8 @@ fn format_location(l: &std::panic::Location<'_>) -> String {
 }
 
 /// Writes a crash file for `source` into `log_dir` on every panic, then
-/// calls the previous hook.
+/// calls the previous hook. A panic inside [`recovering`] is written as a
+/// `recovered-*` file instead.
 pub fn install_panic_hook(log_dir: PathBuf, version: &'static str, source: CrashSource) {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -165,7 +251,10 @@ pub fn install_panic_hook(log_dir: PathBuf, version: &'static str, source: Crash
             .map_or_else(|| "unknown".to_string(), format_location);
         let thread = std::thread::current();
         let name = thread.name().unwrap_or("unnamed");
-        let _ = write_crash(&log_dir, source, version, &message, &location, name);
+        let recovered = is_recovering();
+        let _ = write_panic_record(
+            &log_dir, source, recovered, version, &message, &location, name,
+        );
         previous(info);
     }));
 }
@@ -299,6 +388,10 @@ impl Redactor {
 
     /// Returns `text` with the known folders replaced. Only whole path
     /// components match, so `/home/max` leaves `/home/maxwell` alone.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "map has norm.len() + 1 entries and a hit needs i + needle.len() <= norm.len(); a needle is valid UTF-8 matched whole, so its offsets in text are char boundaries"
+    )]
     pub fn apply(&self, text: &str) -> String {
         let (norm, map) = normalise(text);
         let mut out = String::with_capacity(text.len());
@@ -337,8 +430,8 @@ pub fn system_summary(version: &str, renderer: &str) -> String {
 }
 
 /// Writes a zip with `summary.txt`, the 3 newest `printdex.log*` files and
-/// the 5 newest crash records (`crash-*.txt` and `cli-crash-*.txt`), each
-/// passed through `redactor`.
+/// the 5 newest crash records (`crash-*.txt` and `cli-crash-*.txt`) and the
+/// 5 newest `recovered-*.txt` records, each passed through `redactor`.
 pub fn save_bundle(
     log_dir: &Path,
     dest: &Path,
@@ -359,9 +452,15 @@ pub fn save_bundle(
     crashes.extend(crash_files(log_dir, CLI_CRASH_PREFIX));
     // Stable: within a millisecond each prefix keeps its newest-first order.
     crashes.sort_by_key(|c| std::cmp::Reverse(c.0));
+    // Recovered panics have their own quota so a flood of them can't push
+    // real crashes out of the bundle.
+    let recovered = crash_files(log_dir, RECOVERED_PREFIX)
+        .into_iter()
+        .take(BUNDLE_CRASHES);
     let crashes: Vec<PathBuf> = crashes
         .into_iter()
         .take(BUNDLE_CRASHES)
+        .chain(recovered)
         .map(|(_, p)| p)
         .collect();
 
@@ -388,6 +487,131 @@ mod tests {
     use std::io::Read;
     use std::time::Duration;
 
+    /// The panic hook is process-global: tests that swap it take this lock.
+    static HOOK_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    /// Installs the crash hook on `dir`, runs `f`, then restores the old hook.
+    fn with_hook<R>(dir: &Path, f: impl FnOnce() -> R) -> R {
+        let _lock = HOOK_LOCK.blocking_lock();
+        let saved = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        install_panic_hook(dir.to_path_buf(), "1", CrashSource::App);
+        let out = f();
+        std::panic::set_hook(saved);
+        out
+    }
+
+    fn files_starting(dir: &Path, prefix: &str) -> Vec<PathBuf> {
+        crash_files(dir, prefix)
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect()
+    }
+
+    /// Records with this prefix whose `message:` is exactly `msg`. Other
+    /// tests may panic while the global hook points at `dir`, so tests count
+    /// only their own uniquely worded panics.
+    fn records_with(dir: &Path, prefix: &str, msg: &str) -> Vec<PathBuf> {
+        let line = format!("message: {msg}\n");
+        files_starting(dir, prefix)
+            .into_iter()
+            .filter(|p| std::fs::read_to_string(p).is_ok_and(|t| t.contains(&line)))
+            .collect()
+    }
+
+    #[test]
+    fn recovered_panic_writes_recovered_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let r = with_hook(dir, || {
+            std::panic::catch_unwind(|| recovering(|| panic!("rec-boom")))
+        });
+        assert!(r.is_err());
+        let found = records_with(dir, "recovered-", "rec-boom");
+        assert_eq!(found.len(), 1);
+        let text = std::fs::read_to_string(&found[0]).unwrap();
+        assert!(text.contains("recovered: yes"), "{text}");
+        assert!(records_with(dir, CRASH_PREFIX, "rec-boom").is_empty());
+    }
+
+    #[test]
+    fn recovered_panic_is_not_unseen_crash() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let _ = with_hook(dir, || {
+            std::panic::catch_unwind(|| recovering(|| panic!("unseen-boom")))
+        });
+        assert_eq!(records_with(dir, "recovered-", "unseen-boom").len(), 1);
+        assert!(records_with(dir, CRASH_PREFIX, "unseen-boom").is_empty());
+        assert!(unseen_crash(dir).is_none_or(|c| c.message != "unseen-boom"));
+    }
+
+    #[test]
+    fn plain_panic_still_writes_crash_after_recovering() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let _ = with_hook(dir, || {
+            let _ = std::panic::catch_unwind(|| recovering(|| panic!("again-a")));
+            std::panic::catch_unwind(|| panic!("again-b"))
+        });
+        assert_eq!(records_with(dir, CRASH_PREFIX, "again-b").len(), 1);
+        assert!(records_with(dir, CRASH_PREFIX, "again-a").is_empty());
+        assert_eq!(records_with(dir, "recovered-", "again-a").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn recovering_future_marks_panics() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let joined = {
+            let _lock = HOOK_LOCK.lock().await;
+            let saved = std::panic::take_hook();
+            std::panic::set_hook(Box::new(|_| {}));
+            install_panic_hook(dir.to_path_buf(), "1", CrashSource::App);
+            let joined = tokio::spawn(recovering_future(async { panic!("fut-x") })).await;
+            std::panic::set_hook(saved);
+            joined
+        };
+        assert!(joined.is_err());
+        assert_eq!(records_with(dir, "recovered-", "fut-x").len(), 1);
+        assert!(records_with(dir, CRASH_PREFIX, "fut-x").is_empty());
+    }
+
+    #[tokio::test]
+    async fn recovering_inside_cpu_work_writes_recovered_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let joined = {
+            let _lock = HOOK_LOCK.lock().await;
+            let saved = std::panic::take_hook();
+            std::panic::set_hook(Box::new(|_| {}));
+            install_panic_hook(dir.to_path_buf(), "1", CrashSource::App);
+            // The shape of the thumbnail call sites: rayon runs the closure
+            // at depth 0, so it must mark itself.
+            let joined = tokio::spawn(async {
+                crate::cpu::run_cpu(move || recovering(|| -> () { panic!("cpu-rec-x") })).await
+            })
+            .await;
+            std::panic::set_hook(saved);
+            joined
+        };
+        assert!(joined.is_err());
+        assert_eq!(records_with(dir, "recovered-", "cpu-rec-x").len(), 1);
+        assert!(records_with(dir, CRASH_PREFIX, "cpu-rec-x").is_empty());
+    }
+
+    #[test]
+    fn bundle_includes_recovered_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(dir.join("recovered-5.txt"), "recovered: yes").unwrap();
+        let dest = tmp.path().join("bundle.zip");
+        save_bundle(dir, &dest, "s", &Redactor::new(None, &[])).unwrap();
+        let zip = zip::ZipArchive::new(std::fs::File::open(&dest).unwrap()).unwrap();
+        let names: Vec<String> = zip.file_names().map(|n| n.unwrap().into_owned()).collect();
+        assert!(names.contains(&"recovered-5.txt".to_string()), "{names:?}");
+    }
+
     #[test]
     fn file_writer_fails_when_folder_cannot_be_created() {
         let tmp = tempfile::tempdir().unwrap();
@@ -399,6 +623,7 @@ mod tests {
 
     #[test]
     fn panic_payloads_become_messages() {
+        let _lock = HOOK_LOCK.blocking_lock();
         let caught = |f: fn()| std::panic::catch_unwind(f).unwrap_err();
         let silent = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));

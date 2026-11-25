@@ -85,10 +85,14 @@ pub const FONT_FILES: [&[u8]; 6] = [
 
 /// Parses `#rrggbb` or `#rrggbbaa`. Panics on malformed input, which only
 /// ever comes from the constant tables below (covered by tests).
+#[expect(
+    clippy::indexing_slicing,
+    reason = "the assert checks the length (7 or 9) before any index is read"
+)]
 pub const fn hex(s: &str) -> Color {
     let b = s.as_bytes();
     assert!(
-        b[0] == b'#' && (b.len() == 7 || b.len() == 9),
+        (b.len() == 7 || b.len() == 9) && b[0] == b'#',
         "bad hex colour"
     );
     let r = byte(b[1], b[2]);
@@ -107,6 +111,10 @@ const fn byte(hi: u8, lo: u8) -> u8 {
     nibble(hi) * 16 + nibble(lo)
 }
 
+#[expect(
+    clippy::panic,
+    reason = "only constant colour tables reach this, and tests parse them all"
+)]
 const fn nibble(c: u8) -> u8 {
     match c {
         b'0'..=b'9' => c - b'0',

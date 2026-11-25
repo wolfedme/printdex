@@ -20,6 +20,7 @@ use crate::engine::Engine;
 use crate::error::{CoreError, Result, SyncError};
 use crate::events::EngineEvent;
 use crate::ids::{AttemptId, LibraryId, ModelId};
+use crate::supervise::{TaskName, spawn_supervised};
 use crate::time::now_ms;
 
 /// Wait after the last local change before syncing.
@@ -194,7 +195,7 @@ impl Engine {
                 let key = tokio::task::spawn_blocking(move || crypto::derive(&p, &k))
                     .await
                     .map_err(|e| SyncError::Storage(e.to_string()))??;
-                (Some(kdf), Some(crypto::check_value(&key)))
+                (Some(kdf), Some(crypto::check_value(&key)?))
             };
             let file = SpaceFile {
                 format: FORMAT,
@@ -594,43 +595,50 @@ impl Engine {
             return;
         }
         let engine = self.clone();
-        let mut events = self.events.subscribe();
-        tokio::spawn(async move {
-            let mut next_full = tokio::time::Instant::now();
-            loop {
-                let wait = next_full.saturating_duration_since(tokio::time::Instant::now());
-                tokio::select! {
-                    _ = tokio::time::sleep(wait) => {}
-                    _ = engine.sync.poke.notified() => {
-                        // Debounce: wait until changes stop for a moment.
-                        loop {
-                            tokio::select! {
-                                _ = tokio::time::sleep(DEBOUNCE) => break,
-                                _ = engine.sync.poke.notified() => {}
-                            }
-                        }
-                    }
-                    ev = events.recv() => {
-                        if let Ok(EngineEvent::ScanFinished { .. }) = ev {
-                            // A scan may have brought models that were parked.
-                            let ids: Vec<i64> = engine
-                                .db
-                                .sync_spaces()
-                                .await
-                                .map(|s| s.into_iter().map(|s| s.id).collect())
-                                .unwrap_or_default();
-                            engine.sync.rematch_all(ids);
-                            engine.sync.poke.notify_one();
-                        }
-                        continue;
-                    }
-                }
-                if let Err(e) = engine.sync_now().await {
-                    tracing::warn!(error = %e, "sync run failed");
-                }
-                next_full = tokio::time::Instant::now() + INTERVAL;
-            }
+        spawn_supervised(TaskName::Sync, self.events.clone(), move || {
+            scheduler_loop(engine.clone())
         });
+    }
+}
+
+/// One supervised run of the sync scheduler: syncs at once, then on
+/// changes and on a timer.
+async fn scheduler_loop(engine: Engine) {
+    let mut events = engine.events.subscribe();
+    let mut next_full = tokio::time::Instant::now();
+    loop {
+        crate::fsx::faults::checkpoint(TaskName::Sync);
+        let wait = next_full.saturating_duration_since(tokio::time::Instant::now());
+        tokio::select! {
+            _ = tokio::time::sleep(wait) => {}
+            _ = engine.sync.poke.notified() => {
+                // Debounce: wait until changes stop for a moment.
+                loop {
+                    tokio::select! {
+                        _ = tokio::time::sleep(DEBOUNCE) => break,
+                        _ = engine.sync.poke.notified() => {}
+                    }
+                }
+            }
+            ev = events.recv() => {
+                if let Ok(EngineEvent::ScanFinished { .. }) = ev {
+                    // A scan may have brought models that were parked.
+                    let ids: Vec<i64> = engine
+                        .db
+                        .sync_spaces()
+                        .await
+                        .map(|s| s.into_iter().map(|s| s.id).collect())
+                        .unwrap_or_default();
+                    engine.sync.rematch_all(ids);
+                    engine.sync.poke.notify_one();
+                }
+                continue;
+            }
+        }
+        if let Err(e) = engine.sync_now().await {
+            tracing::warn!(error = %e, "sync run failed");
+        }
+        next_full = tokio::time::Instant::now() + INTERVAL;
     }
 }
 

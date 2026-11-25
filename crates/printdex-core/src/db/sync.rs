@@ -122,7 +122,7 @@ fn field_row(r: &sqlx::sqlite::SqliteRow) -> Option<FieldRow> {
         model: r.get("model"),
         stamp: serde_json::from_str(r.get::<&str, _>("stamp")).ok()?,
         seq: u(r.get("seq")),
-        hash: r.get::<i64, _>("hash") as u64,
+        hash: r.get::<i64, _>("hash").cast_unsigned(),
         value: serde_json::from_str(r.get::<&str, _>("value")).ok()?,
     })
 }
@@ -563,7 +563,7 @@ impl Db {
             .bind(r.model)
             .bind(serde_json::to_string(&r.stamp).unwrap_or_default())
             .bind(i(r.seq))
-            .bind(r.hash as i64)
+            .bind(r.hash.cast_signed())
             .bind(serde_json::to_string(&r.value).unwrap_or_else(|_| "null".into()))
             .execute(&mut *tx)
             .await?;
@@ -786,7 +786,7 @@ impl Db {
                 out.push((id, r.get(1), Vec::new()));
             }
             if let (Some(fp), Some(last)) = (fp, out.last_mut()) {
-                last.2.push(fp as u64);
+                last.2.push(fp.cast_unsigned());
             }
         }
         for o in &mut out {
@@ -815,7 +815,7 @@ impl Db {
         .fetch_all(self.writer())
         .await?
         .into_iter()
-        .map(|h| h as u64)
+        .map(i64::cast_unsigned)
         .collect();
         fps.sort_unstable();
         fps.dedup();

@@ -33,7 +33,28 @@ pub fn size(bytes: u64) -> String {
         v /= 1000.0;
         unit += 1;
     }
-    format!("{v:.1} {}", UNITS[unit])
+    format!(
+        "{v:.1} {}",
+        UNITS.get(unit).or(UNITS.last()).unwrap_or(&"B")
+    )
+}
+
+/// A float as a `u32`, saturating: negative and NaN give 0, too large gives
+/// `u32::MAX`. Fractions are truncated.
+pub fn to_u32(v: f32) -> u32 {
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "float-to-int `as` saturates (NaN is 0); that is the wanted result"
+    )]
+    let n = v as u32;
+    n
+}
+
+/// A length in physical pixels from a float: rounded, saturating and at
+/// least 1, so a degenerate window size can never make a zero-sized texture.
+pub fn px(v: f32) -> u32 {
+    to_u32(v.round()).max(1)
 }
 
 /// A calendar date (UTC) from unix milliseconds: `(year, month 1–12, day)`.
@@ -103,5 +124,28 @@ mod tests {
         assert_eq!(parent_path("Minis/Dragons/Red"), "Minis/Dragons");
         assert_eq!(parent_path("Red"), "");
         assert_eq!(parent_path("Minis/x.stl"), "Minis");
+    }
+
+    #[test]
+    fn sizes_never_run_off_the_unit_table() {
+        assert_eq!(size(u64::MAX), "18446744.1 TB");
+    }
+
+    #[test]
+    fn float_sizes_saturate() {
+        assert_eq!(to_u32(-5.0), 0);
+        assert_eq!(to_u32(f32::NAN), 0);
+        assert_eq!(to_u32(2.9), 2);
+        assert_eq!(to_u32(f32::INFINITY), u32::MAX);
+        assert_eq!(to_u32(1e20), u32::MAX);
+    }
+
+    #[test]
+    fn pixel_sizes_are_at_least_one() {
+        assert_eq!(px(0.0), 1);
+        assert_eq!(px(-300.0), 1);
+        assert_eq!(px(f32::NAN), 1);
+        assert_eq!(px(99.6), 100);
+        assert_eq!(px(f32::INFINITY), u32::MAX);
     }
 }

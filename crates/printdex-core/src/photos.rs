@@ -40,7 +40,7 @@ pub fn store_photo(
     let n = std::fs::File::open(src)
         .and_then(|mut f| f.read(&mut head))
         .map_err(io)?;
-    let ext = photo_extension(&head[..n]).ok_or(CoreError::PhotoInvalid)?;
+    let ext = photo_extension(head.get(..n).unwrap_or_default()).ok_or(CoreError::PhotoInvalid)?;
     let dir = photo_dir.join(attempt.to_string());
     std::fs::create_dir_all(&dir).map_err(|source| CoreError::Io {
         path: dir.clone(),

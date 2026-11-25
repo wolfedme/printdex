@@ -221,8 +221,8 @@ impl shader::Primitive for Primitive {
         let s = viewport.scale_factor();
         let place = Placement {
             origin: [bounds.x * s, bounds.y * s],
-            width: (bounds.width * s).round().max(1.0) as u32,
-            height: (bounds.height * s).round().max(1.0) as u32,
+            width: crate::format::px(bounds.width * s),
+            height: crate::format::px(bounds.height * s),
         };
         pipeline.viewer.set_mesh(
             device,

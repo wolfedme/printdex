@@ -226,7 +226,10 @@ fn visit(
     }
 
     for &i in &node.printables {
-        let rel_path = &files[i].rel_path;
+        let Some(file) = files.get(i) else {
+            continue;
+        };
+        let rel_path = &file.rel_path;
         let file_name = rel_path.rsplit('/').next().unwrap_or(rel_path);
         let name = file_name
             .rsplit_once('.')

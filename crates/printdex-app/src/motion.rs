@@ -205,7 +205,9 @@ impl Motion {
             0
         } else {
             let t = elapsed.as_secs_f32() / FOCAL.as_secs_f32();
-            ((t * PRINT_LAYERS as f32).floor() as u32 + 1).min(PRINT_LAYERS)
+            crate::format::to_u32((t * PRINT_LAYERS as f32).floor())
+                .saturating_add(1)
+                .min(PRINT_LAYERS)
         };
         let label = if before {
             1.0

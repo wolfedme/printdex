@@ -39,6 +39,10 @@ pub struct KdfParams {
 impl KdfParams {
     /// Fresh parameters: a random salt, N = 2^15, r = 8, p = 1 (about 32 MiB
     /// and a few hundred milliseconds, once per session).
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "an XChaCha20 nonce is 24 bytes, so [..16] is in range"
+    )]
     pub fn generate() -> KdfParams {
         let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
         KdfParams {
@@ -82,16 +86,16 @@ pub fn derive(pass: &str, params: &KdfParams) -> Result<SpaceKey, SyncError> {
 }
 
 /// Encrypts `plain`: nonce followed by ciphertext and tag.
-pub fn seal(key: &SpaceKey, plain: &[u8]) -> Vec<u8> {
+pub fn seal(key: &SpaceKey, plain: &[u8]) -> Result<Vec<u8>, SyncError> {
     let cipher = XChaCha20Poly1305::new((&key.0).into());
     let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
     let body = cipher
         .encrypt(&nonce, plain)
-        .expect("XChaCha20-Poly1305 encryption of an in-memory buffer");
+        .map_err(|_| SyncError::Storage("encrypting a sync file failed".to_owned()))?;
     let mut out = Vec::with_capacity(NONCE_LEN + body.len());
     out.extend_from_slice(&nonce);
     out.extend_from_slice(&body);
-    out
+    Ok(out)
 }
 
 /// Decrypts what [`seal`] wrote. A wrong key and a damaged file look the
@@ -108,8 +112,8 @@ pub fn open(key: &SpaceKey, sealed: &[u8]) -> Result<Vec<u8>, SyncError> {
 }
 
 /// The check value a new space stores (hex).
-pub fn check_value(key: &SpaceKey) -> String {
-    hex(&seal(key, CHECK_PLAIN))
+pub fn check_value(key: &SpaceKey) -> Result<String, SyncError> {
+    Ok(hex(&seal(key, CHECK_PLAIN)?))
 }
 
 /// Whether `key` opens a space whose check value is `check`.
@@ -135,11 +139,11 @@ mod tests {
     #[test]
     fn seal_roundtrip() {
         let k = derive("secret", &fast()).unwrap();
-        let s = seal(&k, b"hello");
+        let s = seal(&k, b"hello").unwrap();
         assert_ne!(&s[NONCE_LEN..], b"hello");
         assert_eq!(open(&k, &s).unwrap(), b"hello");
         // Fresh nonce every time.
-        assert_ne!(seal(&k, b"hello"), s);
+        assert_ne!(seal(&k, b"hello").unwrap(), s);
     }
 
     #[test]
@@ -147,9 +151,9 @@ mod tests {
         let p = fast();
         let k = derive("secret", &p).unwrap();
         let other = derive("other", &p).unwrap();
-        let s = seal(&k, b"hello");
+        let s = seal(&k, b"hello").unwrap();
         assert_eq!(open(&other, &s), Err(SyncError::WrongPassphrase));
-        let check = check_value(&k);
+        let check = check_value(&k).unwrap();
         assert!(verify(&k, &check).is_ok());
         assert_eq!(verify(&other, &check), Err(SyncError::WrongPassphrase));
     }
@@ -159,7 +163,7 @@ mod tests {
         let p = fast();
         let a = derive("pw", &p).unwrap();
         let b = derive("pw", &p).unwrap();
-        assert_eq!(open(&b, &seal(&a, b"x")).unwrap(), b"x");
+        assert_eq!(open(&b, &seal(&a, b"x").unwrap()).unwrap(), b"x");
     }
 
     #[test]

@@ -89,6 +89,15 @@ pub fn rows_for_items(items: usize, columns: usize) -> usize {
     items.div_ceil(columns.max(1))
 }
 
+/// The items in the rows `rows` of a grid of `columns` columns holding
+/// `items` items, clamped so it is always a valid (possibly empty) range:
+/// a viewport left over from a longer list can point past the end.
+pub fn item_range(rows: Range<usize>, columns: usize, items: usize) -> Range<usize> {
+    let start = rows.start.saturating_mul(columns).min(items);
+    let end = rows.end.saturating_mul(columns).min(items).max(start);
+    start..end
+}
+
 /// Row range covering `[offset, offset + height)` plus [`OVERSCAN`] rows on
 /// each side, clamped to `0..rows`.
 pub fn visible_range(offset: f32, height: f32, stride: f32, rows: usize) -> Range<usize> {
@@ -102,7 +111,9 @@ pub fn visible_range(offset: f32, height: f32, stride: f32, rows: usize) -> Rang
         r
     };
     let first = to_row(offset).saturating_sub(OVERSCAN).min(rows);
-    let last = (to_row((offset + height.max(0.0)).ceil()) + 1 + OVERSCAN).min(rows);
+    let last = to_row((offset + height.max(0.0)).ceil())
+        .saturating_add(1 + OVERSCAN)
+        .min(rows);
     first..last.max(first)
 }
 
@@ -169,6 +180,13 @@ mod tests {
     }
 
     #[test]
+    fn visible_range_survives_huge_offsets() {
+        assert_eq!(visible_range(f32::INFINITY, 250.0, 100.0, 50), 50..50);
+        assert_eq!(visible_range(f32::MAX, f32::MAX, 1.0, 50), 50..50);
+        assert_eq!(visible_range(0.0, f32::INFINITY, 100.0, 50), 0..50);
+    }
+
+    #[test]
     fn visible_range_clamps_at_end() {
         assert_eq!(visible_range(4900.0, 250.0, 100.0, 50), 48..50);
         assert_eq!(visible_range(99_999.0, 250.0, 100.0, 50), 50..50);
@@ -188,5 +206,22 @@ mod tests {
         assert_eq!(scroll_target(3, 200.0, 250.0, 100.0, 84.0), None);
         assert_eq!(scroll_target(1, 200.0, 250.0, 100.0, 84.0), Some(100.0));
         assert_eq!(scroll_target(5, 200.0, 250.0, 100.0, 84.0), Some(334.0));
+    }
+
+    #[test]
+    fn item_range_never_leaves_the_list() {
+        assert_eq!(item_range(0..2, 5, 11), 0..10);
+        assert_eq!(item_range(2..3, 5, 11), 10..11);
+        // A viewport left over from a longer list points past the end.
+        assert_eq!(item_range(3..4, 5, 11), 11..11);
+        assert_eq!(item_range(40..50, 5, 0), 0..0);
+        assert_eq!(item_range(usize::MAX - 1..usize::MAX, 5, 3), 3..3);
+        assert_eq!(item_range(0..1, 0, 3), 0..0);
+        // The range from a stale viewport indexes a shorter list safely.
+        let hits = [1, 2, 3];
+        let none: &[i32] = hits
+            .get(item_range(7..9, 5, hits.len()))
+            .unwrap_or_default();
+        assert!(none.is_empty());
     }
 }

@@ -13,13 +13,13 @@ use printdex_core::{
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
-fn touch(root: &Path, rel: &str) {
+pub(crate) fn touch(root: &Path, rel: &str) {
     let p = root.join(rel);
     fs::create_dir_all(p.parent().unwrap()).unwrap();
     fs::write(p, rel.as_bytes()).unwrap();
 }
 
-fn fast() -> MonitorConfig {
+pub(crate) fn fast() -> MonitorConfig {
     MonitorConfig {
         probe_every: Duration::from_millis(100),
         debounce: Duration::from_millis(300),
@@ -31,16 +31,16 @@ fn fast() -> MonitorConfig {
     }
 }
 
-struct Fixture {
+pub(crate) struct Fixture {
     _dir: tempfile::TempDir,
-    root: PathBuf,
+    pub(crate) root: PathBuf,
     data: PathBuf,
-    engine: Engine,
+    pub(crate) engine: Engine,
     lib: Library,
 }
 
 impl Fixture {
-    async fn new(mode: ChangeMode, kind: LibraryKind, fs: Arc<dyn Fs>) -> Fixture {
+    pub(crate) async fn new(mode: ChangeMode, kind: LibraryKind, fs: Arc<dyn Fs>) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("lib");
         touch(&root, "Hook/hook.stl");
@@ -69,7 +69,7 @@ impl Fixture {
 }
 
 /// The next event `pick` accepts, or `None` after `within`.
-async fn next<T>(
+pub(crate) async fn next<T>(
     rx: &mut broadcast::Receiver<EngineEvent>,
     within: Duration,
     mut pick: impl FnMut(EngineEvent) -> Option<T>,
@@ -91,7 +91,7 @@ async fn next<T>(
     .ok()
 }
 
-fn finished(e: EngineEvent) -> Option<ScanSummary> {
+pub(crate) fn finished(e: EngineEvent) -> Option<ScanSummary> {
     match e {
         EngineEvent::ScanFinished { summary, .. } => Some(summary),
         _ => None,

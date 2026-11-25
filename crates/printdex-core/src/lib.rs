@@ -2,6 +2,18 @@
 //!
 //! This crate has no UI dependencies. The desktop app and the `printdex` CLI
 //! both drive it through the [`Engine`] handle.
+#![cfg_attr(
+    not(test),
+    warn(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_wrap
+    )
+)]
 
 pub mod backup;
 pub mod cpu;
@@ -22,6 +34,7 @@ pub mod monitor;
 pub mod photos;
 pub mod scan;
 pub mod sidecar;
+mod supervise;
 pub mod sync;
 pub mod thumbs;
 pub mod time;
@@ -45,6 +58,7 @@ pub use model_data::{
 };
 pub use monitor::{Monitor, MonitorConfig};
 pub use scan::ScanSummary;
+pub use supervise::TaskName;
 pub use thumbs::{
     DEFAULT_CACHE_LIMIT, Detail, Preview, THUMB_HEIGHT, THUMB_WIDTH, ThumbFailure, ThumbKind,
     ThumbTarget, ThumbnailService,

@@ -387,7 +387,11 @@ impl LogForm {
             Some(i) if typed.is_empty() => {
                 overrides.remove(i);
             }
-            Some(i) => overrides[i].settings = typed,
+            Some(i) => {
+                if let Some(o) = overrides.get_mut(i) {
+                    o.settings = typed;
+                }
+            }
             None if typed.is_empty() => {}
             None => overrides.push(PartOverride {
                 part: part.clone(),

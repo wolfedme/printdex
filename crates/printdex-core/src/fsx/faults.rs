@@ -22,6 +22,12 @@
 //!   over it.
 //! - Dropping the [`FaultGuard`] disarms it.
 //!
+//! Supervised background tasks (see `crate::supervise`) call [`checkpoint`]
+//! once per loop iteration. [`arm_panic`] makes the next `times` checkpoints
+//! of one [`TaskName`] panic, but only on the tokio runtime that armed it,
+//! so parallel tests (each on its own runtime) don't see each other's
+//! panics.
+//!
 //! Which path each operation passes:
 //!
 //! - [`Op::Write`]: the final path being written (not its temporary file).
@@ -55,6 +61,18 @@ pub fn check(_op: Op, _path: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Called once per loop iteration of each supervised task. Panics while an
+/// [`arm_panic`] for `task` is armed on this runtime.
+#[cfg(not(any(test, feature = "fault-injection")))]
+#[inline]
+pub fn checkpoint(_task: TaskName) {}
+
+/// Like [`checkpoint`] for a task with several loops: `site` names the loop,
+/// so [`arm_panic_at`] can target one of them.
+#[cfg(not(any(test, feature = "fault-injection")))]
+#[inline]
+pub fn checkpoint_at(_task: TaskName, _site: &'static str) {}
+
 /// Runs `real`, the operation `op` on `path`, after [`check`]; an armed
 /// [`Action::Instead`] that fires replaces it.
 #[cfg(not(any(test, feature = "fault-injection")))]
@@ -68,7 +86,12 @@ pub fn perform(
 }
 
 #[cfg(any(test, feature = "fault-injection"))]
-pub use armed::{Action, FaultGuard, InsteadFn, arm, check, perform};
+pub use armed::{
+    Action, FaultGuard, InsteadFn, arm, arm_panic, arm_panic_at, check, checkpoint, checkpoint_at,
+    perform,
+};
+
+use crate::supervise::TaskName;
 
 #[cfg(any(test, feature = "fault-injection"))]
 mod armed {
@@ -77,7 +100,7 @@ mod armed {
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, MutexGuard};
 
-    use super::Op;
+    use super::{Op, TaskName};
 
     /// The closure of an [`Action::Instead`].
     pub type InsteadFn = dyn Fn(&Path) -> io::Result<()> + Send + Sync;
@@ -111,12 +134,92 @@ mod armed {
         fired: Arc<AtomicUsize>,
     }
 
+    /// An armed [`arm_panic`].
+    struct ArmedPanic {
+        id: u64,
+        task: TaskName,
+        /// Only the checkpoint with this site name fires it; `None` takes any.
+        site: Option<&'static str>,
+        runtime: Option<tokio::runtime::Id>,
+        left: usize,
+        fired: Arc<AtomicUsize>,
+    }
+
     static REGISTRY: Mutex<Vec<Armed>> = Mutex::new(Vec::new());
+    static PANICS: Mutex<Vec<ArmedPanic>> = Mutex::new(Vec::new());
     static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
     fn registry() -> MutexGuard<'static, Vec<Armed>> {
         // A panicking test must not take the others down with it.
         REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn panics() -> MutexGuard<'static, Vec<ArmedPanic>> {
+        PANICS.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn current_runtime() -> Option<tokio::runtime::Id> {
+        tokio::runtime::Handle::try_current().ok().map(|h| h.id())
+    }
+
+    /// Makes the next `times` [`checkpoint`]s of `task` on the current
+    /// tokio runtime panic, until the returned guard is dropped.
+    pub fn arm_panic(task: TaskName, times: usize) -> FaultGuard {
+        arm_panic_site(task, None, times)
+    }
+
+    /// Like [`arm_panic`], but only for the [`checkpoint_at`] named `site`,
+    /// so a task with several loops panics in a fixed one.
+    pub fn arm_panic_at(task: TaskName, site: &'static str, times: usize) -> FaultGuard {
+        arm_panic_site(task, Some(site), times)
+    }
+
+    fn arm_panic_site(task: TaskName, site: Option<&'static str>, times: usize) -> FaultGuard {
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let fired = Arc::new(AtomicUsize::new(0));
+        panics().push(ArmedPanic {
+            id,
+            task,
+            site,
+            runtime: current_runtime(),
+            left: times,
+            fired: fired.clone(),
+        });
+        FaultGuard { id, fired }
+    }
+
+    /// Called once per loop iteration of each supervised task. Panics while
+    /// an [`arm_panic`] for `task` is armed on this runtime.
+    pub fn checkpoint(task: TaskName) {
+        checkpoint_at(task, "");
+    }
+
+    /// [`checkpoint`] of the loop named `site`. Panics while an
+    /// [`arm_panic`] for `task`, or an [`arm_panic_at`] for this `site`, is
+    /// armed on this runtime.
+    #[expect(
+        clippy::panic,
+        reason = "fault injection: the panic is the injected fault, and this module compiles only with the fault-injection feature"
+    )]
+    pub fn checkpoint_at(task: TaskName, site: &'static str) {
+        let runtime = current_runtime();
+        let hit = panics()
+            .iter_mut()
+            .find(|p| {
+                p.task == task
+                    && p.runtime == runtime
+                    && p.left > 0
+                    && p.site.is_none_or(|s| s == site)
+            })
+            .map(|p| {
+                p.left -= 1;
+                p.fired.fetch_add(1, Ordering::SeqCst);
+            })
+            .is_some();
+        // Outside the lock, so the registry is not poisoned.
+        if hit {
+            panic!("injected panic in {task:?}");
+        }
     }
 
     /// Keeps a fault armed; dropping it disarms the fault.
@@ -127,7 +230,8 @@ mod armed {
     }
 
     impl FaultGuard {
-        /// How many times this fault has fired so far (0 or 1).
+        /// How many times this fault has fired so far (0 or 1, or up to
+        /// `times` for [`arm_panic`]).
         pub fn fired(&self) -> usize {
             self.fired.load(Ordering::SeqCst)
         }
@@ -136,6 +240,7 @@ mod armed {
     impl Drop for FaultGuard {
         fn drop(&mut self) {
             registry().retain(|a| a.id != self.id);
+            panics().retain(|p| p.id != self.id);
         }
     }
 

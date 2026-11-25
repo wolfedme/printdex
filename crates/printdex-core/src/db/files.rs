@@ -137,7 +137,7 @@ fn overlaps(a: &str, b: &str) -> bool {
     let inside = |inner: &str, outer: &str| {
         inner.len() > outer.len()
             && inner.starts_with(outer)
-            && inner.as_bytes()[outer.len()] == b'/'
+            && inner.as_bytes().get(outer.len()) == Some(&b'/')
     };
     a == b || inside(a, b) || inside(b, a)
 }
@@ -171,16 +171,16 @@ impl Db {
             .await?;
             out.extend(parts.into_iter().map(|r| KnownFile {
                 rel_path: r.rel_path,
-                size: r.size as u64,
+                size: super::size_from_db(r.size),
                 mtime_ns: r.mtime_ns,
-                fp_hash: r.fp_hash.map(|h| h as u64),
-                material_fp: r.material_fp.map(|h| h as u64),
+                fp_hash: r.fp_hash.map(i64::cast_unsigned),
+                material_fp: r.material_fp.map(i64::cast_unsigned),
                 is_part: true,
                 present: r.missing_since.is_none(),
             }));
             out.extend(assets.into_iter().map(|r| KnownFile {
                 rel_path: r.rel_path,
-                size: r.size as u64,
+                size: super::size_from_db(r.size),
                 mtime_ns: r.mtime_ns,
                 fp_hash: None,
                 material_fp: None,
@@ -266,32 +266,27 @@ impl Db {
         for p in &parts {
             parts_of.entry(p.model_id).or_default().push(p);
         }
-        let key_of = |p: &PartRow| p.fp_hash.map(|h| (p.size as u64, h as u64));
-        let cand_rows: Vec<&ModelRow> = models
+        let key_of = |p: &PartRow| {
+            p.fp_hash
+                .map(|h| (super::size_from_db(p.size), h.cast_unsigned()))
+        };
+        // Both vectors are built together so `cand_rows[c]` lines up with
+        // `candidates[c]`.
+        let (cand_rows, candidates): (Vec<&ModelRow>, Vec<Candidate>) = models
             .iter()
             .filter(|m| !path_matched.contains(&m.id))
-            .filter(|m| {
-                parts_of
-                    .get(&m.id)
-                    .is_some_and(|ps| ps.iter().any(|p| key_of(p).is_some()))
-            })
-            .collect();
-        let candidates: Vec<Candidate> = cand_rows
-            .iter()
             .filter_map(|m| {
-                Some(Candidate {
-                    kind: ModelKind::from_db(&m.kind)?,
-                    keys: parts_of[&m.id].iter().filter_map(|p| key_of(p)).collect(),
-                })
+                let kind = ModelKind::from_db(&m.kind)?;
+                let keys: Vec<Key> = parts_of
+                    .get(&m.id)?
+                    .iter()
+                    .filter_map(|p| key_of(p))
+                    .collect();
+                (!keys.is_empty()).then_some((m, Candidate { kind, keys }))
             })
-            .collect();
-        // `from_db` never fails for rows we wrote; keep indices aligned anyway.
-        let cand_rows: Vec<&ModelRow> = cand_rows
-            .into_iter()
-            .filter(|m| ModelKind::from_db(&m.kind).is_some())
-            .collect();
+            .unzip();
         let file_key = |i: usize| -> Option<Key> {
-            let f = &write.files[i];
+            let f = write.files.get(i)?;
             write
                 .fingerprints
                 .get(&i)
@@ -302,27 +297,32 @@ impl Db {
                         .and_then(|p| key_of(p))
                 })
         };
-        let arriving: Vec<usize> = (0..write.groups.len())
-            .filter(|&g| !models_by_path.contains_key(write.groups[g].rel_path.as_str()))
+        let arriving: Vec<(usize, _)> = write
+            .groups
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| !models_by_path.contains_key(g.rel_path.as_str()))
             .collect();
         let arrivals: Vec<Arrival> = arriving
             .iter()
-            .map(|&g| {
-                let group = &write.groups[g];
-                Arrival {
-                    kind: group.kind,
-                    keys: group
-                        .parts
-                        .iter()
-                        .filter(|&&i| matches!(write.files[i].kind, FileKind::Printable(_)))
-                        .map(|&i| file_key(i))
-                        .collect(),
-                }
+            .map(|&(_, group)| Arrival {
+                kind: group.kind,
+                keys: group
+                    .parts
+                    .iter()
+                    .filter(|&&i| {
+                        write
+                            .files
+                            .get(i)
+                            .is_some_and(|f| matches!(f.kind, FileKind::Printable(_)))
+                    })
+                    .map(|&i| file_key(i))
+                    .collect(),
             })
             .collect();
         let moved_to: HashMap<usize, &ModelRow> = match_moves(&arrivals, &candidates)
             .into_iter()
-            .map(|(a, c)| (arriving[a], cand_rows[c]))
+            .filter_map(|(a, c)| Some((arriving.get(a)?.0, *cand_rows.get(c)?)))
             .collect();
         // Old parts of moved models, by key, to carry their ids over.
         let mut reusable: HashMap<(ModelId, Key), Vec<&PartRow>> = HashMap::new();
@@ -387,13 +387,15 @@ impl Db {
             };
 
             for &i in &group.parts {
-                let file = &write.files[i];
+                let Some(file) = write.files.get(i) else {
+                    continue;
+                };
                 let FileKind::Printable(format) = file.kind else {
                     continue;
                 };
                 let format = format.as_str();
-                let size = file.size as i64;
-                let fp_hash = write.fingerprints.get(&i).map(|f| f.hash as i64);
+                let size = super::size_to_db(file.size);
+                let fp_hash = write.fingerprints.get(&i).map(|f| f.hash.cast_signed());
                 let material = write.materials.get(&i).map(|m| m.as_deref());
                 match parts_by_path.get(file.rel_path.as_str()) {
                     Some(row) => {
@@ -453,8 +455,10 @@ impl Db {
             }
 
             for &i in &group.assets {
-                let file = &write.files[i];
-                let size = file.size as i64;
+                let Some(file) = write.files.get(i) else {
+                    continue;
+                };
+                let size = super::size_to_db(file.size);
                 match assets_by_path.get(file.rel_path.as_str()) {
                     Some(row) => {
                         seen_assets.insert(row.id);

@@ -9,7 +9,7 @@ use crate::{Limits, Mesh, MeshError, Result, malformed};
 pub(crate) fn read<R: BufRead>(mut r: R, limits: Limits) -> Result<Mesh> {
     let mut verts: Vec<[f32; 3]> = Vec::new();
     let mut mesh = Mesh::default();
-    let mut face: Vec<usize> = Vec::new();
+    let mut face: Vec<[f32; 3]> = Vec::new();
     let mut line = Vec::new();
     loop {
         line.clear();
@@ -47,22 +47,30 @@ pub(crate) fn read<R: BufRead>(mut r: R, limits: Limits) -> Result<Mesh> {
                     let idx = if raw > 0 {
                         usize::try_from(raw - 1).ok()
                     } else if raw < 0 {
-                        verts.len().checked_sub(raw.unsigned_abs() as usize)
+                        usize::try_from(raw.unsigned_abs())
+                            .ok()
+                            .and_then(|back| verts.len().checked_sub(back))
                     } else {
                         None
                     };
-                    match idx {
-                        Some(i) if i < verts.len() => face.push(i),
-                        _ => return Err(malformed("face index out of range in OBJ")),
+                    match idx.and_then(|i| verts.get(i)) {
+                        Some(v) => face.push(*v),
+                        None => return Err(malformed("face index out of range in OBJ")),
                     }
                 }
-                for k in 1..face.len().saturating_sub(1) {
+                // Fan from the first corner.
+                let Some((&first, rest)) = face.split_first() else {
+                    continue;
+                };
+                for pair in rest.windows(2) {
                     if mesh.triangles() as u64 >= limits.max_triangles {
                         return Err(MeshError::TooLarge {
                             triangles: mesh.triangles() as u64 + 1,
                         });
                     }
-                    mesh.push_triangle(verts[face[0]], verts[face[k]], verts[face[k + 1]]);
+                    if let [b, c] = *pair {
+                        mesh.push_triangle(first, b, c);
+                    }
                 }
             }
             _ => {}
@@ -104,6 +112,20 @@ mod tests {
         assert!(load(b"v 0 0 0\nv 1 0 0\nf 1 2 3\n").is_err());
         assert!(load(b"v 0 0 0\nf 0 1 1\n").is_err());
         assert!(load(b"v 0 0 0\nf -4 1 1\n").is_err());
+        // Relative indices far past the start, and past i64.
+        assert!(load(b"v 0 0 0\nf -9223372036854775808 1 1\n").is_err());
+        assert!(load(b"v 0 0 0\nf -99999999999999999999 1 1\n").is_err());
+        assert!(load(b"v 0 0 0\nf 99999999999999999 1 1\n").is_err());
+    }
+
+    #[test]
+    fn faces_with_fewer_than_three_corners_add_nothing() {
+        let m = load(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf\nf 1\nf 1 2\nf 1 2 3\n").unwrap();
+        assert_eq!(m.triangles(), 1);
+        // A pentagon fans into three triangles from its first corner.
+        let m = load(b"v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nv -1 1 0\nf 1 2 3 4 5\n").unwrap();
+        assert_eq!(m.triangles(), 3);
+        assert!(m.positions.chunks(3).all(|t| t[0] == [0.0, 0.0, 0.0]));
     }
 
     #[test]

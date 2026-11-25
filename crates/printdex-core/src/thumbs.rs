@@ -28,6 +28,7 @@ use crate::cpu::run_cpu;
 use crate::db::{Db, ImageSource, ModelSources, PartSource};
 use crate::events::EngineEvent;
 use crate::ids::{ModelId, PartId};
+use crate::supervise::{TaskName, spawn_supervised};
 use crate::walk::PrintableFormat;
 
 /// Thumbnail size in pixels. The grid shows them at up to about 1.3× this
@@ -203,8 +204,16 @@ pub(crate) fn weight(format: PrintableFormat, size: u64) -> u32 {
         PrintableFormat::Obj => 1.0,
         PrintableFormat::ThreeMf => 6.0,
     };
-    let mib = (size as f64 * factor / f64::from(1u32 << 20)).ceil();
-    (mib as u32).clamp(1, BUDGET_MIB)
+    let mib = (size as f64 * factor / f64::from(1u32 << 20))
+        .ceil()
+        .clamp(1.0, f64::from(BUDGET_MIB));
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "mib is clamped to [1, BUDGET_MIB], which fits u32; the cast also saturates and never panics"
+    )]
+    let weight = mib as u32;
+    weight
 }
 
 /// Handle to the thumbnail workers. Cheap to clone.
@@ -265,8 +274,9 @@ impl Gpu {
         opts: &printdex_render::RenderOptions,
     ) -> printdex_render::Image {
         if let Some(gpu) = self.get() {
-            let result =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gpu.render(mesh, opts)));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::diagnostics::recovering(|| gpu.render(mesh, opts))
+            }));
             match result {
                 Ok(Ok(img)) => return img,
                 Ok(Err(e)) => {
@@ -310,9 +320,11 @@ impl ThumbnailService {
             dirty: AtomicBool::new(true),
         });
         let cores = std::thread::available_parallelism().map_or(2, |n| n.get());
-        for _ in 0..(cores / 2).clamp(1, 4) {
-            tokio::spawn(worker(inner.clone()));
-        }
+        let workers = (cores / 2).clamp(1, 4);
+        let run = inner.clone();
+        spawn_supervised(TaskName::Thumbnails, inner.events.clone(), move || {
+            run_workers(run.clone(), workers)
+        });
         ThumbnailService { inner }
     }
 
@@ -354,19 +366,21 @@ impl ThumbnailService {
         };
         let (path, format, material) = (src.path.clone(), src.format, src.material);
         run_cpu(move || {
-            let mesh = load_mesh(&path, format)?;
-            let bounds = mesh.bounds().ok_or(ThumbFailure::Invalid)?;
-            let triangles = mesh.triangles();
-            let mesh = printdex_mesh::decimate(mesh, target);
-            let normals = (mesh.triangles() <= SMOOTH_PREVIEW_TRIANGLES)
-                .then(|| printdex_mesh::corner_normals(&mesh));
-            Ok(Preview {
-                normals,
-                decimated: mesh.triangles() < triangles,
-                mesh,
-                dims: bounds.size(),
-                triangles: triangles as u64,
-                material,
+            crate::diagnostics::recovering(|| {
+                let mesh = load_mesh(&path, format)?;
+                let bounds = mesh.bounds().ok_or(ThumbFailure::Invalid)?;
+                let triangles = mesh.triangles();
+                let mesh = printdex_mesh::decimate(mesh, target);
+                let normals = (mesh.triangles() <= SMOOTH_PREVIEW_TRIANGLES)
+                    .then(|| printdex_mesh::corner_normals(&mesh));
+                Ok(Preview {
+                    normals,
+                    decimated: mesh.triangles() < triangles,
+                    mesh,
+                    dims: bounds.size(),
+                    triangles: triangles as u64,
+                    material,
+                })
             })
         })
         .await
@@ -479,8 +493,31 @@ fn lock(q: &Mutex<Queue>) -> std::sync::MutexGuard<'_, Queue> {
     q.lock().unwrap_or_else(|p| p.into_inner())
 }
 
+/// One supervised run: `n` workers on their own tasks. A panic in any of
+/// them ends the run (the others are aborted with it) and the supervisor
+/// restarts all of them.
+async fn run_workers(inner: Arc<Inner>, n: usize) {
+    // A restart follows a panic: nothing is running any more. The jobs that
+    // were are dropped until the app asks for them again (its visible set
+    // changes), so a model that panics the renderer is not retried in a
+    // loop.
+    lock(&inner.queue).running.clear();
+    let mut set = tokio::task::JoinSet::new();
+    for _ in 0..n {
+        set.spawn(crate::diagnostics::recovering_future(worker(inner.clone())));
+    }
+    while let Some(done) = set.join_next().await {
+        if let Err(e) = done
+            && e.is_panic()
+        {
+            std::panic::resume_unwind(e.into_panic());
+        }
+    }
+}
+
 async fn worker(inner: Arc<Inner>) {
     loop {
+        crate::fsx::faults::checkpoint(TaskName::Thumbnails);
         let target = loop {
             let notified = inner.wake.notified();
             if let Some(t) = lock(&inner.queue).next() {
@@ -613,14 +650,16 @@ fn load_mesh(path: &Path, format: PrintableFormat) -> Result<printdex_mesh::Mesh
 
 /// The first row of `img` with a visible pixel; the height when empty.
 fn top_row(img: &printdex_render::Image) -> u32 {
-    let row = img.width as usize * 4;
+    let row = usize::try_from(img.width)
+        .unwrap_or(usize::MAX)
+        .saturating_mul(4);
     if row == 0 {
         return img.height;
     }
     img.rgba
         .chunks(row)
-        .position(|r| r.chunks(4).any(|px| px[3] > 0))
-        .map_or(img.height, |y| y as u32)
+        .position(|r| r.chunks(4).any(|px| px.get(3).is_some_and(|&a| a > 0)))
+        .map_or(img.height, |y| u32::try_from(y).unwrap_or(img.height))
 }
 
 fn render_part(
@@ -753,10 +792,13 @@ impl Inner {
         }
         let path = src.path.clone();
         let png = run_cpu(move || {
-            let bytes = printdex_mesh::threemf_thumbnail(&path, printdex_mesh::Limits::default())
-                .map_err(|_| ThumbFailure::Invalid)?
-                .ok_or(ThumbFailure::NoSource)?;
-            image_to_png(&bytes)
+            crate::diagnostics::recovering(|| {
+                let bytes =
+                    printdex_mesh::threemf_thumbnail(&path, printdex_mesh::Limits::default())
+                        .map_err(|_| ThumbFailure::Invalid)?
+                        .ok_or(ThumbFailure::NoSource)?;
+                image_to_png(&bytes)
+            })
         })
         .await;
         match png {
@@ -778,7 +820,11 @@ impl Inner {
         };
         let (path, format, material, gpu) =
             (src.path.clone(), src.format, src.material, self.gpu.clone());
-        match run_cpu(move || render_part(&path, format, material, &gpu)).await {
+        match run_cpu(move || {
+            crate::diagnostics::recovering(|| render_part(&path, format, material, &gpu))
+        })
+        .await
+        {
             Ok(r) => {
                 if let Err(e) = self
                     .db
@@ -809,8 +855,10 @@ impl Inner {
         }
         let path = img.path.clone();
         let png = run_cpu(move || {
-            let bytes = std::fs::read(&path).map_err(|_| ThumbFailure::Unreadable)?;
-            image_to_png(&bytes)
+            crate::diagnostics::recovering(|| {
+                let bytes = std::fs::read(&path).map_err(|_| ThumbFailure::Unreadable)?;
+                image_to_png(&bytes)
+            })
         })
         .await;
         match png {
@@ -866,6 +914,23 @@ mod tests {
 
     fn m(n: u8) -> ThumbTarget {
         ThumbTarget::Model(ModelId(uuid::Uuid::from_bytes([n; 16])))
+    }
+
+    #[test]
+    fn top_row_survives_a_short_pixel_buffer() {
+        // Three bytes cannot hold one RGBA pixel; there is no alpha to read.
+        let img = printdex_render::Image {
+            width: 1,
+            height: 1,
+            rgba: vec![0, 0, 0],
+        };
+        assert_eq!(top_row(&img), 1);
+        let img = printdex_render::Image {
+            width: 1,
+            height: 2,
+            rgba: vec![0, 0, 0, 0, 1, 1, 1, 9],
+        };
+        assert_eq!(top_row(&img), 1);
     }
 
     #[test]

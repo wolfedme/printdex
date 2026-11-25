@@ -202,11 +202,11 @@ impl Engine {
     pub(crate) fn mark_sync_dirty(&self, id: ModelId) {
         self.sync.mark(id);
         let db = self.db.clone();
-        tokio::spawn(async move {
+        tokio::spawn(crate::diagnostics::recovering_future(async move {
             if let Err(e) = db.mark_sync_dirty(&[id]).await {
                 tracing::warn!(error = %e, "could not remember a change for sync");
             }
-        });
+        }));
     }
 
     async fn hlc(&self) -> Result<Hlc> {
@@ -592,7 +592,7 @@ impl Engine {
                 }
             };
             let bytes = match &open.key {
-                Some(k) => crypto::seal(k, &bytes),
+                Some(k) => crypto::seal(k, &bytes)?,
                 None => bytes,
             };
             open.store.write_once(path, bytes).await?;
@@ -620,15 +620,17 @@ impl Engine {
             open.store
                 .write(
                     &log::batch_path(open.me, seq),
-                    log::encode(&batch, open.key.as_ref()),
+                    log::encode(&batch, open.key.as_ref())?,
                 )
                 .await?;
             let start = chunk_no * BATCH_RECORDS;
             let end = (start + chunk.len()).min(rows.len());
-            for r in &mut rows[start..end] {
-                r.seq = seq;
+            if let Some(stamped) = rows.get_mut(start..end) {
+                for r in &mut *stamped {
+                    r.seq = seq;
+                }
+                self.db.put_fields(space, stamped).await?;
             }
-            self.db.put_fields(space, &rows[start..end]).await?;
             since += chunk.len() as u64;
             seq += 1;
             self.db.set_space_seq(space, seq, since).await?;
@@ -1308,12 +1310,13 @@ impl Engine {
             Some(k) => crypto::open(k, &bytes)?,
             None => bytes,
         };
+        let head = bytes.get(..32).unwrap_or(&bytes);
         if bytes.len() as u64 > crate::photos::MAX_PHOTO_BYTES
-            || crate::photos::photo_extension(&bytes[..bytes.len().min(32)]).is_none()
+            || crate::photos::photo_extension(head).is_none()
         {
             return Ok(false);
         }
-        let ext = crate::photos::photo_extension(&bytes[..bytes.len().min(32)]).unwrap_or("jpg");
+        let ext = crate::photos::photo_extension(head).unwrap_or("jpg");
         let name = format!("{photo}.{ext}");
         let dir = self.db.photo_dir().join(attempt.to_string());
         let dest = dir.join(&name);
@@ -1376,7 +1379,7 @@ impl Engine {
         open.store
             .write(
                 &log::snap_path(open.me, last),
-                log::encode(&snap, open.key.as_ref()),
+                log::encode(&snap, open.key.as_ref())?,
             )
             .await?;
         // Keep one generation back for installs reading right now.

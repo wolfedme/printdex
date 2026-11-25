@@ -25,6 +25,7 @@ use crate::engine::{Engine, LibraryStatus, folder_status};
 use crate::error::{BackupError, CoreError, Result};
 use crate::events::EngineEvent;
 use crate::ids::LibraryId;
+use crate::supervise::{TaskName, spawn_supervised};
 use crate::time::now_ms;
 
 const MINUTE: i64 = 60_000;
@@ -281,7 +282,10 @@ impl Engine {
 
     pub fn start_backup_scheduler_with(&self, config: SchedulerConfig) -> BackupScheduler {
         let stop = CancellationToken::new();
-        tokio::spawn(schedule(self.clone(), config, stop.clone()));
+        let (engine, token) = (self.clone(), stop.clone());
+        spawn_supervised(TaskName::BackupScheduler, self.events.clone(), move || {
+            schedule(engine.clone(), config.clone(), token.clone())
+        });
         BackupScheduler {
             stop,
             engine: self.clone(),
@@ -396,6 +400,7 @@ async fn schedule(engine: Engine, config: SchedulerConfig, stop: CancellationTok
     let mut tick = tokio::time::interval(config.tick);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
+        crate::fsx::faults::checkpoint(TaskName::BackupScheduler);
         tokio::select! {
             () = stop.cancelled() => break,
             _ = tick.tick() => {}

@@ -518,7 +518,7 @@ fn scan_tree(from: &Path) -> io::Result<Vec<Entry>> {
     let mut out = vec![Entry::Dir(PathBuf::new())];
     let mut i = 0;
     while i < out.len() {
-        if let Entry::Dir(rel) = &out[i] {
+        if let Some(Entry::Dir(rel)) = out.get(i) {
             let rel = rel.clone();
             let mut children = Vec::new();
             for e in fs::read_dir(from.join(&rel))? {
@@ -635,7 +635,11 @@ pub fn copy_state(from: &Path, to: &Path) -> io::Result<CopyState> {
         Err(e) if is_links_error(&e) => return Ok(CopyState::NotACopy),
         Err(e) => return Err(e),
     };
-    if std::mem::discriminant(&src[0]) != std::mem::discriminant(&dst[0]) {
+    // `scan_tree` always lists the root first, so neither list is empty.
+    let (Some(src_root), Some(dst_root)) = (src.first(), dst.first()) else {
+        return Ok(CopyState::NotACopy);
+    };
+    if std::mem::discriminant(src_root) != std::mem::discriminant(dst_root) {
         return Ok(CopyState::NotACopy);
     }
     let known: std::collections::HashSet<&Entry> = src.iter().collect();
@@ -660,6 +664,10 @@ pub fn copy_state(from: &Path, to: &Path) -> io::Result<CopyState> {
 
 /// Whether the file `part`'s bytes are the start of `whole`'s: `None` if
 /// not, `Some(true)` if they are all of it.
+#[expect(
+    clippy::indexing_slicing,
+    reason = "n is min(left, pb.len()) and wb has the same length as pb"
+)]
 fn prefix_of(whole: &Path, part: &Path) -> io::Result<Option<bool>> {
     let (mut w, mut p) = (File::open(whole)?, File::open(part)?);
     let (wl, pl) = (w.metadata()?.len(), p.metadata()?.len());
@@ -669,7 +677,7 @@ fn prefix_of(whole: &Path, part: &Path) -> io::Result<Option<bool>> {
     let (mut wb, mut pb) = (vec![0u8; 64 * 1024], vec![0u8; 64 * 1024]);
     let mut left = pl;
     while left > 0 {
-        let n = (left as usize).min(pb.len());
+        let n = usize::try_from(left).unwrap_or(usize::MAX).min(pb.len());
         p.read_exact(&mut pb[..n])?;
         w.read_exact(&mut wb[..n])?;
         if pb[..n] != wb[..n] {
@@ -697,6 +705,7 @@ fn hash_file(p: &Path) -> io::Result<Sum> {
 }
 
 /// Reads `r` to the end, hashing it and handing each chunk to `sink`.
+#[expect(clippy::indexing_slicing, reason = "read returns n <= buf.len()")]
 fn stream(r: &mut File, mut sink: impl FnMut(&[u8]) -> io::Result<()>) -> io::Result<Sum> {
     let mut h = Xxh3::new();
     let mut buf = vec![0u8; 256 * 1024];

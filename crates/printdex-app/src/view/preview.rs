@@ -50,7 +50,8 @@ fn printed<'a>(handle: image::Handle, reveal: Reveal, w: f32, h: f32) -> Element
         Reveal::Fade(alpha) => image(handle).width(w).height(h).opacity(alpha).into(),
         Reveal::Build { clip, .. } => {
             let src_h = printdex_core::THUMB_HEIGHT;
-            let hidden = ((clip.clamp(0.0, 1.0) * src_h as f32).round() as u32).min(src_h);
+            let hidden =
+                crate::format::to_u32((clip.clamp(0.0, 1.0) * src_h as f32).round()).min(src_h);
             let shown = (src_h - hidden) as f32 / src_h as f32;
             let rest: Element<'a, Message> = if hidden == src_h {
                 Space::new().into()

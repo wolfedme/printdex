@@ -116,7 +116,7 @@ impl Db {
             format: format_from_db(&r.format),
             size: u64::try_from(r.size).unwrap_or(0),
             mtime_ns: r.mtime_ns,
-            fp_hash: r.fp_hash.map(|h| h as u64),
+            fp_hash: r.fp_hash.map(i64::cast_unsigned),
             material: preview_material(
                 r.material.as_deref(),
                 r.file_material.as_deref(),
@@ -158,7 +158,7 @@ impl Db {
             format: format_from_db(&r.format),
             size: u64::try_from(r.size).unwrap_or(0),
             mtime_ns: r.mtime_ns,
-            fp_hash: r.fp_hash.map(|h| h as u64),
+            fp_hash: r.fp_hash.map(i64::cast_unsigned),
             material: preview_material(
                 lib.material.as_deref(),
                 r.file_material.as_deref(),
@@ -196,7 +196,7 @@ impl Db {
     ) -> Result<()> {
         let (x, y, z) = (f64::from(dims[0]), f64::from(dims[1]), f64::from(dims[2]));
         let tris = i64::try_from(triangles).unwrap_or(i64::MAX);
-        let fp = fp.map(|h| h as i64);
+        let fp = fp.map(u64::cast_signed);
         sqlx::query!(
             "UPDATE parts SET dim_x = ?, dim_y = ?, dim_z = ?, triangles = ?, measured_fp = ?
              WHERE id = ?",

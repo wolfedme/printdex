@@ -71,6 +71,10 @@ where
         self.anchor.as_widget().size_hint()
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "iced builds this widget's tree from `children()`, so child 0 is always the anchor"
+    )]
     fn layout(
         &mut self,
         tree: &mut Tree,
@@ -82,6 +86,10 @@ where
             .layout(&mut tree.children[0], renderer, limits)
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "iced builds this widget's tree from `children()`, so child 0 is always the anchor"
+    )]
     fn update(
         &mut self,
         tree: &mut Tree,
@@ -105,6 +113,10 @@ where
         );
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "iced builds this widget's tree from `children()`, so child 0 is always the anchor"
+    )]
     fn mouse_interaction(
         &self,
         tree: &Tree,
@@ -122,6 +134,10 @@ where
         )
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "iced builds this widget's tree from `children()`, so child 0 is always the anchor"
+    )]
     fn draw(
         &self,
         tree: &Tree,
@@ -143,6 +159,10 @@ where
         );
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "iced builds this widget's tree from `children()`, so child 0 is always the anchor"
+    )]
     fn operate(
         &mut self,
         tree: &mut Tree,

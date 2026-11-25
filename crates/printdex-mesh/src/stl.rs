@@ -6,7 +6,8 @@ use std::io::{BufRead, Read};
 use crate::{Limits, Mesh, MeshError, Result, malformed};
 
 const HEADER: u64 = 80;
-const RECORD: u64 = 50;
+/// Bytes per binary triangle record.
+const RECORD: usize = 50;
 /// Records decoded per read call.
 const CHUNK_RECORDS: usize = 4096;
 
@@ -19,14 +20,16 @@ const CHUNK_RECORDS: usize = 4096;
 pub(crate) fn read<R: BufRead>(mut r: R, size: u64, limits: Limits) -> Result<Mesh> {
     let mut head = [0u8; 84];
     let got = read_up_to(&mut r, &mut head)?;
-    let starts_solid = head[..got]
+    // `read_up_to` never reports more than it was given room for.
+    let start = head.get(..got).unwrap_or_default();
+    let starts_solid = start
         .iter()
         .skip_while(|b| b.is_ascii_whitespace())
         .take(5)
         .eq(b"solid".iter());
     if got == 84 {
         let count = u64::from(u32::from_le_bytes([head[80], head[81], head[82], head[83]]));
-        let expected = HEADER + 4 + count * RECORD;
+        let expected = HEADER + 4 + count * RECORD as u64;
         if expected == size || (!starts_solid && expected < size) {
             return read_binary(r, count, limits);
         }
@@ -38,21 +41,22 @@ pub(crate) fn read<R: BufRead>(mut r: R, size: u64, limits: Limits) -> Result<Me
     } else if !starts_solid {
         return Err(malformed("file too short for a binary STL"));
     }
-    read_ascii(head[..got].chain(r), limits)
+    read_ascii(start.chain(r), limits)
 }
 
 /// Fills `buf` as far as the reader allows; returns the bytes read.
 fn read_up_to<R: Read>(r: &mut R, buf: &mut [u8]) -> std::io::Result<usize> {
     let mut n = 0;
-    while n < buf.len() {
-        match r.read(&mut buf[n..]) {
+    while let Some(rest) = buf.get_mut(n..).filter(|rest| !rest.is_empty()) {
+        match r.read(rest) {
             Ok(0) => break,
             Ok(k) => n += k,
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
             Err(e) => return Err(e),
         }
     }
-    Ok(n)
+    // A reader may claim more than it was given room for.
+    Ok(n.min(buf.len()))
 }
 
 fn read_binary<R: Read>(mut r: R, count: u64, limits: Limits) -> Result<Mesh> {
@@ -63,11 +67,15 @@ fn read_binary<R: Read>(mut r: R, count: u64, limits: Limits) -> Result<Mesh> {
     let mut mesh = Mesh {
         positions: Vec::with_capacity(count * 3),
     };
-    let mut buf = vec![0u8; CHUNK_RECORDS * RECORD as usize];
+    let mut buf = vec![0u8; CHUNK_RECORDS * RECORD];
     let mut left = count;
     while left > 0 {
         let n = left.min(CHUNK_RECORDS);
-        let bytes = &mut buf[..n * RECORD as usize];
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "n <= CHUNK_RECORDS and buf holds CHUNK_RECORDS records"
+        )]
+        let bytes = &mut buf[..n * RECORD];
         r.read_exact(bytes).map_err(|e| {
             if e.kind() == std::io::ErrorKind::UnexpectedEof {
                 malformed("binary STL ends early")
@@ -75,21 +83,21 @@ fn read_binary<R: Read>(mut r: R, count: u64, limits: Limits) -> Result<Mesh> {
                 e.into()
             }
         })?;
-        for rec in bytes.as_chunks::<{ RECORD as usize }>().0 {
+        for rec in bytes.as_chunks::<RECORD>().0 {
             // 12 bytes normal, 3 × 12 bytes vertices, 2 bytes attribute.
-            let v = |i: usize| -> [f32; 3] {
-                let o = 12 + i * 12;
-                [f32le(&rec[o..]), f32le(&rec[o + 4..]), f32le(&rec[o + 8..])]
+            let [_, _, _, ax, ay, az, bx, by, bz, cx, cy, cz] = *rec.as_chunks::<4>().0 else {
+                continue;
             };
-            mesh.push_triangle(v(0), v(1), v(2));
+            let f = f32::from_le_bytes;
+            mesh.push_triangle(
+                [f(ax), f(ay), f(az)],
+                [f(bx), f(by), f(bz)],
+                [f(cx), f(cy), f(cz)],
+            );
         }
         left -= n;
     }
     Ok(mesh)
-}
-
-fn f32le(b: &[u8]) -> f32 {
-    f32::from_le_bytes([b[0], b[1], b[2], b[3]])
 }
 
 fn read_ascii<R: BufRead>(mut r: R, limits: Limits) -> Result<Mesh> {
@@ -113,13 +121,13 @@ fn read_ascii<R: BufRead>(mut r: R, limits: Limits) -> Result<Mesh> {
                         .ok_or_else(|| malformed("bad vertex in ASCII STL"))?;
                 }
                 verts.push(v);
-                if verts.len() == 3 {
+                if let [a, b, c] = *verts.as_slice() {
                     if mesh.triangles() as u64 >= limits.max_triangles {
                         return Err(MeshError::TooLarge {
                             triangles: mesh.triangles() as u64 + 1,
                         });
                     }
-                    mesh.push_triangle(verts[0], verts[1], verts[2]);
+                    mesh.push_triangle(a, b, c);
                     verts.clear();
                 }
             }
@@ -215,6 +223,32 @@ pub(crate) mod tests {
     fn drops_non_finite_triangles() {
         let bad = [[f32::NAN, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]];
         assert_eq!(load(&binary(b"", &[bad, TRI])).unwrap().triangles(), 1);
+    }
+
+    /// A reader that claims to have read more than it was given room for.
+    struct Liar;
+
+    impl Read for Liar {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            Ok(buf.len() + 10)
+        }
+    }
+
+    impl BufRead for Liar {
+        fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+            Ok(&[])
+        }
+
+        fn consume(&mut self, _: usize) {}
+    }
+
+    #[test]
+    fn a_reader_reporting_too_much_is_not_trusted() {
+        let mut buf = [0u8; 4];
+        assert_eq!(read_up_to(&mut Liar, &mut buf).unwrap(), 4);
+        // The header read claims 94 of 84 bytes: taken as 84 (all zero,
+        // so a binary STL of no triangles).
+        assert_eq!(read(Liar, 84, Limits::default()).unwrap().triangles(), 0);
     }
 
     #[test]

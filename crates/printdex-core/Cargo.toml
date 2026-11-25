@@ -23,6 +23,7 @@ sqlx.workspace = true
 sysinfo.workspace = true
 trash.workspace = true
 thiserror.workspace = true
+pin-project-lite.workspace = true
 tokio.workspace = true
 toml.workspace = true
 tokio-util.workspace = true
@@ -45,7 +46,7 @@ gethostname.workspace = true
 [target.'cfg(unix)'.dependencies]
 opendal = { workspace = true, features = ["services-sftp"] }
 # fsx::rename_no_replace: renameat2(RENAME_NOREPLACE) / renameatx_np(RENAME_EXCL).
-rustix = { version = "1", features = ["fs"] }
+rustix = { version = "1", features = ["fs", "process"] }
 
 [features]
 # Turns on fsx::faults::arm so integration tests can fail or interfere with
@@ -56,6 +57,8 @@ fault-injection = []
 # Itself, with fault injection on, for tests/it.
 printdex-core = { path = ".", features = ["fault-injection"] }
 tempfile.workspace = true
+# Paused time for the supervision tests.
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

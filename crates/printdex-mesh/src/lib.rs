@@ -5,6 +5,18 @@
 //! and treated as hostile: declared counts are checked against the file
 //! size, archive entries are read with a size cap, indices are bounds
 //! checked, and non-finite coordinates are dropped.
+#![cfg_attr(
+    not(test),
+    warn(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_possible_wrap
+    )
+)]
 
 use std::fs::File;
 use std::io::BufReader;
@@ -72,17 +84,21 @@ impl Mesh {
         self.positions.len() / 3
     }
 
-    /// Bounding box of all positions; `None` for an empty mesh.
+    /// Bounding box of all finite positions; `None` when there are none.
+    /// (The loaders never produce a non-finite one, but `positions` is
+    /// public.)
     pub fn bounds(&self) -> Option<Bounds> {
-        let first = *self.positions.first()?;
+        let finite = |p: &&[f32; 3]| p.iter().all(|v| v.is_finite());
+        let mut points = self.positions.iter().filter(finite);
+        let first = *points.next()?;
         let mut b = Bounds {
             min: first,
             max: first,
         };
-        for p in &self.positions {
-            for (i, v) in p.iter().enumerate() {
-                b.min[i] = b.min[i].min(*v);
-                b.max[i] = b.max[i].max(*v);
+        for p in points {
+            for ((lo, hi), v) in b.min.iter_mut().zip(&mut b.max).zip(p) {
+                *lo = lo.min(*v);
+                *hi = hi.max(*v);
             }
         }
         Some(b)
@@ -166,6 +182,27 @@ mod tests {
     #[test]
     fn empty_mesh_has_no_bounds() {
         assert!(Mesh::default().bounds().is_none());
+    }
+
+    #[test]
+    fn bounds_skip_non_finite_positions() {
+        // `positions` is public, so a mesh can hold what the loaders drop.
+        let m = Mesh {
+            positions: vec![
+                [f32::NAN, 0.0, 0.0],
+                [1.0, f32::INFINITY, 2.0],
+                [0.0, 0.0, 0.0],
+                [2.0, -1.0, 3.0],
+                [0.0, 0.0, f32::NEG_INFINITY],
+            ],
+        };
+        let b = m.bounds().unwrap();
+        assert_eq!(b.min, [0.0, -1.0, 0.0]);
+        assert_eq!(b.max, [2.0, 0.0, 3.0]);
+        let none = Mesh {
+            positions: vec![[f32::NAN; 3], [f32::INFINITY; 3]],
+        };
+        assert_eq!(none.bounds(), None);
     }
 
     #[test]

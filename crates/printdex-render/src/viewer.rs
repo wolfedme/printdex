@@ -16,7 +16,8 @@ use glam::{Vec2, Vec3};
 use printdex_mesh::{Bounds, Mesh, PackedNormal, pack};
 use wgpu::util::DeviceExt;
 
-use crate::camera::{Fit, View};
+use crate::camera::{Fit, View, finite, finite2};
+use crate::cast::to_u32;
 use crate::material::{AO_RADIUS, Lighting, Material};
 use crate::raster::{Sphere, edge_step};
 
@@ -374,8 +375,8 @@ impl Uniforms {
             c3(light.sheen),
         ];
         let mut out = [0.0; UNIFORM_BYTES / 4];
-        for (i, row) in rows.iter().enumerate() {
-            out[i * 4..i * 4 + 4].copy_from_slice(row);
+        for (dst, row) in out.as_chunks_mut::<4>().0.iter_mut().zip(rows) {
+            *dst = row;
         }
         Uniforms(out)
     }
@@ -421,17 +422,19 @@ pub fn home_view(sphere: Sphere, bounds: Bounds, width: f32, height: f32) -> Vie
         return view;
     }
     let usable = 1.0 - 2.0 * crate::camera::ORBIT_MARGIN;
-    let sphere_scale = side * usable / (2.0 * sphere.radius);
+    // As in `Fit::orbit`: a point mesh still has a size to divide by.
+    let sphere_scale = side * usable / (2.0 * sphere.radius.max(1e-3));
     let fit_scale = (width * usable / extent.x).min(height * usable / extent.y);
-    // Capped so turning the model doesn't push it far out of view.
-    let zoom = (fit_scale / sphere_scale).clamp(1.0, HOME_MAX_ZOOM);
+    // Capped so turning the model doesn't push it far out of view. A NaN
+    // ratio (from huge bounds) gives the plain sphere view.
+    let zoom = finite(fit_scale / sphere_scale).clamp(1.0, HOME_MAX_ZOOM);
     // Centre the box, not the sphere (they differ in screen space only
     // by rounding for a box, but keep it exact).
-    let mid = (lo + hi) / 2.0;
+    let mid = lo / 2.0 + hi / 2.0;
     let scale = sphere_scale * zoom;
     View {
         zoom,
-        pan: Vec2::new(-(mid.x - c.x) * scale, (mid.y - c.y) * scale) / side,
+        pan: finite2(Vec2::new(-(mid.x - c.x) * scale, (mid.y - c.y) * scale) / side),
         ..view
     }
 }
@@ -645,15 +648,16 @@ impl GpuViewer {
                         let [a, b, c] = tri.map(Vec3::from_array);
                         pack((b - a).cross(c - a).to_array())
                     };
-                    let ns = match normals {
-                        Some(n) => [n[corner], n[corner + 1], n[corner + 2]],
-                        None => [face(); 3],
+                    // Lengths were matched above; a short list draws flat.
+                    let ns = match normals.and_then(|n| n.get(corner..corner + 3)) {
+                        Some(&[a, b, c]) => [a, b, c],
+                        _ => [face(); 3],
                     };
                     for (p, n) in tri.iter().zip(ns) {
                         for v in p {
                             bytes.extend_from_slice(&v.to_le_bytes());
                         }
-                        bytes.extend(n.map(|v| v as u8));
+                        bytes.extend(n.map(i8::cast_unsigned));
                     }
                 }
                 let buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -661,7 +665,12 @@ impl GpuViewer {
                     contents: &bytes,
                     usage: wgpu::BufferUsages::VERTEX,
                 });
-                (buf, chunk.len() as u32)
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "a chunk holds at most CHUNK_VERTICES (3M) positions"
+                )]
+                let count = chunk.len() as u32;
+                (buf, count)
             })
             .collect();
         self.mesh = Some((id, buffers));
@@ -675,7 +684,7 @@ impl GpuViewer {
     /// Supersampling used for an output of `width` × `height`: 2× unless
     /// the device's texture size limit forbids it.
     fn supersampling(&self, width: u32, height: u32) -> u32 {
-        if width.max(height) * SS <= self.max_texture {
+        if width.max(height).saturating_mul(SS) <= self.max_texture {
             SS
         } else {
             1
@@ -782,16 +791,20 @@ impl GpuViewer {
             return;
         };
         // Scissor: the clip, within the viewer's own rectangle.
-        let x0 = (clip[0] as f32).max(place.origin[0].max(0.0)).floor() as u32;
-        let y0 = (clip[1] as f32).max(place.origin[1].max(0.0)).floor() as u32;
-        let x1 = ((clip[0] + clip[2]) as f32)
-            .min(place.origin[0] + place.width as f32)
-            .max(0.0)
-            .ceil() as u32;
-        let y1 = ((clip[1] + clip[3]) as f32)
-            .min(place.origin[1] + place.height as f32)
-            .max(0.0)
-            .ceil() as u32;
+        let x0 = to_u32((clip[0] as f32).max(place.origin[0].max(0.0)).floor());
+        let y0 = to_u32((clip[1] as f32).max(place.origin[1].max(0.0)).floor());
+        let x1 = to_u32(
+            (clip[0].saturating_add(clip[2]) as f32)
+                .min(place.origin[0] + place.width as f32)
+                .max(0.0)
+                .ceil(),
+        );
+        let y1 = to_u32(
+            (clip[1].saturating_add(clip[3]) as f32)
+                .min(place.origin[1] + place.height as f32)
+                .max(0.0)
+                .ceil(),
+        );
         if x1 <= x0 || y1 <= y0 {
             return;
         }
@@ -1065,6 +1078,46 @@ mod tests {
                 "{px}"
             );
         }
+    }
+
+    fn finite_view(v: &View) -> bool {
+        v.zoom.is_finite()
+            && v.pan.is_finite()
+            && v.camera.azimuth.is_finite()
+            && v.camera.elevation.is_finite()
+    }
+
+    #[test]
+    fn home_view_of_point_mesh_is_finite() {
+        let point = Sphere {
+            center: Vec3::ZERO,
+            radius: 0.0,
+        };
+        let at_origin = Bounds {
+            min: [0.; 3],
+            max: [0.; 3],
+        };
+        let v = home_view(point, at_origin, 0.0, 0.0);
+        assert!(finite_view(&v), "{v:?}");
+        // In a real viewer, and in a sliver of one.
+        for (w, h) in [(700.0, 320.0), (1.0, 1.0), (1.0, 500.0), (-5.0, 10.0)] {
+            let v = home_view(point, at_origin, w, h);
+            assert!(finite_view(&v), "{w}x{h}: {v:?}");
+            let p = project(point, &v, w as u32, h as u32, Vec3::ZERO);
+            assert!(p.is_finite(), "{w}x{h}: {p}");
+        }
+        // Huge but finite bounds.
+        let huge = Bounds {
+            min: [-f32::MAX; 3],
+            max: [f32::MAX; 3],
+        };
+        let s = Sphere {
+            center: Vec3::ZERO,
+            radius: f32::MAX,
+        };
+        let v = home_view(s, huge, 700.0, 320.0);
+        assert!(finite_view(&v), "{v:?}");
+        assert!(project(s, &v, 700, 320, Vec3::ONE).is_finite());
     }
 
     #[test]
