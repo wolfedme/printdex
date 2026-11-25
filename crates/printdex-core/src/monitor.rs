@@ -190,7 +190,7 @@ async fn supervise(
     }
 
     loop {
-        crate::fsx::faults::checkpoint(TaskName::Monitor);
+        crate::fsx::faults::checkpoint_at(TaskName::Monitor, "supervise");
         let event = tokio::select! {
             () = cancel.cancelled() => break,
             e = events.recv() => e,
@@ -394,7 +394,7 @@ async fn run_library(
     let mut pending = Pending::default();
 
     loop {
-        crate::fsx::faults::checkpoint(TaskName::Monitor);
+        crate::fsx::faults::checkpoint_at(TaskName::Monitor, "library");
         tokio::select! {
             () = cancel.cancelled() => break,
             _ = probe.tick() => {
