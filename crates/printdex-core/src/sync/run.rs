@@ -202,11 +202,11 @@ impl Engine {
     pub(crate) fn mark_sync_dirty(&self, id: ModelId) {
         self.sync.mark(id);
         let db = self.db.clone();
-        tokio::spawn(async move {
+        tokio::spawn(crate::diagnostics::recovering_future(async move {
             if let Err(e) = db.mark_sync_dirty(&[id]).await {
                 tracing::warn!(error = %e, "could not remember a change for sync");
             }
-        });
+        }));
     }
 
     async fn hlc(&self) -> Result<Hlc> {

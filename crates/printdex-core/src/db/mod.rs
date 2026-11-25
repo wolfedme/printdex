@@ -297,11 +297,13 @@ async fn quick_check_fails(db: &Path) -> bool {
     };
     let check = async {
         let mut conn = opts.filename(db).read_only(true).connect().await?;
-        let row: (String,) = sqlx::query_as("PRAGMA quick_check(1)")
+        let row = sqlx::query_as::<_, (String,)>("PRAGMA quick_check(1)")
             .fetch_one(&mut conn)
-            .await?;
+            .await;
+        // Close on every path: an open handle blocks moving the file aside
+        // on Windows.
         let _ = conn.close().await;
-        Ok::<_, sqlx::Error>(row.0)
+        Ok::<_, sqlx::Error>(row?.0)
     };
     match check.await {
         Ok(result) => result != "ok",

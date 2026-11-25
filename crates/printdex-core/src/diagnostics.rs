@@ -577,6 +577,29 @@ mod tests {
         assert!(records_with(dir, CRASH_PREFIX, "fut-x").is_empty());
     }
 
+    #[tokio::test]
+    async fn recovering_inside_cpu_work_writes_recovered_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let joined = {
+            let _lock = HOOK_LOCK.lock().await;
+            let saved = std::panic::take_hook();
+            std::panic::set_hook(Box::new(|_| {}));
+            install_panic_hook(dir.to_path_buf(), "1", CrashSource::App);
+            // The shape of the thumbnail call sites: rayon runs the closure
+            // at depth 0, so it must mark itself.
+            let joined = tokio::spawn(async {
+                crate::cpu::run_cpu(move || recovering(|| -> () { panic!("cpu-rec-x") })).await
+            })
+            .await;
+            std::panic::set_hook(saved);
+            joined
+        };
+        assert!(joined.is_err());
+        assert_eq!(records_with(dir, "recovered-", "cpu-rec-x").len(), 1);
+        assert!(records_with(dir, CRASH_PREFIX, "cpu-rec-x").is_empty());
+    }
+
     #[test]
     fn bundle_includes_recovered_files() {
         let tmp = tempfile::tempdir().unwrap();

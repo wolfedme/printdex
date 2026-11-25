@@ -111,7 +111,9 @@ pub fn visible_range(offset: f32, height: f32, stride: f32, rows: usize) -> Rang
         r
     };
     let first = to_row(offset).saturating_sub(OVERSCAN).min(rows);
-    let last = (to_row((offset + height.max(0.0)).ceil()) + 1 + OVERSCAN).min(rows);
+    let last = to_row((offset + height.max(0.0)).ceil())
+        .saturating_add(1 + OVERSCAN)
+        .min(rows);
     first..last.max(first)
 }
 
@@ -175,6 +177,13 @@ mod tests {
     fn visible_range_scrolled() {
         // offset 1050 → first visible row 10, last 13; overscan 9..15.
         assert_eq!(visible_range(1050.0, 250.0, 100.0, 50), 9..15);
+    }
+
+    #[test]
+    fn visible_range_survives_huge_offsets() {
+        assert_eq!(visible_range(f32::INFINITY, 250.0, 100.0, 50), 50..50);
+        assert_eq!(visible_range(f32::MAX, f32::MAX, 1.0, 50), 50..50);
+        assert_eq!(visible_range(0.0, f32::INFINITY, 100.0, 50), 0..50);
     }
 
     #[test]

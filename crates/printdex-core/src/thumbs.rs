@@ -366,19 +366,21 @@ impl ThumbnailService {
         };
         let (path, format, material) = (src.path.clone(), src.format, src.material);
         run_cpu(move || {
-            let mesh = load_mesh(&path, format)?;
-            let bounds = mesh.bounds().ok_or(ThumbFailure::Invalid)?;
-            let triangles = mesh.triangles();
-            let mesh = printdex_mesh::decimate(mesh, target);
-            let normals = (mesh.triangles() <= SMOOTH_PREVIEW_TRIANGLES)
-                .then(|| printdex_mesh::corner_normals(&mesh));
-            Ok(Preview {
-                normals,
-                decimated: mesh.triangles() < triangles,
-                mesh,
-                dims: bounds.size(),
-                triangles: triangles as u64,
-                material,
+            crate::diagnostics::recovering(|| {
+                let mesh = load_mesh(&path, format)?;
+                let bounds = mesh.bounds().ok_or(ThumbFailure::Invalid)?;
+                let triangles = mesh.triangles();
+                let mesh = printdex_mesh::decimate(mesh, target);
+                let normals = (mesh.triangles() <= SMOOTH_PREVIEW_TRIANGLES)
+                    .then(|| printdex_mesh::corner_normals(&mesh));
+                Ok(Preview {
+                    normals,
+                    decimated: mesh.triangles() < triangles,
+                    mesh,
+                    dims: bounds.size(),
+                    triangles: triangles as u64,
+                    material,
+                })
             })
         })
         .await
@@ -790,10 +792,13 @@ impl Inner {
         }
         let path = src.path.clone();
         let png = run_cpu(move || {
-            let bytes = printdex_mesh::threemf_thumbnail(&path, printdex_mesh::Limits::default())
-                .map_err(|_| ThumbFailure::Invalid)?
-                .ok_or(ThumbFailure::NoSource)?;
-            image_to_png(&bytes)
+            crate::diagnostics::recovering(|| {
+                let bytes =
+                    printdex_mesh::threemf_thumbnail(&path, printdex_mesh::Limits::default())
+                        .map_err(|_| ThumbFailure::Invalid)?
+                        .ok_or(ThumbFailure::NoSource)?;
+                image_to_png(&bytes)
+            })
         })
         .await;
         match png {
@@ -815,7 +820,11 @@ impl Inner {
         };
         let (path, format, material, gpu) =
             (src.path.clone(), src.format, src.material, self.gpu.clone());
-        match run_cpu(move || render_part(&path, format, material, &gpu)).await {
+        match run_cpu(move || {
+            crate::diagnostics::recovering(|| render_part(&path, format, material, &gpu))
+        })
+        .await
+        {
             Ok(r) => {
                 if let Err(e) = self
                     .db
@@ -846,8 +855,10 @@ impl Inner {
         }
         let path = img.path.clone();
         let png = run_cpu(move || {
-            let bytes = std::fs::read(&path).map_err(|_| ThumbFailure::Unreadable)?;
-            image_to_png(&bytes)
+            crate::diagnostics::recovering(|| {
+                let bytes = std::fs::read(&path).map_err(|_| ThumbFailure::Unreadable)?;
+                image_to_png(&bytes)
+            })
         })
         .await;
         match png {
